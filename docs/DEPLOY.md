@@ -68,9 +68,11 @@ docker compose up -d --build
 docker compose logs -f migrate     # watch it apply migrations, seed, then exit 0
 ```
 
-The `migrate` service runs `alembic upgrade head` and then seeds the ACME demo
-tenant (`OC8_SEED_ON_START=true`). The API, worker, ingestion-worker and
-scheduler all wait for it to finish, so migration runs exactly once.
+The `migrate` service runs `alembic upgrade head` and, with the default
+`.env.example` values (`OC8_ENV=prod`, `OC8_SEED_ON_START=false`), nothing
+else — the instance starts empty and `POST /auth/setup` creates its first
+administrator. The API, worker, ingestion-worker and scheduler all wait for
+`migrate` to finish, so migration runs exactly once.
 
 If port 80 is taken, set `OC8_HTTP_PORT` in `.env` (e.g. `8090`) and re-up.
 
@@ -81,11 +83,15 @@ docker compose ps                  # migrate = exited(0); the rest running/healt
 curl -s http://<host>/health       # -> {"status":"ok","version":"..."}
 ```
 
-Then open `http://<host>/` in a browser, log in via **dev-login** (available
-because `OC8_ENV` defaults to `dev`; setting it to `prod` disables dev-login),
-and the Office screen shows the ACME departments — that is the seed data, proving the
-whole path (frontend → relative `/api/v1` → backend → Postgres) works through
-the single Caddy origin, with no CORS.
+Then open `http://<host>/` in a browser: it lands on the Community setup
+screen, and creating the local administrator account proves the whole path
+(frontend → relative `/api/v1` → backend → Postgres) works through the single
+Caddy origin, with no CORS.
+
+For a local demo stack instead — seeded ACME/Globex tenants and the
+unauthenticated dev-login endpoint, never on a reachable host — bring the
+stack up with the dev override instead of editing `.env`:
+`docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build`.
 
 ## Giving agents a model
 
@@ -176,8 +182,9 @@ it deliberately, not to save space you have.
 - **Logs:** `docker compose logs -f backend` (or `worker`, `scheduler`, …).
 - **Backup and restore:** follow [the pilot backup/restore runbook](PILOT_BACKUP_RESTORE.md)
   and rehearse it before inviting pilot users.
-- **Re-seed / reset data:** `docker compose down -v` drops the Postgres volume;
-  the next `up` migrates and seeds fresh. Omit `-v` to keep data across restarts.
+- **Reset data:** `docker compose down -v` drops the Postgres volume; the next
+  `up` migrates a fresh, empty instance (or re-seeds, with `OC8_SEED_ON_START=true`
+  under the dev override). Omit `-v` to keep data across restarts.
 - **Update to new code:** `git pull && docker compose up -d --build`. The
   `migrate` service applies any new revisions before the app restarts.
 - **The four backend processes** are one image with different commands:
@@ -188,15 +195,16 @@ it deliberately, not to save space you have.
 
 This stack is for testing, and skips what production needs:
 
-- **dev-login is an unauthenticated admin bypass, and it is on by default.**
-  With `OC8_ENV=dev` (the default), `POST /api/v1/auth/dev-login` mints an
-  `org_admin` token for the seed tenant for *anyone who can reach it* — and Caddy
-  exposes it. This is deliberate so the stack is easy to try locally, but
-  it means **a publicly reachable host is wide open**. Before exposing one:
-  restrict it at the network layer (firewall, VPN, or bind the published port to
-  a private interface — e.g. `OC8_HTTP_PORT` published as `127.0.0.1:8090:80`
-  behind your own proxy), or set `OC8_ENV=prod` so dev-login is disabled and
-  configure normal login for your deployment.
+- **dev-login is an unauthenticated admin bypass, and it is off by default.**
+  `.env.example` ships `OC8_ENV=prod`, so `POST /api/v1/auth/dev-login` 404s
+  and the only way in is real password auth (`/auth/setup` then `/auth/login`).
+  Setting `OC8_ENV=dev` (or using the `docker-compose.dev.yml` override, which
+  sets it for you) re-enables dev-login: it then mints an `org_admin` token for
+  the seed tenant for *anyone who can reach it*, and Caddy exposes it. Only do
+  that for a local demo, and never on a publicly reachable host — if you do,
+  restrict it at the network layer too (firewall, VPN, or bind the published
+  port to a private interface, e.g. `OC8_HTTP_PORT` published as
+  `127.0.0.1:8090:80` behind your own proxy).
 - **Weak internal credentials, not exposed.** The `oc8_app`/`oc8_migrate`
   database roles use the password `oc8` (fixed by `backend/docker/init-db.sql`).
   This is acceptable *only because* Postgres and Redis have **no port
