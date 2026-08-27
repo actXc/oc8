@@ -124,6 +124,42 @@ async def test_a_plain_agent_gets_no_roster_and_no_delegation_context(
     assert str(mate.id) not in joined
     assert pre.assigned_skills == []
     assert pre.skill_tool_names == frozenset()
+    assert pre.has_knowledge is False
+
+
+async def test_has_knowledge_is_true_once_a_kb_is_granted_to_the_department(
+    app_session: AppSessionFactory,
+) -> None:
+    """has_knowledge gates whether offered_tools() offers search_knowledge at
+    all (see oc8.agent.control_tools) -- independent of whether THIS task's
+    initial text happens to retrieve anything: a scheduled agent's task text
+    is only "check the inbox", so the real query only becomes clear once it
+    has read the ticket, which is what the tool is for."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        dept = m.Department(tenant_id=tenant, name="IT-Support", frame={})
+        db.add(dept)
+        await db.flush()
+        agent = m.Agent(
+            tenant_id=tenant, department_id=dept.id, name="Lennart", status="idle",
+            definition={}, presentation={},
+        )
+        kb = m.KnowledgeBase(tenant_id=tenant, name="OPaaS", embedding_model="bge-large")
+        db.add_all([agent, kb])
+        await db.flush()
+        db.add(
+            m.KnowledgeGrant(
+                tenant_id=tenant, kb_id=kb.id, grantee_type="department", grantee_id=dept.id
+            )
+        )
+        await db.flush()
+
+        pre = await build_run_preamble(
+            db, agent=agent, tenant_id=tenant, task_text="Jetzt ausführen",
+            frame={}, model_locality="cloud",
+        )
+
+    assert pre.has_knowledge is True
 
 
 async def test_the_provenance_rule_precedes_anything_a_stranger_wrote(

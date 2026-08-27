@@ -138,6 +138,26 @@ def test_render_component_is_offered_to_every_agent() -> None:
     assert "render_component" in names
 
 
+def test_search_knowledge_is_withheld_without_a_knowledge_base_grant() -> None:
+    """Offering search_knowledge to an agent with no KB grant at all would be
+    offering a tool that can only ever answer "nothing in the knowledge base"
+    -- noise, not a capability. Defaults to withheld: has_knowledge defaults
+    to False, matching every pre-existing offered_tools() call site until it
+    is updated to pass the real value."""
+    names = [t.name for t in offered_tools(
+        _agent(), assigned_skills=[], active_skills=[], mcp_tools=MCP_TOOLS
+    )]
+    assert "search_knowledge" not in names
+
+
+def test_search_knowledge_is_offered_once_a_knowledge_base_is_granted() -> None:
+    names = [t.name for t in offered_tools(
+        _agent(), assigned_skills=[], active_skills=[], mcp_tools=MCP_TOOLS,
+        has_knowledge=True,
+    )]
+    assert "search_knowledge" in names
+
+
 # ------------------------------------------------------------------ execution
 
 

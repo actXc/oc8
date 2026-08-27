@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from oc8 import models as m
 from oc8.agent.provenance import RULE as PROVENANCE_RULE
-from oc8.knowledge.retrieval import retrieve_kb_context
+from oc8.knowledge.retrieval import granted_kb_ids, retrieve_kb_context
 from oc8.memory.router import retrieve_context
 from oc8.modelrouter import NeutralMessage
 from oc8.skills.runtime import LoadedSkill, catalog_block, load_assigned_skills
@@ -60,6 +60,12 @@ class RunPreamble:
     assigned_skills: list[LoadedSkill] = field(default_factory=list)
     skill_tool_names: frozenset[str] = frozenset()
     contains_restricted: bool = False
+    #: Whether the agent (directly or via its department) has been granted at
+    #: least one knowledge base. Independent of whether kb_ctx above actually
+    #: found anything for THIS task's initial text -- search_knowledge exists
+    #: precisely because a scheduled or blank-instruction run only learns its
+    #: real topic mid-run, once it has read the record it was triggered for.
+    has_knowledge: bool = False
 
 
 async def roster_block(db: AsyncSession, *, agent: m.Agent) -> str | None:
@@ -138,6 +144,7 @@ async def build_run_preamble(
     )
     if kb_ctx:
         messages.append(NeutralMessage(role="system", content=kb_ctx))
+    has_knowledge = bool(await granted_kb_ids(db, agent=agent))
 
     if agent.is_team_lead:
         # Appended as its own system message (like memory/KB context) because
@@ -161,4 +168,5 @@ async def build_run_preamble(
         # server can name anything) is never mistaken for an assigned skill.
         skill_tool_names=frozenset(s.tool_name for s in assigned_skills),
         contains_restricted=contains_restricted,
+        has_knowledge=has_knowledge,
     )

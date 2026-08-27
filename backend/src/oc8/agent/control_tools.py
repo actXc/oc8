@@ -240,12 +240,17 @@ def offered_tools(
     assigned_skills: Sequence[LoadedSkill],
     active_skills: Sequence[LoadedSkill],
     mcp_tools: Sequence[NeutralTool],
+    has_knowledge: bool = False,
 ) -> list[NeutralTool]:
     """The full tool list to offer the model this step.
 
     delegate_task is withheld from a non-lead deliberately: _authorize denies it
     for them on every call, so offering it would only invite calls that can never
-    succeed.
+    succeed. search_knowledge is withheld the same way when the agent has no
+    knowledge base granted at all (has_knowledge, from the preamble's
+    granted_kb_ids check): execute_control_tool already degrades a call to it
+    gracefully, but a tool that can only ever answer "nothing in the knowledge
+    base" is noise in the model's tool list, not a capability.
     """
     # Skill tools stay offered even once active: a model that invokes an
     # already-active skill again just hits the no-op branch in
@@ -255,6 +260,8 @@ def offered_tools(
     offered = [MEMORY_WRITE, ASK_USER, RENDER_COMPONENT]
     if agent.is_team_lead:
         offered.append(DELEGATE_TASK)
+    if has_knowledge:
+        offered.append(SEARCH_KNOWLEDGE)
     offered.extend(skill_tool_schemas(assigned_skills))
 
     if active_skills:
