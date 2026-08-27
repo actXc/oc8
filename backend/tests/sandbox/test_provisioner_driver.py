@@ -140,3 +140,61 @@ def test_provisioner_driver_requires_an_absolute_http_url() -> None:
             sandbox_provisioner_token="test-token",
             sandbox_provisioner_url="runtime-provisioner",
         )
+
+
+@pytest.mark.asyncio
+async def test_wait_overrides_the_client_default_timeout_for_the_requested_duration() -> None:
+    """`wait` legitimately blocks server-side for up to `timeout_s` while the
+    container actually runs -- a real agent step (one model call plus a tool
+    round trip) routinely exceeds the client's own 30s default (__init__),
+    which every OTHER call correctly keeps. Caught live 2026-08-27: without a
+    per-request override here, httpx's own ReadTimeout fired at 30s and every
+    run past that mark failed with SandboxError("provisioner request
+    failed"), indistinguishable from a genuinely broken provisioner. httpx
+    resolves the effective per-request timeout into `request.extensions
+    ["timeout"]` before handing off to the transport, which is what this
+    reads -- not a mock of the client's own `.request` method, so a
+    regression that reverts to omitting the override is caught even though
+    MockTransport itself never actually times out.
+    """
+    seen: list[dict[str, float | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.extensions["timeout"])
+        return httpx.Response(200, json={"exit_code": 0})
+
+    driver = _driver(httpx.MockTransport(handler))
+    exit_code = await driver.wait(SandboxHandle("handle", "image"), timeout_s=120.0)
+    await driver.aclose()
+
+    assert exit_code == 0
+    # +30s of headroom over the server's own bound, so a slow-but-real
+    # response is never raced against the client's own clock.
+    assert seen == [{"connect": 150.0, "read": 150.0, "write": 150.0, "pool": 150.0}]
+
+
+@pytest.mark.asyncio
+async def test_every_other_call_keeps_the_clients_own_default_timeout() -> None:
+    """The override above is `wait`-specific. Every other endpoint answers
+    near-instantly, and widening their timeout too would only let a
+    genuinely wedged provisioner hang a caller for minutes instead of
+    failing fast at the client's own default.
+
+    `_driver()` injects a client built with no explicit `timeout=`, so that
+    default here is httpx's own library default (5s), not the 30s
+    `ProvisionerSandboxDriver.__init__` sets when it builds its own client --
+    what this asserts is that `_request` did not pass a `timeout=` override
+    at all for a non-`wait` call, whatever the client's own default happens
+    to be.
+    """
+    seen: list[dict[str, float | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.extensions["timeout"])
+        return httpx.Response(204)
+
+    driver = _driver(httpx.MockTransport(handler))
+    await driver.teardown(SandboxHandle("handle", "image"))
+    await driver.aclose()
+
+    assert seen == [{"connect": 5.0, "read": 5.0, "write": 5.0, "pool": 5.0}]

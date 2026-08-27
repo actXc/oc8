@@ -59,10 +59,25 @@ class ProvisionerSandboxDriver:
         await self._client.aclose()
 
     async def _request(
-        self, method: str, path: str, *, json: dict[str, object] | None = None
+        self,
+        method: str,
+        path: str,
+        *,
+        json: dict[str, object] | None = None,
+        timeout: float | None = None,  # noqa: ASYNC109 - httpx per-request override, not asyncio
     ) -> httpx.Response:
+        # httpx treats an explicit `timeout=None` as "no timeout at all", not
+        # "use the client's own default" -- those are different sentinels
+        # (USE_CLIENT_DEFAULT vs None). Only override per-request when a
+        # caller actually passed one (`wait`, below); every other call keeps
+        # the client's 30s default by omitting the kwarg entirely.
         try:
-            response = await self._client.request(method, path, json=json)
+            if timeout is not None:
+                response = await self._client.request(
+                    method, path, json=json, timeout=timeout
+                )
+            else:
+                response = await self._client.request(method, path, json=json)
         except httpx.HTTPError as exc:
             raise SandboxError("provisioner request failed") from exc
         if not response.is_success:
@@ -126,10 +141,22 @@ class ProvisionerSandboxDriver:
         await self._request("DELETE", f"/v1/sandboxes/{handle.container_id}")
 
     async def wait(self, handle: SandboxHandle, timeout_s: float = 600.0) -> int:
+        # The client's own default (30s, __init__ above) is for every OTHER
+        # call, which all answer near-instantly. This one is different by
+        # design: the server holds the connection open for up to `timeout_s`
+        # while the container actually runs -- a real agent step (one model
+        # call plus a tool round trip) routinely exceeds 30s. Without this
+        # override every run past that mark raised `SandboxError("provisioner
+        # request failed")` from httpx's own 30s ReadTimeout, indistinguishable
+        # from a genuinely broken provisioner and, until the tenant-GUC fix
+        # alongside this one, capable of stranding the run in "running" for
+        # the full 10-minute reconciler window. +30s of headroom over the
+        # server's own bound, so a slow-but-real response is never raced.
         response = await self._request(
             "POST",
             f"/v1/sandboxes/{handle.container_id}/wait",
             json=WaitRequestDTO(timeout_s=timeout_s).model_dump(mode="json"),
+            timeout=timeout_s + 30.0,
         )
         result = self._model(response, WaitResponseDTO)
         return result.exit_code
