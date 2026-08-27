@@ -192,25 +192,7 @@ export function KnowledgePage() {
         />
       )}
 
-      {detailKb && (
-        <KbDetailDrawer
-          kbId={detailKb}
-          onClose={() => setDetailKb(null)}
-          onSync={() => {
-            setBases((prev) =>
-              prev.map((b) => (b.id === detailKb ? { ...b, status: "updating" } : b)),
-            );
-            toast.success("Sync started", { description: "Re-embedding changed documents…" });
-            setTimeout(() => {
-              setBases((prev) =>
-                prev.map((b) =>
-                  b.id === detailKb ? { ...b, status: "current", updated: "just now" } : b,
-                ),
-              );
-            }, 2400);
-          }}
-        />
-      )}
+      {detailKb && <KbDetailDrawer kbId={detailKb} onClose={() => setDetailKb(null)} />}
 
       {wizardOpen === "source" && (
         <SourceWizard
@@ -830,19 +812,13 @@ export function BasesTab({
 
 // ============================= KB detail drawer =============================
 
-export function KbDetailDrawer({
-  kbId,
-  onClose,
-  onSync,
-}: {
-  kbId: string;
-  onClose: () => void;
-  onSync: () => void;
-}) {
+export function KbDetailDrawer({ kbId, onClose }: { kbId: string; onClose: () => void }) {
   const t = useT();
   // Detail sheet needs the whole set to find one row by id -- not the
-  // paginated list view.
-  const { data: basesPage } = useKnowledgeBases({ pageSize: 200 });
+  // paginated list view. `refetch` is how Re-sync below picks up the
+  // server's post-ingestion doc/chunk counts once its polled job lands on a
+  // terminal status -- no query-key export needed for that.
+  const { data: basesPage, refetch: refetchBases } = useKnowledgeBases({ pageSize: 200 });
   const { data: departmentsPage } = useDepartments({ pageSize: 200 });
   const { data: agentsPage } = useAgents({ pageSize: 200 });
   // Every DataSource, archived included, so a since-deleted source that fed
@@ -861,6 +837,34 @@ export function KbDetailDrawer({
   const deleteKb = useDeleteKnowledgeBase();
   const unlinkSource = useUnlinkSourceFromBase();
   const syncSource = useSyncSource();
+  // Re-sync (below) fires one `syncSource.mutate` per linked source but
+  // tracks only the LAST job's id here -- same "good enough" simplification
+  // SourcesTab's own `activeJob` makes: every job still runs and ingests
+  // server-side regardless of which one this polls, this just decides which
+  // one the toast and progress chip describe. The overwhelmingly common case
+  // is one source per base anyway.
+  const [activeJob, setActiveJob] = useState<{ id: string; label: string } | null>(null);
+  const { data: polledJob } = useIngestionJob(activeJob?.id ?? null);
+  useEffect(() => {
+    if (!activeJob || !polledJob || !JOB_TERMINAL_STATUSES.has(polledJob.status)) return;
+    const fetched = Number(polledJob.stats.fetched ?? 0);
+    const ingested = Number(polledJob.stats.ingested ?? 0);
+    const chunks = Number(polledJob.stats.chunks ?? 0);
+    const fatalError = typeof polledJob.stats.error === "string" ? polledJob.stats.error : null;
+    const description =
+      fatalError ?? `${fetched} found, ${ingested} document(s) ingested, ${chunks} chunk(s)`;
+    if (polledJob.status === "failed") {
+      toast.error(`${t("Sync failed", "Sync fehlgeschlagen")} · ${activeJob.label}`, {
+        description,
+      });
+    } else {
+      toast.success(`${t("Sync", "Sync")} ${polledJob.status} · ${activeJob.label}`, {
+        description,
+      });
+    }
+    setActiveJob(null);
+    void refetchBases();
+  }, [activeJob, polledJob, refetchBases, t]);
   const { confirm, ConfirmDialog } = useConfirm();
   const [name, setName] = useState(kb?.name ?? "");
   const [description, setDescription] = useState(kb?.description ?? "");
@@ -1156,11 +1160,39 @@ export function KbDetailDrawer({
           <div className="flex items-center gap-2 text-xs">
             <SensPill sens={kb.sensitivity} />
             <StatusChip status={kb.status} />
+            {activeJob && polledJob && <JobStatusChip status={polledJob.status} />}
             <button
-              onClick={onSync}
-              className="inline-flex items-center gap-1 rounded-md border border-border bg-panel px-2 py-1 hover:border-primary/50 hover:text-primary"
+              disabled={syncSource.isPending || !!activeJob || linkedSources.length === 0}
+              onClick={() => {
+                const targets = linkedSources;
+                if (targets.length === 0) return;
+                const label = targets.map((s) => s.name).join(", ");
+                let lastJobId: string | null = null;
+                let failures = 0;
+                Promise.all(
+                  targets.map((s) =>
+                    syncSource
+                      .mutateAsync({ sourceId: s.id, kbId: kb.id })
+                      .then((job) => {
+                        lastJobId = job.id;
+                      })
+                      .catch(() => {
+                        failures += 1;
+                      }),
+                  ),
+                ).then(() => {
+                  if (lastJobId) setActiveJob({ id: lastJobId, label });
+                  if (failures === targets.length) {
+                    toast.error(`${t("Sync failed", "Sync fehlgeschlagen")} · ${label}`);
+                  } else {
+                    toast.success(t("Sync started", "Sync gestartet"), { description: label });
+                  }
+                });
+              }}
+              className="inline-flex items-center gap-1 rounded-md border border-border bg-panel px-2 py-1 hover:border-primary/50 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <RefreshCw className="h-3 w-3" /> Re-sync
+              <RefreshCw className="h-3 w-3" />
+              {activeJob ? t("Syncing…", "Sync läuft…") : t("Re-sync", "Re-sync")}
             </button>
             <Link
               to="/knowledge/bases/$kbId/content"
@@ -1171,8 +1203,8 @@ export function KbDetailDrawer({
             </Link>
           </div>
         </div>
-        <Pipeline updating={kb.status === "updating"} />
-        {kb.status === "updating" && <SyncProgress className="mt-3" />}
+        <Pipeline updating={!!activeJob} />
+        {activeJob && <SyncProgress className="mt-3" />}
       </section>
 
       {/* Governance */}
