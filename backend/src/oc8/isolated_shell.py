@@ -72,7 +72,14 @@ def main() -> int:
     status, output = "done", ""
     step_no = 0
     try:
-        with httpx.Client(timeout=120.0, headers=headers) as c:
+        # 120s used to be too tight for a reasoning-heavy model (e.g.
+        # z-ai/glm-5.3-flash via OpenRouter): a single /step completion can
+        # legitimately take several minutes, and a client-side ReadTimeout
+        # here crashes the whole run with no useful message -- not the
+        # graceful "waiting_for_approval"/"waiting_for_input" suspend this
+        # loop already handles below. The outer provisioner wait() timeout
+        # (agent_max_steps * 60s, config.py) stays the real backstop.
+        with httpx.Client(timeout=300.0, headers=headers) as c:
             for step_no in range(1, MAX_ITERS + 1):
                 r = c.post(f"{api}/step")
                 check_response(r)
