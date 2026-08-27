@@ -65,7 +65,8 @@ from oc8.modelrouter import (
 )
 from oc8.modelrouter.accumulate import accumulate_stream
 from oc8.modelrouter.keys import resolve_model_base_url
-from oc8.modelrouter.sampling import resolve_params
+from oc8.modelrouter.sampling import bumped_for_length_retry, resolve_params
+from oc8.modelrouter.types import ModelParams
 from oc8.realtime.emit import note_focus, publish_run_token_delta, publish_run_tool_call
 from oc8.runtime.approval_resume import pre_decided_map
 from oc8.runtime.run_context import append_tool_call
@@ -189,6 +190,13 @@ class StepResult(BaseModel):
     done: bool
     text: str = ""
     tool_calls: list[dict[str, Any]] = []
+    #: Set only when the model was truncated by its token budget without
+    #: producing an answer or a tool call, even after a retry with a bumped
+    #: budget (see engine.py's identical check) -- the shell must report this
+    #: verbatim as the run's terminal status instead of its own done/no-calls
+    #: heuristic, which would otherwise read a truncation as "the agent
+    #: finished".
+    status_override: str | None = None
 
 
 @router.post(
@@ -347,34 +355,53 @@ async def step(
             # completes (ctx["transcript"] + the final db.commit()).
             await publish_run_token_delta(run.tenant_id, run_id=run.id, text=text)
 
-        result = await accumulate_stream(
-            stream_completion_with_fallback(
+        async def _complete(sampling_params: ModelParams, req_id: uuid.UUID) -> Any:
+            return await accumulate_stream(
+                stream_completion_with_fallback(
+                    db,
+                    get_model_router(),
+                    tenant_id=run.tenant_id,
+                    agent_id=agent.id,
+                    primary=model_config,
+                    no_config_provider=provider,
+                    no_config_model=model,
+                    messages=resolved_messages,
+                    tools=resolved_tools,
+                    params=sampling_params,
+                    request_id=req_id,
+                    contains_restricted=contains_restricted,
+                ),
+                on_text=_live_token_delta,
+            )
+
+        async def _record(res: Any, req_id: uuid.UUID) -> None:
+            await record_usage(
                 db,
-                get_model_router(),
                 tenant_id=run.tenant_id,
+                request_id=req_id,
+                model=res.model,
+                provider=res.provider,
+                tokens_in=res.usage.tokens_in,
+                tokens_out=res.usage.tokens_out,
                 agent_id=agent.id,
-                primary=model_config,
-                no_config_provider=provider,
-                no_config_model=model,
-                messages=resolved_messages,
-                tools=resolved_tools,
-                params=resolved_params,
-                request_id=request_id,
-                contains_restricted=contains_restricted,
-            ),
-            on_text=_live_token_delta,
-        )
-        await record_usage(
-            db,
-            tenant_id=run.tenant_id,
-            request_id=request_id,
-            model=result.model,
-            provider=result.provider,
-            tokens_in=result.usage.tokens_in,
-            tokens_out=result.usage.tokens_out,
-            agent_id=agent.id,
-            department_id=agent.department_id,
-        )
+                department_id=agent.department_id,
+            )
+
+        result = await _complete(resolved_params, request_id)
+        await _record(result, request_id)
+        if (
+            result.stop_reason == "length"
+            and not result.tool_calls
+            and not result.text.strip()
+        ):
+            # See engine.py's identical check: a reasoning-capable model can
+            # spend its whole completion budget on hidden reasoning and hit
+            # max_tokens before writing anything visible. One retry with
+            # double the budget, before this silently reads as the run being
+            # finished with nothing actually done.
+            retry_request_id = uuid.uuid4()
+            result = await _complete(bumped_for_length_retry(resolved_params), retry_request_id)
+            await _record(result, retry_request_id)
         await cache_flow.store_if_matching(key, result, provider=provider, model=model)
         # Read by /tool below, once this step's requested tool calls come back
         # and any of them turns out to have failed for real (see that
@@ -396,12 +423,18 @@ async def step(
     run.context = ctx
     await db.commit()
 
+    truncated_empty = (
+        result.stop_reason == "length" and not result.tool_calls and not result.text.strip()
+    )
     return StepResult(
         done=not result.tool_calls and int(ctx["steps"]) <= _max_steps(agent),
         text=result.text,
         tool_calls=[
             {"id": t.id, "name": t.name, "arguments": t.arguments} for t in result.tool_calls
         ],
+        # Truncated even after the retry above -- never let the shell read
+        # this as "done" (see engine.py's identical check for why).
+        status_override="failed" if truncated_empty else None,
     )
 
 

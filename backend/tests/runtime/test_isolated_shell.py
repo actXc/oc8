@@ -128,6 +128,42 @@ def test_main_stops_and_reports_suspension_without_finishing(
     assert "run suspended: waiting_for_approval" in capsys.readouterr().err
 
 
+def test_main_honours_a_status_override_from_the_control_plane(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """/step can decide the terminal status itself (e.g. the model was
+    truncated by its token budget without producing an answer, even after a
+    retry) -- the shell must report that verbatim, never fall back to its
+    own done/no-calls heuristic, which would read this as a plain "done"."""
+    finish_bodies = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/step"):
+            return httpx.Response(
+                200,
+                json={
+                    "done": True,
+                    "text": "",
+                    "tool_calls": [],
+                    "status_override": "failed",
+                },
+            )
+        if request.url.path.endswith("/finish"):
+            import json
+
+            finish_bodies.append(json.loads(request.content))
+            return httpx.Response(200, json={})
+        raise AssertionError(f"unexpected request: {request.url.path}")
+
+    exit_code = _run_main(monkeypatch, handler)
+
+    assert exit_code == 0
+    assert finish_bodies == [{"status": "failed", "output": ""}]
+    err = capsys.readouterr().err
+    assert "control plane reports 'failed'" in err
+    assert "run run-1: finished: failed" in err
+
+
 def test_main_logs_which_step_failed_before_reraising(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

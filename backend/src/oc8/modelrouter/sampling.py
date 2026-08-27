@@ -38,6 +38,21 @@ DEFAULT_MAX_TOKENS = 1536
 _MIN_TEMPERATURE = 0.0
 _MAX_TEMPERATURE = 2.0
 
+# A reasoning-capable model can spend its whole completion budget on hidden
+# reasoning tokens and hit max_tokens before writing anything visible --
+# `stop_reason == "length"` with no tool call and no usable text is that, not
+# a real stop (see engine.py/internal_agent.py's use of this). One retry with
+# a doubled budget is cheap insurance against a truncation that would
+# otherwise silently read as a completed task with nothing done.
+LENGTH_RETRY_MAX_TOKENS_MULTIPLIER = 2
+
+
+def bumped_for_length_retry(params: ModelParams) -> ModelParams:
+    return ModelParams(
+        temperature=params.temperature,
+        max_tokens=params.max_tokens * LENGTH_RETRY_MAX_TOKENS_MULTIPLIER,
+    )
+
 
 def _temperature(raw: Any) -> float | None:
     """A usable temperature, or None if this value says nothing."""

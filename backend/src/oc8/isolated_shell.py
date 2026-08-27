@@ -84,6 +84,16 @@ def main() -> int:
                     f"text={_preview(step.get('text') or '')!r}"
                 )
                 if not calls:
+                    override = step.get("status_override")
+                    if override:
+                        # The control plane already determined this step's
+                        # terminal status itself (e.g. the model was truncated
+                        # by its token budget without producing an answer,
+                        # even after a retry) -- never second-guess it with
+                        # the done/no-calls heuristic below.
+                        log(f"step {step_no}: control plane reports {override!r}, ending run")
+                        status = str(override)
+                        break
                     if step.get("done"):
                         log(f"step {step_no}: model signalled it is finished, ending run as done")
                         break

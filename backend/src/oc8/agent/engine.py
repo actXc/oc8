@@ -78,7 +78,8 @@ from oc8.modelrouter import (
 )
 from oc8.modelrouter.accumulate import accumulate_stream
 from oc8.modelrouter.keys import resolve_model_base_url
-from oc8.modelrouter.sampling import resolve_params
+from oc8.modelrouter.sampling import bumped_for_length_retry, resolve_params
+from oc8.modelrouter.types import ModelParams
 from oc8.observability import get_tracer, record_budget_exceeded, record_tool_call
 from oc8.realtime.emit import (
     note_focus,
@@ -644,41 +645,71 @@ async def run_agent(
                         saved_tokens_out=result.usage.tokens_out,
                     )
                 else:
-                    result = await accumulate_stream(
-                        stream_completion_with_fallback(
+
+                    async def _complete(
+                        sampling_params: ModelParams,
+                        req_id: uuid.UUID,
+                        msgs: list[NeutralMessage] = resolved_messages,
+                        tls: list[NeutralTool] = resolved_tools,
+                    ) -> Any:
+                        return await accumulate_stream(
+                            stream_completion_with_fallback(
+                                db,
+                                router,
+                                tenant_id=tenant_id,
+                                agent_id=agent.id,
+                                primary=model_config,
+                                no_config_provider=provider,
+                                no_config_model=model,
+                                messages=msgs,
+                                tools=tls,
+                                params=sampling_params,
+                                request_id=req_id,
+                                contains_restricted=contains_restricted,
+                            ),
+                            on_text=_live_token_delta,
+                        )
+
+                    async def _record(res: Any, req_id: uuid.UUID) -> None:
+                        await record_usage(
                             db,
-                            router,
                             tenant_id=tenant_id,
+                            request_id=req_id,
+                            model=res.model,
+                            provider=res.provider,
+                            tokens_in=res.usage.tokens_in,
+                            tokens_out=res.usage.tokens_out,
                             agent_id=agent.id,
-                            primary=model_config,
-                            no_config_provider=provider,
-                            no_config_model=model,
-                            messages=resolved_messages,
-                            tools=resolved_tools,
-                            params=resolved_params,
-                            request_id=request_id,
-                            contains_restricted=contains_restricted,
-                        ),
-                        on_text=_live_token_delta,
-                    )
-                    await record_usage(
-                        db,
-                        tenant_id=tenant_id,
-                        request_id=request_id,
-                        model=result.model,
-                        provider=result.provider,
-                        tokens_in=result.usage.tokens_in,
-                        tokens_out=result.usage.tokens_out,
-                        agent_id=agent.id,
-                        department_id=agent.department_id,
-                        skill_id=active_skills[-1].skill_id if active_skills else None,
-                        skill_version_id=(
-                            active_skills[-1].skill_version_id if active_skills else None
-                        ),
-                        creator_id=active_skills[-1].creator_id if active_skills else None,
-                    )
+                            department_id=agent.department_id,
+                            skill_id=active_skills[-1].skill_id if active_skills else None,
+                            skill_version_id=(
+                                active_skills[-1].skill_version_id if active_skills else None
+                            ),
+                            creator_id=active_skills[-1].creator_id if active_skills else None,
+                        )
+
+                    result = await _complete(resolved_params, request_id)
+                    await _record(result, request_id)
                     if not result.tool_calls:
                         result.tool_calls = _salvage_tool_calls(result.text, _offered())
+                    if (
+                        result.stop_reason == "length"
+                        and not result.tool_calls
+                        and not result.text.strip()
+                    ):
+                        # A reasoning-capable model can spend its whole completion
+                        # budget on hidden reasoning and hit max_tokens before
+                        # writing anything visible -- length-truncation with
+                        # nothing produced is never a real stop. One retry with
+                        # double the budget, before this silently reads as "the
+                        # agent finished" with nothing actually done.
+                        retry_request_id = uuid.uuid4()
+                        result = await _complete(
+                            bumped_for_length_retry(resolved_params), retry_request_id
+                        )
+                        await _record(result, retry_request_id)
+                        if not result.tool_calls:
+                            result.tool_calls = _salvage_tool_calls(result.text, _offered())
                     await cache_flow.store_if_matching(key, result, provider=provider, model=model)
                 tokens_since_checkpoint += result.usage.tokens_in + result.usage.tokens_out
 
@@ -686,6 +717,44 @@ async def run_agent(
                     result.tool_calls = _salvage_tool_calls(result.text, _offered())
 
                 if not result.tool_calls:
+                    if result.stop_reason == "length" and not result.text.strip():
+                        # Truncated even after the retry above -- the model
+                        # never produced an answer or a tool call, so this must
+                        # never read as "done" (a genuine finish always has at
+                        # least the short summary system_prompt requires).
+                        task.state = "failed"
+                        await record_activity(
+                            db,
+                            tenant_id=tenant_id,
+                            agent_id=agent.id,
+                            status="warning",
+                            message=(
+                                f"{agent.name}: model exceeded its token budget "
+                                "without producing an answer"
+                            ),
+                        )
+                        await maybe_checkpoint(
+                            db,
+                            tenant_id=tenant_id,
+                            agent_id=agent.id,
+                            task_id=task.id,
+                            anchor=anchor,
+                            tool_trace_delta=checkpoint_trace_delta,
+                            tokens_since_checkpoint=tokens_since_checkpoint,
+                            force=True,
+                            contains_restricted=contains_restricted,
+                        )
+                        await dispatch_claude_event(tenant_id, "Stop", _hook_ctx())
+                        return RunResult(
+                            task.id,
+                            agent.id,
+                            "failed",
+                            "Model exceeded its token budget without producing an answer or "
+                            "tool call.",
+                            tool_trace,
+                            steps,
+                            pending_runs,
+                        )
                     task.state = "done"
                     await record_activity(
                         db,

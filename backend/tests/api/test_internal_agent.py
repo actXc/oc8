@@ -1082,3 +1082,103 @@ async def test_the_internal_endpoints_step_streams_token_deltas_live(
 
     deltas = [data["text"] for type_, data in published if type_ == "run.token_delta"]
     assert deltas == ["Hal", "lo"]
+
+
+# ------------------------------------------------------- length truncation
+# See tests/agents/test_length_truncation.py for the in-process engine's
+# identical behaviour and the live incident that motivated both.
+
+
+@pytest.mark.asyncio
+async def test_step_retries_an_empty_length_truncation_with_a_bigger_budget(
+    app_session: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oc8.modelrouter.types import CompletionResult, Usage
+
+    seen_max_tokens: list[int] = []
+
+    async def fake_complete(*args: object, **kw: object) -> CompletionResult:
+        params = kw.get("params")
+        seen_max_tokens.append(getattr(params, "max_tokens", -1))
+        if len(seen_max_tokens) == 1:
+            return CompletionResult(
+                text="", tool_calls=[], usage=Usage(tokens_in=6832, tokens_out=1536),
+                stop_reason="length", provider="openrouter", model="z-ai/glm-5.3-flash",
+            )
+        return CompletionResult(
+            text="Approval code BIOS-7743-QUARTZ noted.", tool_calls=[],
+            usage=Usage(tokens_in=7000, tokens_out=40), stop_reason="stop",
+            provider="openrouter", model="z-ai/glm-5.3-flash",
+        )
+
+    monkeypatch.setattr(
+        "oc8.api.v1.internal_agent.stream_completion_with_fallback", _as_stream(fake_complete)
+    )
+
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:  # type: ignore[operator]
+        agent, _task, run = await _plain_agent_run(db, tenant)
+        agent_id, run_id = agent.id, run.id
+
+    token = _agent_token(tenant, agent_id, run_id)
+    from asgi_lifespan import LifespanManager
+    from httpx import ASGITransport, AsyncClient
+
+    from oc8.main import create_app
+
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.post(
+                f"/api/v1/internal/agent/{run_id}/step",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["status_override"] is None
+            assert "BIOS-7743-QUARTZ" in body["text"]
+    assert len(seen_max_tokens) == 2
+    assert seen_max_tokens[1] > seen_max_tokens[0]
+
+
+@pytest.mark.asyncio
+async def test_step_reports_status_override_failed_when_still_truncated_after_retry(
+    app_session: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oc8.modelrouter.types import CompletionResult, Usage
+
+    calls = {"n": 0}
+
+    async def fake_complete(*args: object, **kw: object) -> CompletionResult:
+        calls["n"] += 1
+        return CompletionResult(
+            text="", tool_calls=[], usage=Usage(tokens_in=8000, tokens_out=1536),
+            stop_reason="length", provider="openrouter", model="z-ai/glm-5.3-flash",
+        )
+
+    monkeypatch.setattr(
+        "oc8.api.v1.internal_agent.stream_completion_with_fallback", _as_stream(fake_complete)
+    )
+
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:  # type: ignore[operator]
+        agent, _task, run = await _plain_agent_run(db, tenant)
+        agent_id, run_id = agent.id, run.id
+
+    token = _agent_token(tenant, agent_id, run_id)
+    from asgi_lifespan import LifespanManager
+    from httpx import ASGITransport, AsyncClient
+
+    from oc8.main import create_app
+
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.post(
+                f"/api/v1/internal/agent/{run_id}/step",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["status_override"] == "failed"
+    # Exactly one retry, never an unbounded loop.
+    assert calls["n"] == 2
