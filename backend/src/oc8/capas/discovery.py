@@ -25,7 +25,6 @@ from oc8.capas.claude_adapter import (
     is_claude_plugin,
     merge_claude_and_oc8,
 )
-
 from oc8.capas.guardrails import Guardrail, GuardrailLibrary, parse_guardrail_entry
 from oc8.capas.manifest import (
     CredentialTypeSpec,
@@ -33,6 +32,7 @@ from oc8.capas.manifest import (
     ManifestError,
     PluginSetupSpec,
     SkillTemplateSpec,
+    ToolPackConnection,
     parse_guardrail_preset,
     parse_manifest,
 )
@@ -756,4 +756,45 @@ def find_plugin(plugin_id: str, paths: Sequence[str] | None = None) -> Discovere
     for plugin in discover_plugins(paths):
         if plugin.plugin_id == plugin_id:
             return plugin
+    return None
+
+
+def resolve_tool_pack_connection(
+    plugin_name: str, connection_key: str
+) -> ToolPackConnection | None:
+    """The manifest `ToolPackConnection` a materialised `McpConnection` row was
+    stamped from -- `materialise.py` writes `_plugin_name`/`_connection_key`
+    onto every row it creates, and this is the read side of that pair.
+
+    Exists because plugin-authored data (the `scopes` read/write/send
+    classification in particular -- see `oc8.authz.pdp.required_right`) lives
+    only on the manifest's `ToolPackConnection`, never copied onto the row:
+    `McpConnection.scopes` is an unrelated column (a flat list, "standardised"
+    per its own docstring, predating this classification) that happens to
+    share the name. A caller that reads `McpConnection.scopes` expecting the
+    read/write/send dict gets `None` back from a plain list every time --
+    always fail-closed to `write` in `required_right`, invisibly so as long as
+    a connection's frame grants `write`, and outright broken the moment it
+    does not (which is every real guardrail preset this design ships, since
+    none of them grants `write`).
+
+    None for a connection whose plugin was removed from disk, ships no tool
+    pack, or no longer declares this connection key -- callers must tolerate
+    that rather than crash a run over a missing plugin folder.
+    """
+    if not plugin_name:
+        return None
+    discovered = find_plugin(plugin_name)
+    if discovered is None or not discovered.valid or discovered.manifest is None:
+        return None
+    try:
+        manifest = parse_manifest(discovered.manifest)
+    except ManifestError:
+        return None
+    if manifest.tool_pack is None:
+        return None
+    return next(
+        (conn for conn in manifest.tool_pack.connections if conn.key == connection_key),
+        None,
+    )
     return None

@@ -75,6 +75,7 @@ from oc8.authz.pdp import (
     effective_tool_policies,
     required_right,
 )
+from oc8.capas.discovery import resolve_tool_pack_connection
 from oc8.memory.policy import authorize_memory_write
 from oc8.realtime.emit import note_focus, record_activity
 from oc8.runtime.approval_resume import pre_decided_map
@@ -241,6 +242,25 @@ def _cfg(conn: m.McpConnection | None) -> dict[str, Any]:
     return conn.config if conn is not None and isinstance(conn.config, dict) else {}
 
 
+def _manifest_scopes(conn: m.McpConnection | None) -> dict[str, Any] | None:
+    """The read/write/send classification `required_right` needs, resolved
+    from `conn`'s plugin manifest -- NOT `conn.scopes` itself, which is an
+    unrelated, list-shaped DB column that happens to share the name (see
+    `resolve_tool_pack_connection`'s docstring). Falls back to `conn.scopes`
+    only for a connection with no matching manifest that still carries an
+    operator-supplied dict there directly.
+    """
+    if conn is None:
+        return None
+    cfg = _cfg(conn)
+    manifest_conn = resolve_tool_pack_connection(
+        str(cfg.get("_plugin_name", "")), str(cfg.get("_connection_key", ""))
+    )
+    if manifest_conn is not None and isinstance(manifest_conn.scopes, dict):
+        return manifest_conn.scopes
+    return conn.scopes if isinstance(conn.scopes, dict) else None
+
+
 async def _env(conn: m.McpConnection, db: DbSession, tenant_id: uuid.UUID) -> dict[str, str]:
     return await resolve_mcp_env(db, tenant_id=tenant_id, cfg=_cfg(conn), connection_name=conn.name)
 
@@ -274,7 +294,7 @@ async def _list_tools(
         policy = policies.get(conn.name)
         if policy is None or not policy.enabled:
             continue
-        scopes = conn.scopes if isinstance(conn.scopes, dict) else None
+        scopes = _manifest_scopes(conn)
         cfg = _cfg(conn)
         try:
             # INSIDE the guard, not before it: resolving the environment can now
@@ -509,7 +529,7 @@ async def _call_tool(
     value_spec = cfg.get("value_spec") if isinstance(cfg.get("value_spec"), dict) else None
     focus_spec = cfg.get("focus_spec") if isinstance(cfg.get("focus_spec"), dict) else None
     outward_tools = cfg.get("outward_tools") if isinstance(cfg.get("outward_tools"), list) else None
-    scopes = conn.scopes if conn is not None and isinstance(conn.scopes, dict) else None
+    scopes = _manifest_scopes(conn)
     if conn is not None and scopes is None:
         warn_unclassified_connection(conn.id, conn.name)
 

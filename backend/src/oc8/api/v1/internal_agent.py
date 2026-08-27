@@ -52,6 +52,7 @@ from oc8.authz.pdp import (
     effective_tool_policies,
     required_right,
 )
+from oc8.capas.discovery import resolve_tool_pack_connection
 from oc8.config import get_settings
 from oc8.metering import record_usage
 from oc8.modelrouter import (
@@ -154,6 +155,25 @@ async def _load(
 def _mcp_params(conn: m.McpConnection) -> dict[str, Any]:
     cfg = conn.config if isinstance(conn.config, dict) else {}
     return cfg
+
+
+def _manifest_scopes(conn: m.McpConnection | None) -> dict[str, Any] | None:
+    """The read/write/send classification `required_right` needs, resolved
+    from `conn`'s plugin manifest -- NOT `conn.scopes` itself, which is an
+    unrelated, list-shaped DB column that happens to share the name (see
+    `resolve_tool_pack_connection`'s docstring). Falls back to `conn.scopes`
+    only for a connection with no matching manifest that still carries an
+    operator-supplied dict there directly.
+    """
+    if conn is None:
+        return None
+    cfg = _mcp_params(conn)
+    manifest_conn = resolve_tool_pack_connection(
+        str(cfg.get("_plugin_name", "")), str(cfg.get("_connection_key", ""))
+    )
+    if manifest_conn is not None and isinstance(manifest_conn.scopes, dict):
+        return manifest_conn.scopes
+    return conn.scopes if isinstance(conn.scopes, dict) else None
 
 
 async def _mcp_env(conn: m.McpConnection, db: DbSession, tenant_id: uuid.UUID) -> dict[str, str]:
@@ -425,7 +445,7 @@ async def tool(
     value_spec = cfg.get("value_spec") if isinstance(cfg.get("value_spec"), dict) else None
     focus_spec = cfg.get("focus_spec") if isinstance(cfg.get("focus_spec"), dict) else None
     outward_tools = cfg.get("outward_tools") if isinstance(cfg.get("outward_tools"), list) else None
-    scopes = conn.scopes if conn is not None and isinstance(conn.scopes, dict) else None
+    scopes = _manifest_scopes(conn)
 
     active_ids = {str(s) for s in run.context.get("active_skill_ids", [])}
     active_skills = [s for s in assigned_skills if str(s.skill_version_id) in active_ids]

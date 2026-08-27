@@ -59,6 +59,7 @@ from oc8.capas.claude_hooks.context import (
 from oc8.capas.claude_hooks.context import (
     task_created as claude_task_created,
 )
+from oc8.capas.discovery import resolve_tool_pack_connection
 from oc8.coding.tools import CODING_FRAME_KEY, CODING_TOOL_RIGHTS, Toolset
 from oc8.config import get_settings
 from oc8.hooks.bus import dispatch_filter
@@ -376,8 +377,27 @@ async def run_agent(
             outward_tools: list[str] | None = None
         elif mcp_conn is not None:
             connection_key = mcp_conn.name
-            tool_scopes = mcp_conn.scopes if isinstance(mcp_conn.scopes, dict) else None
             _cfg = mcp_conn.config if isinstance(mcp_conn.config, dict) else {}
+            # The read/write/send classification `required_right` needs lives
+            # on the manifest's own ToolPackConnection, not this row's
+            # `scopes` column -- that column is an unrelated, list-shaped
+            # field (see `resolve_tool_pack_connection`'s docstring). Reading
+            # it here used to fail closed to "write" for every tool call
+            # whenever the row's `scopes` wasn't itself a dict, which is the
+            # common case.
+            _manifest_conn = resolve_tool_pack_connection(
+                str(_cfg.get("_plugin_name", "")), str(_cfg.get("_connection_key", ""))
+            )
+            if _manifest_conn is not None and isinstance(_manifest_conn.scopes, dict):
+                tool_scopes = _manifest_conn.scopes
+            elif isinstance(mcp_conn.scopes, dict):
+                # A connection with no manifest (plugin removed from disk, or
+                # never plugin-backed at all) that still carries an operator-
+                # supplied dict on the row itself -- `CreateMcpConnectionRequest`
+                # allows this. Kept as a fallback, not the primary path.
+                tool_scopes = mcp_conn.scopes
+            else:
+                tool_scopes = None
             _vs = _cfg.get("value_spec")
             _fs = _cfg.get("focus_spec")
             _ot = _cfg.get("outward_tools")
