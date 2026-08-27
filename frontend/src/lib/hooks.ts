@@ -25,6 +25,9 @@ export interface ToolPolicy {
   write: boolean;
   send: boolean;
   approvalEur: number | null;
+  approvalActions: string[];
+  only: string[] | null;
+  connectionId?: string | null;
 }
 
 export interface AgentDetail extends Agent {

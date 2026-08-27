@@ -237,6 +237,31 @@ describe("GuardrailPresetPicker", () => {
     );
     expect(screen.getByText(/Approval needed for:/i)).toBeInTheDocument();
   });
+
+  it("lets an operator type an arbitrary tool name and adds it to approvalActions on Enter", () => {
+    const onChange = vi.fn();
+    render(
+      <GuardrailPresetPicker presets={[]} hasValueSpec={false} value={FREE} onChange={onChange} />,
+    );
+    const input = screen.getByPlaceholderText(/delete_record/i);
+    fireEvent.change(input, { target: { value: "delete_record" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onChange).toHaveBeenCalledWith({
+      ...FREE,
+      approvalActions: [...FREE.approvalActions, "delete_record"],
+    });
+  });
+
+  it("renders a free-text approval action as a removable chip, leaving write/send untouched", () => {
+    const onChange = vi.fn();
+    const value: GuardrailValue = { ...FREE, approvalActions: ["send", "delete_record"] };
+    render(
+      <GuardrailPresetPicker presets={[]} hasValueSpec={false} value={value} onChange={onChange} />,
+    );
+    expect(screen.getByText("delete_record")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /remove delete_record/i }));
+    expect(onChange).toHaveBeenCalledWith({ ...value, approvalActions: ["send"] });
+  });
 });
 
 // Realistic shapes lifted from plugins/odoo_mcp/guardrails/ (design §7):
@@ -439,6 +464,27 @@ describe("GuardrailPresetPicker -- guardrail library (grouped by use_case)", () 
     const applied = onChange.mock.calls[0][0] as GuardrailValue;
     expect(applied.only).toEqual(["search_records", "update_record"]);
     expect(applied.only).not.toContain("delete_record");
+  });
+
+  it("offers the same free-text approval-action input under 'Configure myself' in the library branch", () => {
+    const onChange = vi.fn();
+    render(
+      <GuardrailPresetPicker
+        presets={[]}
+        guardrailLibrary={LIBRARY}
+        hasValueSpec
+        value={FREE}
+        onChange={onChange}
+      />,
+    );
+    fireEvent.click(screen.getByText(/Configure myself/i));
+    const input = screen.getByPlaceholderText(/delete_record/i);
+    fireEvent.change(input, { target: { value: "delete_record" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onChange).toHaveBeenCalledWith({
+      ...FREE,
+      approvalActions: [...FREE.approvalActions, "delete_record"],
+    });
   });
 
   it("renders a raw use_case string humanized when it has no bilingual entry in the known table", () => {

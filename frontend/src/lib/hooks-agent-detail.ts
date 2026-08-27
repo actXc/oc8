@@ -6,6 +6,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import type { ToolPolicy } from "@/lib/hooks";
 
 // Mirrors backend AgentDetailDTO (backend/src/oc8/schemas/dto.py), camelCase
 // over the wire via CamelModel. Extends the AgentDTO fields inline.
@@ -28,8 +29,8 @@ export interface AgentDetail {
   isLead: boolean;
   mission: string;
   departmentName: string | null;
-  effectiveTools: Record<string, unknown>;
-  departmentFrameTools: Record<string, unknown>;
+  effectiveTools: Record<string, ToolPolicy>;
+  departmentFrameTools: Record<string, ToolPolicy>;
   runtimeRef: string | null;
   // The run this agent is on right now, whoever started it. Without it the live
   // log can only follow a run started in this browser tab, so a scheduled run

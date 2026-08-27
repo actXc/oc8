@@ -239,6 +239,79 @@ function GrantChip({ on, label }: { on: boolean; label: string }) {
   );
 }
 
+/** Free-text add/remove for `approvalActions` entries beyond the `write`/
+ * `send` checkboxes rendered alongside it. Those checkboxes cover the two
+ * literal rights `authorize_tool_call` understands directly; this input
+ * lets an operator additionally gate one specific tool call by name (e.g.
+ * `delete_record`) that a blanket `write` gate wouldn't otherwise single
+ * out for approval. Renders only the non-`write`/`send` entries as removable
+ * chips -- the checkboxes above already own those two. */
+function FreeTextApprovalActions({
+  value,
+  onChange,
+  t,
+}: {
+  value: GuardrailValue;
+  onChange: (next: GuardrailValue) => void;
+  t: (en: string, de: string) => string;
+}) {
+  const [draft, setDraft] = useState("");
+  const custom = value.approvalActions.filter((a) => a !== "write" && a !== "send");
+
+  function addDraft() {
+    const name = draft.trim();
+    setDraft("");
+    if (!name || value.approvalActions.includes(name)) return;
+    onChange({ ...value, approvalActions: [...value.approvalActions, name] });
+  }
+
+  return (
+    <label className="block text-xs uppercase tracking-wider text-muted-foreground">
+      {t(
+        "Also require approval for a specific tool (optional)",
+        "Zusätzlich Freigabe für ein bestimmtes Tool (optional)",
+      )}
+      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+        {custom.map((name) => (
+          <span
+            key={name}
+            className="inline-flex items-center gap-1 rounded-full border border-border bg-background/40 px-2 py-0.5 text-[11px] normal-case text-foreground"
+          >
+            {name}
+            <button
+              type="button"
+              aria-label={t(`Remove ${name}`, `${name} entfernen`)}
+              onClick={() =>
+                onChange({
+                  ...value,
+                  approvalActions: value.approvalActions.filter((a) => a !== name),
+                })
+              }
+              className="text-muted-foreground hover:text-foreground"
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === ",") {
+              e.preventDefault();
+              addDraft();
+            }
+          }}
+          onBlur={addDraft}
+          placeholder={t("e.g. delete_record", "z. B. delete_record")}
+          className="min-w-[140px] flex-1 rounded-md border border-border bg-background/40 px-2 py-1 text-xs normal-case text-foreground outline-none focus:border-primary/50"
+        />
+      </div>
+    </label>
+  );
+}
+
 /** Renders a plugin's named guardrail presets (recommended first) plus an
  * always-last "decide myself" option that reveals free controls. A plugin
  * with no presets renders only the free controls -- no empty chooser.
@@ -441,6 +514,7 @@ export function GuardrailPresetPicker({
                 ))}
               </div>
             </label>
+            <FreeTextApprovalActions value={value} onChange={onChange} t={t} />
             {hasValueSpec && (
               <label className="block text-xs uppercase tracking-wider text-muted-foreground">
                 {t("Approval needed from (€, optional)", "Freigabe nötig ab (€, optional)")}
@@ -590,6 +664,7 @@ export function GuardrailPresetPicker({
               ))}
             </div>
           </label>
+          <FreeTextApprovalActions value={value} onChange={onChange} t={t} />
           {hasValueSpec && (
             <label className="block text-xs uppercase tracking-wider text-muted-foreground">
               {t("Approval needed from (€, optional)", "Freigabe nötig ab (€, optional)")}

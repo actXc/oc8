@@ -143,6 +143,44 @@ async def test_get_agent_surfaces_the_pinned_connection_id_in_effective_tools(
             assert effective_tools["Odoo (User 1)"]["connectionId"] == conn_id
 
 
+async def test_get_agent_surfaces_approval_actions_and_only_in_effective_tools(
+    app_session: AppSessionFactory,
+) -> None:
+    """`ToolPolicyDTO` used to omit `approval_actions`/`only` entirely, even
+    though `ToolPolicy.to_json()` (and the raw frame JSON) always carry them --
+    a Guardrails editor reading `effectiveTools` back could never tell which
+    specific actions were already gated, and would silently reset that list to
+    empty on the very first save."""
+    tenant = uuid.uuid4()
+    agent_id = await _seed_agent_with_frame_tool(app_session, tenant, "Odoo (User 1)")
+    async with app_session(tenant) as db:
+        conn = (await db.execute(select(m.McpConnection))).scalar_one()
+        conn_id = str(conn.id)
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            put_r = await c.put(
+                f"/api/v1/agents/{agent_id}/narrowing",
+                json={
+                    "narrowing": {
+                        "tools": {
+                            "Odoo (User 1)": {
+                                "enabled": True,
+                                "connection_id": conn_id,
+                                "approval_actions": ["delete_record"],
+                            }
+                        }
+                    }
+                },
+                headers=_headers(tenant),
+            )
+            assert put_r.status_code == 200, put_r.text
+            get_r = await c.get(f"/api/v1/agents/{agent_id}", headers=_headers(tenant))
+            assert get_r.status_code == 200, get_r.text
+            effective = get_r.json()["effectiveTools"]["Odoo (User 1)"]
+            assert effective["approvalActions"] == ["delete_record"]
+
+
 async def test_enabling_a_tool_with_no_login_connection_is_unaffected(
     app_session: AppSessionFactory,
 ) -> None:

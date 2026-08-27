@@ -54,6 +54,7 @@ import {
   type TriggerDTO,
 } from "@/lib/hooks";
 import { CredentialPicker } from "@/components/credential-picker";
+import { GuardrailPresetPicker, type GuardrailValue } from "@/components/guardrail-preset-picker";
 import { SUBSCRIPTION_PROVIDER, SubscriptionRiskBadge } from "@/routes/models";
 import { CronBuilder } from "@/components/cron-builder";
 import {
@@ -106,11 +107,11 @@ export const Route = createFileRoute("/agents/$id")({
 const TAB_IDS = [
   "overview",
   "instructions",
+  "guardrails",
   "livelog",
   "chat",
   "files",
   "config",
-  "access",
   "skills",
   "memory",
   "history",
@@ -196,11 +197,11 @@ function AgentDetail() {
   const tabs: { id: TabId; label: string }[] = [
     { id: "overview", label: t("Overview", "Übersicht") },
     { id: "instructions", label: t("Instructions", "Anweisungen") },
+    { id: "guardrails", label: t("Guardrails", "Guardrails") },
     { id: "livelog", label: t("Live Log", "Live-Log") },
     { id: "chat", label: t("Chat", "Chat") },
     { id: "files", label: t("Files", "Dateien") },
     { id: "config", label: t("Configuration", "Konfiguration") },
-    { id: "access", label: t("Access & Permissions", "Zugriff & Rechte") },
     { id: "skills", label: t("Skills", "Skills") },
     { id: "memory", label: t("Memory", "Gedächtnis") },
     { id: "history", label: t("History", "Verlauf") },
@@ -442,7 +443,6 @@ function AgentDetail() {
             runtimeRef={agent.runtimeRef}
             mayManage={mayManage}
           />
-          <NarrowingEditor agent={agent} mayManage={mayManage} />
           <Panel className="p-5">
             <ConfigSectionHeader
               hint={t("when this agent runs", "wann dieser Agent läuft")}
@@ -460,17 +460,6 @@ function AgentDetail() {
               deptEnabled={deptEnabled}
             />
           </div>
-          <Panel className="p-5 md:col-span-2">
-            <div className="flex items-start gap-2 text-xs text-foreground/80">
-              <Shield className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-              <span>
-                {t(
-                  "Tool & interface access is managed under Access & Permissions — inherited from the department frame.",
-                  "Tool- & Schnittstellenzugriff wird unter Zugriff & Rechte verwaltet — vererbt aus dem Abteilungsrahmen.",
-                )}
-              </span>
-            </div>
-          </Panel>
         </div>
       )}
 
@@ -478,12 +467,14 @@ function AgentDetail() {
         <AgentInstructionsPanel agentId={agent.id} mission={agent.mission} mayManage={mayManage} />
       )}
 
-      {tab === "access" && agent.departmentId && <AccessRightsTab agent={agent} />}
-      {tab === "access" && !agent.departmentId && (
+      {tab === "guardrails" && agent.departmentId && (
+        <NarrowingEditor agent={agent} mayManage={mayManage} />
+      )}
+      {tab === "guardrails" && !agent.departmentId && (
         <Panel className="p-5 text-sm text-muted-foreground">
           {t(
-            `${agent.name} is not assigned to a department – permissions are defined at the department level.`,
-            `${agent.name} ist keiner Abteilung zugeordnet – Rechte werden auf Abteilungsebene definiert.`,
+            `${agent.name} is not assigned to a department – guardrails are defined at the department level.`,
+            `${agent.name} ist keiner Abteilung zugeordnet – Guardrails werden auf Abteilungsebene definiert.`,
           )}
         </Panel>
       )}
@@ -936,19 +927,6 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void 
 
 // ---------- Guardrails / tool narrowing ----------
 
-interface WireToolPolicy {
-  enabled: boolean;
-  read: boolean;
-  write: boolean;
-  send: boolean;
-  approvalEur: number | null;
-  // Not currently emitted by the backend's effective-tools payload (the
-  // ToolPolicyDTO on the wire has no such field yet), but if a resolved pin
-  // is ever surfaced here it would arrive camelCase like every other typed
-  // field on this DTO. Absent = "no pin yet".
-  connectionId?: string | null;
-}
-
 // The agent's Assigned-LLM panel. Its own component (rather than inline in
 // AgentDetail) so the subscription risk badge below is reachable from a test
 // without standing up the whole routed page -- same shape as NarrowingEditor
@@ -1034,8 +1012,8 @@ export function NarrowingEditor({
   const update = useUpdateNarrowing(agent.id);
   const logins = useMcpLogins();
   const { data: connections = [] } = useMcpConnections();
-  const frame = (agent.departmentFrameTools ?? {}) as Record<string, WireToolPolicy>;
-  const effective = (agent.effectiveTools ?? {}) as Record<string, WireToolPolicy>;
+  const frame = agent.departmentFrameTools;
+  const effective = agent.effectiveTools;
   const frameKeys = Object.keys(frame).filter((k) => frame[k]?.enabled);
   // Only a tool with a live MCP connection is actually usable -- a
   // department can enable a tool in its frame before anyone connected it
@@ -1050,6 +1028,12 @@ export function NarrowingEditor({
   );
   const [pickerOpen, setPickerOpen] = useState(false);
   const [toolSearch, setToolSearch] = useState("");
+  // Per-tool-key policy edits (read/write/send/approvalEur/approvalActions/
+  // only), keyed the same way as `enabled` -- not fed back from `effective`
+  // on every render, same reason DepartmentToolsPanel's `edited` state isn't
+  // either: a click on a preset or a free-text chip must not get clobbered by
+  // a refetch mid-edit.
+  const [edited, setEdited] = useState<Record<string, GuardrailValue>>({});
   // Per-tool-key login pin, keyed the same way as `enabled`. Seeded from any
   // pin the backend already resolved for this agent (if the DTO ever carries
   // one); absent means "no pin yet", not "unpin".
@@ -1107,10 +1091,29 @@ export function NarrowingEditor({
     }
   }
 
+  // What the picker for tool `k` starts from: any local edit, else the
+  // agent's current effective policy (which already reflects prior
+  // narrowing merged with the department frame), else the frame's own
+  // policy. Deliberately NOT `frame[k]` alone -- that would silently reset
+  // an already-narrowed approvalActions/only back to the department's wider
+  // default the moment the picker first renders.
+  function valueFor(k: string): GuardrailValue {
+    if (edited[k]) return edited[k];
+    const src = effective[k] ?? frame[k];
+    return {
+      read: !!src?.read,
+      write: !!src?.write,
+      send: !!src?.send,
+      approvalActions: src?.approvalActions ?? [],
+      approvalEur: src?.approvalEur ?? null,
+      only: src?.only ?? [],
+    };
+  }
+
   function save() {
     const tools: Record<string, unknown> = {};
     for (const k of frameKeys) {
-      const eff = effective[k] ?? frame[k];
+      const val = valueFor(k);
       if (enabled[k] && (loginsByKey[k]?.length ?? 0) > 0 && !connectionId[k]) {
         toast.error(t("Pick a login before saving", "Login vor dem Speichern auswählen"), {
           description: k,
@@ -1118,13 +1121,14 @@ export function NarrowingEditor({
       }
       tools[k] = {
         enabled: enabled[k],
-        read: eff.read,
-        write: eff.write,
-        send: eff.send,
-        // Backend narrowing dict reads snake_case `approval_eur`.
-        approval_eur: eff.approvalEur ?? null,
-        // Same reason: an untyped dict on the backend, so nothing auto-
-        // converts this key either. Must stay snake_case `connection_id`.
+        read: val.read,
+        write: val.write,
+        send: val.send,
+        // Backend narrowing dict reads snake_case keys throughout -- an
+        // untyped dict on the backend, so nothing auto-converts these.
+        approval_eur: val.approvalEur ?? null,
+        approval_actions: val.approvalActions,
+        only: val.only,
         connection_id: connectionId[k] || null,
       };
     }
@@ -1188,55 +1192,73 @@ export function NarrowingEditor({
           )}
         </p>
       ) : (
-        <ul className="space-y-2">
+        <ul className="space-y-3">
           {connectedFrameKeys
             .filter((k) => enabled[k])
-            .map((k) => (
-              <li
-                key={k}
-                className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-border bg-background/30 px-3 py-2"
-              >
-                <div className="flex min-w-0 flex-1 items-center gap-2">
-                  <Shield className="h-3.5 w-3.5 shrink-0 text-primary" />
-                  <span className="min-w-0 flex-1 truncate text-sm">{k}</span>
-                </div>
-                <span
-                  className={cn(
-                    "hidden text-[10px] sm:inline",
-                    enabled[k] ? "text-[color:var(--status-running)]" : "text-muted-foreground",
-                  )}
-                >
-                  {enabled[k] ? t("enabled", "aktiv") : t("disabled", "aus")}
-                </span>
-                {(() => {
-                  const credentialType = connections.find((c) => c.name === k)?.credentialType;
-                  if (!credentialType) return null;
-                  const pickedCredentialId =
-                    (loginsByKey[k] ?? []).find((l) => l.id === connectionId[k])?.credentialId ??
-                    "";
-                  if (!mayManage) {
-                    const pinnedName = (loginsByKey[k] ?? []).find(
-                      (l) => l.id === connectionId[k],
-                    )?.name;
-                    return pinnedName ? (
-                      <span className="shrink-0 text-[11px] text-muted-foreground">
-                        {pinnedName}
-                      </span>
-                    ) : null;
-                  }
-                  return (
-                    <div className="min-w-[220px] shrink-0">
-                      <CredentialPicker
-                        credentialType={credentialType}
-                        value={pickedCredentialId}
-                        onChange={(credentialId) => pinCredential(k, credentialType, credentialId)}
+            .map((k) => {
+              const connection = connections.find((c) => c.name === k);
+              return (
+                <li key={k} className="rounded-md border border-border bg-background/30 p-3">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <Shield className="h-3.5 w-3.5 shrink-0 text-primary" />
+                      <span className="min-w-0 flex-1 truncate text-sm">{k}</span>
+                    </div>
+                    <span
+                      className={cn(
+                        "hidden text-[10px] sm:inline",
+                        enabled[k] ? "text-[color:var(--status-running)]" : "text-muted-foreground",
+                      )}
+                    >
+                      {enabled[k] ? t("enabled", "aktiv") : t("disabled", "aus")}
+                    </span>
+                    {(() => {
+                      const credentialType = connection?.credentialType;
+                      if (!credentialType) return null;
+                      const pickedCredentialId =
+                        (loginsByKey[k] ?? []).find((l) => l.id === connectionId[k])
+                          ?.credentialId ?? "";
+                      if (!mayManage) {
+                        const pinnedName = (loginsByKey[k] ?? []).find(
+                          (l) => l.id === connectionId[k],
+                        )?.name;
+                        return pinnedName ? (
+                          <span className="shrink-0 text-[11px] text-muted-foreground">
+                            {pinnedName}
+                          </span>
+                        ) : null;
+                      }
+                      return (
+                        <div className="min-w-[220px] shrink-0">
+                          <CredentialPicker
+                            credentialType={credentialType}
+                            value={pickedCredentialId}
+                            onChange={(credentialId) =>
+                              pinCredential(k, credentialType, credentialId)
+                            }
+                          />
+                        </div>
+                      );
+                    })()}
+                    <Toggle
+                      on={!!enabled[k]}
+                      onChange={(v) => setEnabled((s) => ({ ...s, [k]: v }))}
+                    />
+                  </div>
+                  {mayManage && connection && (
+                    <div className="mt-3 border-t border-border/70 pt-3">
+                      <GuardrailPresetPicker
+                        presets={connection.guardrailPresets}
+                        guardrailLibrary={connection.guardrailLibrary}
+                        hasValueSpec={connection.hasValueSpec}
+                        value={valueFor(k)}
+                        onChange={(next) => setEdited((prev) => ({ ...prev, [k]: next }))}
                       />
                     </div>
-                  );
-                })()}
-                <Toggle on={!!enabled[k]} onChange={(v) => setEnabled((s) => ({ ...s, [k]: v }))} />
-              </li>
-            ))}
+                  )}
+                </li>
+              );
+            })}
         </ul>
       )}
       {frameKeys.length > 0 && (
@@ -1939,103 +1961,6 @@ function ScheduleEditor({
         )}
       </p>
     </div>
-  );
-}
-
-// Real, read-only tool-access view. The department frame is the ceiling; the
-// agent's effective policy is what actually applies after narrowing. Both come
-// straight off the AgentDetail (effectiveTools / departmentFrameTools) — no
-// mock department/policy data. Editing happens under Configuration › Guardrails.
-function AccessRightsTab({ agent }: { agent: AgentDetailData }) {
-  const t = useT();
-  const frame = (agent.departmentFrameTools ?? {}) as Record<string, WireToolPolicy>;
-  const effective = (agent.effectiveTools ?? {}) as Record<string, WireToolPolicy>;
-  const keys = Array.from(new Set([...Object.keys(frame), ...Object.keys(effective)])).sort();
-
-  return (
-    <Panel className="p-5">
-      <div className="mb-4 flex items-start justify-between gap-2">
-        <ConfigSectionHeader
-          hint={t("effective tool access", "Effektiver Tool-Zugriff")}
-          title={t("Access & Permissions", "Zugriff & Rechte")}
-        />
-        <span className="mt-2 text-[10px] text-muted-foreground">
-          {t("read-only", "schreibgeschützt")}
-        </span>
-      </div>
-      {keys.length === 0 ? (
-        <p className="rounded-md border border-dashed border-border/70 bg-background/30 p-3 text-center text-xs text-muted-foreground">
-          {t(
-            "No tools are granted to this agent's department frame.",
-            "Dem Abteilungsrahmen dieses Agenten sind keine Tools zugewiesen.",
-          )}
-        </p>
-      ) : (
-        <ul className="space-y-2">
-          {keys.map((k) => {
-            const eff = effective[k];
-            const fr = frame[k];
-            const on = !!eff?.enabled;
-            const narrowed = !!fr?.enabled && !on;
-            const caps = eff ?? fr;
-            return (
-              <li
-                key={k}
-                className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-border bg-background/30 px-3 py-2"
-              >
-                <div className="flex min-w-0 flex-1 items-center gap-2">
-                  <Shield
-                    className={cn(
-                      "h-3.5 w-3.5 shrink-0",
-                      on ? "text-primary" : "text-muted-foreground",
-                    )}
-                  />
-                  <span className="min-w-0 flex-1 truncate text-sm">{k}</span>
-                </div>
-                <div className="flex flex-wrap items-center gap-1">
-                  {caps?.read && <CapBadge label={t("read", "lesen")} />}
-                  {caps?.write && <CapBadge label={t("write", "schreiben")} />}
-                  {caps?.send && <CapBadge label={t("send", "senden")} />}
-                  {caps && caps.approvalEur != null && (
-                    <CapBadge label={`≤ ${caps.approvalEur} €`} />
-                  )}
-                </div>
-                <span
-                  className={cn(
-                    "text-[10px]",
-                    on
-                      ? "text-[color:var(--status-running)]"
-                      : narrowed
-                        ? "text-[color:var(--status-warning)]"
-                        : "text-muted-foreground",
-                  )}
-                >
-                  {on
-                    ? t("enabled", "aktiv")
-                    : narrowed
-                      ? t("narrowed off", "eingeschränkt")
-                      : t("not in frame", "nicht im Rahmen")}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      <p className="mt-3 text-[11px] text-muted-foreground">
-        {t(
-          "Effective access is the department frame narrowed by this agent. Adjust it under Configuration › Guardrails.",
-          "Der effektive Zugriff ist der durch diesen Agenten eingeschränkte Abteilungsrahmen. Anpassung unter Konfiguration › Guardrails.",
-        )}
-      </p>
-    </Panel>
-  );
-}
-
-function CapBadge({ label }: { label: string }) {
-  return (
-    <span className="inline-flex items-center rounded border border-border bg-background/50 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-      {label}
-    </span>
   );
 }
 

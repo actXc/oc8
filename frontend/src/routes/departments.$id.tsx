@@ -157,7 +157,9 @@ function DepartmentDetail() {
   // KB grants for this department, not a paginated list view.
   const { data: allBasesPage } = useKnowledgeBases({ pageSize: 200 });
   const allBases = allBasesPage?.items ?? [];
-  const [tab, setTab] = useState<"overview" | "perms" | "collab" | "settings">("overview");
+  const [tab, setTab] = useState<"overview" | "perms" | "guardrails" | "collab" | "settings">(
+    "overview",
+  );
   const [hireOpen, setHireOpen] = useState(false);
 
   const taskState = board?.tasks ?? [];
@@ -336,8 +338,9 @@ function DepartmentDetail() {
           { id: "overview" as const, label: t("Overview", "Übersicht") },
           {
             id: "perms" as const,
-            label: t("Integrations & Permissions", "Integrationen & Rechte"),
+            label: t("Integrations", "Integrationen"),
           },
+          { id: "guardrails" as const, label: t("Guardrails", "Guardrails") },
           { id: "collab" as const, label: t("Collaboration", "Zusammenarbeit") },
           { id: "settings" as const, label: t("Settings", "Einstellungen") },
         ].map((t) => (
@@ -371,6 +374,11 @@ function DepartmentDetail() {
               })
             }
           />
+        </div>
+      )}
+
+      {tab === "guardrails" && (
+        <div className="space-y-6">
           <DepartmentToolsPanel departmentId={dept.id} />
         </div>
       )}

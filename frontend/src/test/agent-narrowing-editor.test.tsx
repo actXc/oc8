@@ -100,6 +100,9 @@ const ODOO_CONNECTION = {
   scopes: [],
   health: {},
   credentialType: "odoo_login",
+  guardrailPresets: [],
+  guardrailLibrary: null,
+  hasValueSpec: false,
 };
 
 describe("NarrowingEditor credential picker", () => {
@@ -169,6 +172,8 @@ describe("NarrowingEditor credential picker", () => {
               write: false,
               send: false,
               approval_eur: null,
+              approval_actions: [],
+              only: [],
               connection_id: "login-1",
             },
           },
@@ -232,6 +237,8 @@ describe("NarrowingEditor credential picker", () => {
               write: false,
               send: false,
               approval_eur: null,
+              approval_actions: [],
+              only: [],
               connection_id: "login-new",
             },
           },

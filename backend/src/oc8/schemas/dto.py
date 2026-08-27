@@ -503,6 +503,12 @@ class ToolPolicyDTO(CamelModel):
     write: bool
     send: bool
     approval_eur: int | None = None
+    # Both default empty/None rather than being required: `**ToolPolicy.to_json()`
+    # (agent_tools_dto's frame path) and the raw frame JSON dict (this DTO's
+    # narrowing/effective-tools path) both always carry them, but a caller
+    # constructing one by hand for a test should not have to.
+    approval_actions: list[str] = []
+    only: list[str] | None = None
     connection_id: str | None = None
 
 
