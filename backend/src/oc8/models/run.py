@@ -55,7 +55,8 @@ class AgentRun(Base, PkMixin, TenantMixin, TimestampMixin):
             name="ck_agent_run_state",
         ),
         CheckConstraint(
-            "source IN ('manual','cron','event','webhook','delegation','decision','handoff')",
+            "source IN "
+            "('manual','cron','event','webhook','delegation','decision','handoff','chat')",
             name="ck_agent_run_source",
         ),
         CheckConstraint(

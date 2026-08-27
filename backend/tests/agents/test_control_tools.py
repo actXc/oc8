@@ -32,8 +32,13 @@ MCP_TOOLS = [
 
 def _agent(*, is_team_lead: bool = False) -> m.Agent:
     return m.Agent(
-        id=uuid.uuid4(), tenant_id=uuid.uuid4(), department_id=uuid.uuid4(),
-        name="Nora", status="idle", definition={}, presentation={},
+        id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        department_id=uuid.uuid4(),
+        name="Nora",
+        status="idle",
+        definition={},
+        presentation={},
         is_team_lead=is_team_lead,
     )
 
@@ -48,16 +53,21 @@ def _skill(tool_name: str, *, requires: list[str]) -> LoadedSkill:
         "guardrails": [],
     }
     return LoadedSkill(
-        skill_id=uuid.uuid4(), skill_version_id=uuid.uuid4(), name="Skill X",
-        description="d", tool_name=tool_name,
-        definition=parse_definition(definition), creator_id=None,
+        skill_id=uuid.uuid4(),
+        skill_version_id=uuid.uuid4(),
+        name="Skill X",
+        description="d",
+        tool_name=tool_name,
+        definition=parse_definition(definition),
+        creator_id=None,
     )
 
 
 def test_every_agent_may_remember_and_ask() -> None:
-    names = [t.name for t in offered_tools(
-        _agent(), assigned_skills=[], active_skills=[], mcp_tools=MCP_TOOLS
-    )]
+    names = [
+        t.name
+        for t in offered_tools(_agent(), assigned_skills=[], active_skills=[], mcp_tools=MCP_TOOLS)
+    ]
     assert "memory_write" in names
     assert "ask_user" in names
 
@@ -65,12 +75,16 @@ def test_every_agent_may_remember_and_ask() -> None:
 def test_only_a_team_lead_is_offered_delegation() -> None:
     """Offering delegate_task to a non-lead would be offering a tool that
     _authorize denies on every call -- pure model confusion."""
-    plain = [t.name for t in offered_tools(
-        _agent(), assigned_skills=[], active_skills=[], mcp_tools=MCP_TOOLS
-    )]
-    lead = [t.name for t in offered_tools(
-        _agent(is_team_lead=True), assigned_skills=[], active_skills=[], mcp_tools=MCP_TOOLS
-    )]
+    plain = [
+        t.name
+        for t in offered_tools(_agent(), assigned_skills=[], active_skills=[], mcp_tools=MCP_TOOLS)
+    ]
+    lead = [
+        t.name
+        for t in offered_tools(
+            _agent(is_team_lead=True), assigned_skills=[], active_skills=[], mcp_tools=MCP_TOOLS
+        )
+    ]
     assert "delegate_task" not in plain
     assert "delegate_task" in lead
 
@@ -79,9 +93,12 @@ def test_an_active_skill_narrows_the_connection_tools() -> None:
     """An active skill focuses the model on its own tools. OFFERING only --
     _authorize still checks the frame on every call, so this cannot widen."""
     skill = _skill("skill_x", requires=["read_record"])
-    names = [t.name for t in offered_tools(
-        _agent(), assigned_skills=[skill], active_skills=[skill], mcp_tools=MCP_TOOLS
-    )]
+    names = [
+        t.name
+        for t in offered_tools(
+            _agent(), assigned_skills=[skill], active_skills=[skill], mcp_tools=MCP_TOOLS
+        )
+    ]
     assert "read_record" in names
     assert "create_record" not in names
     assert "send_email" not in names
@@ -91,9 +108,12 @@ def test_a_skill_requiring_nothing_available_falls_back_to_all_tools() -> None:
     """A skill whose required tools this connection does not have must not leave
     the model with no connection tools at all -- it would be unable to act."""
     skill = _skill("skill_x", requires=["nonexistent_tool"])
-    names = [t.name for t in offered_tools(
-        _agent(), assigned_skills=[skill], active_skills=[skill], mcp_tools=MCP_TOOLS
-    )]
+    names = [
+        t.name
+        for t in offered_tools(
+            _agent(), assigned_skills=[skill], active_skills=[skill], mcp_tools=MCP_TOOLS
+        )
+    ]
     for t in MCP_TOOLS:
         assert t.name in names
 
@@ -102,16 +122,20 @@ def test_an_assigned_skill_stays_offered_once_active() -> None:
     """Withdrawing the tool the moment it activates would strand a model that
     re-checks its own tool list with an unknown tool name."""
     skill = _skill("skill_x", requires=["read_record"])
-    names = [t.name for t in offered_tools(
-        _agent(), assigned_skills=[skill], active_skills=[skill], mcp_tools=MCP_TOOLS
-    )]
+    names = [
+        t.name
+        for t in offered_tools(
+            _agent(), assigned_skills=[skill], active_skills=[skill], mcp_tools=MCP_TOOLS
+        )
+    ]
     assert "skill_x" in names
 
 
 def test_without_an_active_skill_all_connection_tools_are_offered() -> None:
-    names = [t.name for t in offered_tools(
-        _agent(), assigned_skills=[], active_skills=[], mcp_tools=MCP_TOOLS
-    )]
+    names = [
+        t.name
+        for t in offered_tools(_agent(), assigned_skills=[], active_skills=[], mcp_tools=MCP_TOOLS)
+    ]
     for t in MCP_TOOLS:
         assert t.name in names
 
@@ -132,9 +156,10 @@ def test_render_component_is_offered_to_every_agent() -> None:
     """Withholding it would not be a real gate -- the ComponentGrant check
     inside execute_control_tool is the gate; offering only hides, and "a
     grant that only hides is not a grant that holds" (see pdp.py)."""
-    names = [t.name for t in offered_tools(
-        _agent(), assigned_skills=[], active_skills=[], mcp_tools=MCP_TOOLS
-    )]
+    names = [
+        t.name
+        for t in offered_tools(_agent(), assigned_skills=[], active_skills=[], mcp_tools=MCP_TOOLS)
+    ]
     assert "render_component" in names
 
 
@@ -144,17 +169,24 @@ def test_search_knowledge_is_withheld_without_a_knowledge_base_grant() -> None:
     -- noise, not a capability. Defaults to withheld: has_knowledge defaults
     to False, matching every pre-existing offered_tools() call site until it
     is updated to pass the real value."""
-    names = [t.name for t in offered_tools(
-        _agent(), assigned_skills=[], active_skills=[], mcp_tools=MCP_TOOLS
-    )]
+    names = [
+        t.name
+        for t in offered_tools(_agent(), assigned_skills=[], active_skills=[], mcp_tools=MCP_TOOLS)
+    ]
     assert "search_knowledge" not in names
 
 
 def test_search_knowledge_is_offered_once_a_knowledge_base_is_granted() -> None:
-    names = [t.name for t in offered_tools(
-        _agent(), assigned_skills=[], active_skills=[], mcp_tools=MCP_TOOLS,
-        has_knowledge=True,
-    )]
+    names = [
+        t.name
+        for t in offered_tools(
+            _agent(),
+            assigned_skills=[],
+            active_skills=[],
+            mcp_tools=MCP_TOOLS,
+            has_knowledge=True,
+        )
+    ]
     assert "search_knowledge" in names
 
 
@@ -168,14 +200,24 @@ async def _dept_agent_task(
     db.add(dept)
     await db.flush()
     agent = m.Agent(
-        tenant_id=tenant, department_id=dept.id, name="Nora", status="running",
-        definition={}, presentation={}, narrowing={}, is_team_lead=is_team_lead,
+        tenant_id=tenant,
+        department_id=dept.id,
+        name="Nora",
+        status="running",
+        definition={},
+        presentation={},
+        narrowing={},
+        is_team_lead=is_team_lead,
     )
     db.add(agent)
     await db.flush()
     task = m.Task(
-        tenant_id=tenant, department_id=dept.id, assigned_agent_id=agent.id,
-        title="Erstelle ein Angebot", state="in_progress", delegation_depth=depth,
+        tenant_id=tenant,
+        department_id=dept.id,
+        assigned_agent_id=agent.id,
+        title="Erstelle ein Angebot",
+        state="in_progress",
+        delegation_depth=depth,
     )
     db.add(task)
     await db.flush()
@@ -188,10 +230,16 @@ async def test_ask_user_asks_to_suspend(app_session: Any) -> None:
     async with app_session(tenant) as db:
         agent, task = await _dept_agent_task(db, tenant)
         outcome = await execute_control_tool(
-            db, tenant_id=tenant, agent=agent, task=task,
+            db,
+            tenant_id=tenant,
+            agent=agent,
+            task=task,
             tc=ToolCall(id="c1", name="ask_user", arguments={"question": "Welches Konto?"}),
-            decision=Decision(Effect.ALLOW), assigned_skills=[], active_skills=[],
-            mcp_conn=None, originating_operator=None,
+            decision=Decision(Effect.ALLOW),
+            assigned_skills=[],
+            active_skills=[],
+            mcp_conn=None,
+            originating_operator=None,
         )
         assert outcome is not None
     assert outcome.suspend == "waiting_for_input"
@@ -206,10 +254,16 @@ async def test_an_empty_question_is_a_model_error_not_a_suspend(app_session: Any
     async with app_session(tenant) as db:
         agent, task = await _dept_agent_task(db, tenant)
         outcome = await execute_control_tool(
-            db, tenant_id=tenant, agent=agent, task=task,
+            db,
+            tenant_id=tenant,
+            agent=agent,
+            task=task,
             tc=ToolCall(id="c1", name="ask_user", arguments={"question": "   "}),
-            decision=Decision(Effect.ALLOW), assigned_skills=[], active_skills=[],
-            mcp_conn=None, originating_operator=None,
+            decision=Decision(Effect.ALLOW),
+            assigned_skills=[],
+            active_skills=[],
+            mcp_conn=None,
+            originating_operator=None,
         )
         assert outcome is not None
     assert outcome.suspend is None
@@ -222,11 +276,20 @@ async def test_memory_write_records_and_reports_the_id(app_session: Any) -> None
     async with app_session(tenant) as db:
         agent, task = await _dept_agent_task(db, tenant)
         outcome = await execute_control_tool(
-            db, tenant_id=tenant, agent=agent, task=task,
-            tc=ToolCall(id="c1", name="memory_write",
-                        arguments={"tier": "agent", "content": "Kunde zahlt per Rechnung."}),
-            decision=Decision(Effect.ALLOW), assigned_skills=[], active_skills=[],
-            mcp_conn=None, originating_operator=None,
+            db,
+            tenant_id=tenant,
+            agent=agent,
+            task=task,
+            tc=ToolCall(
+                id="c1",
+                name="memory_write",
+                arguments={"tier": "agent", "content": "Kunde zahlt per Rechnung."},
+            ),
+            decision=Decision(Effect.ALLOW),
+            assigned_skills=[],
+            active_skills=[],
+            mcp_conn=None,
+            originating_operator=None,
         )
         assert outcome is not None
         assert "memory recorded" in outcome.output
@@ -244,11 +307,18 @@ async def test_a_denied_memory_write_reaches_the_model_as_an_error(app_session: 
     async with app_session(tenant) as db:
         agent, task = await _dept_agent_task(db, tenant)
         outcome = await execute_control_tool(
-            db, tenant_id=tenant, agent=agent, task=task,
-            tc=ToolCall(id="c1", name="memory_write",
-                        arguments={"tier": "company", "content": "x"}),
+            db,
+            tenant_id=tenant,
+            agent=agent,
+            task=task,
+            tc=ToolCall(
+                id="c1", name="memory_write", arguments={"tier": "company", "content": "x"}
+            ),
             decision=Decision(Effect.DENY, "company tier not permitted"),
-            assigned_skills=[], active_skills=[], mcp_conn=None, originating_operator=None,
+            assigned_skills=[],
+            active_skills=[],
+            mcp_conn=None,
+            originating_operator=None,
         )
         assert outcome is not None
         assert outcome.output == "ERROR: company tier not permitted"
@@ -266,17 +336,30 @@ async def test_delegate_task_creates_a_sub_run_the_caller_must_publish(app_sessi
     async with app_session(tenant) as db:
         lead, task = await _dept_agent_task(db, tenant, is_team_lead=True)
         mate = m.Agent(
-            tenant_id=tenant, department_id=lead.department_id, name="Rico",
-            status="idle", definition={}, presentation={},
+            tenant_id=tenant,
+            department_id=lead.department_id,
+            name="Rico",
+            status="idle",
+            definition={},
+            presentation={},
         )
         db.add(mate)
         await db.flush()
         outcome = await execute_control_tool(
-            db, tenant_id=tenant, agent=lead, task=task,
-            tc=ToolCall(id="c1", name="delegate_task",
-                        arguments={"agent_id": str(mate.id), "task_text": "Ruf den Kunden an"}),
-            decision=Decision(Effect.ALLOW), assigned_skills=[], active_skills=[],
-            mcp_conn=None, originating_operator=None,
+            db,
+            tenant_id=tenant,
+            agent=lead,
+            task=task,
+            tc=ToolCall(
+                id="c1",
+                name="delegate_task",
+                arguments={"agent_id": str(mate.id), "task_text": "Ruf den Kunden an"},
+            ),
+            decision=Decision(Effect.ALLOW),
+            assigned_skills=[],
+            active_skills=[],
+            mcp_conn=None,
+            originating_operator=None,
         )
         assert outcome is not None
         assert outcome.pending_run is not None
@@ -297,17 +380,30 @@ async def test_delegation_to_another_department_is_refused(app_session: Any) -> 
         db.add(other)
         await db.flush()
         stranger = m.Agent(
-            tenant_id=tenant, department_id=other.id, name="Fremd", status="idle",
-            definition={}, presentation={},
+            tenant_id=tenant,
+            department_id=other.id,
+            name="Fremd",
+            status="idle",
+            definition={},
+            presentation={},
         )
         db.add(stranger)
         await db.flush()
         outcome = await execute_control_tool(
-            db, tenant_id=tenant, agent=lead, task=task,
-            tc=ToolCall(id="c1", name="delegate_task",
-                        arguments={"agent_id": str(stranger.id), "task_text": "x"}),
-            decision=Decision(Effect.ALLOW), assigned_skills=[], active_skills=[],
-            mcp_conn=None, originating_operator=None,
+            db,
+            tenant_id=tenant,
+            agent=lead,
+            task=task,
+            tc=ToolCall(
+                id="c1",
+                name="delegate_task",
+                arguments={"agent_id": str(stranger.id), "task_text": "x"},
+            ),
+            decision=Decision(Effect.ALLOW),
+            assigned_skills=[],
+            active_skills=[],
+            mcp_conn=None,
+            originating_operator=None,
         )
         assert outcome is not None
         assert outcome.pending_run is None
@@ -324,11 +420,20 @@ async def test_the_depth_limit_deny_warns_an_operator(app_session: Any) -> None:
     async with app_session(tenant) as db:
         lead, task = await _dept_agent_task(db, tenant, is_team_lead=True)
         outcome = await execute_control_tool(
-            db, tenant_id=tenant, agent=lead, task=task,
-            tc=ToolCall(id="c1", name="delegate_task",
-                        arguments={"agent_id": str(uuid.uuid4()), "task_text": "x"}),
+            db,
+            tenant_id=tenant,
+            agent=lead,
+            task=task,
+            tc=ToolCall(
+                id="c1",
+                name="delegate_task",
+                arguments={"agent_id": str(uuid.uuid4()), "task_text": "x"},
+            ),
             decision=Decision(Effect.DENY, DEPTH_LIMIT_REASON),
-            assigned_skills=[], active_skills=[], mcp_conn=None, originating_operator=None,
+            assigned_skills=[],
+            active_skills=[],
+            mcp_conn=None,
+            originating_operator=None,
         )
         assert outcome is not None
         assert outcome.output.startswith("ERROR:")
@@ -351,10 +456,16 @@ async def test_an_unrelated_delegation_deny_does_not_warn(app_session: Any) -> N
     async with app_session(tenant) as db:
         lead, task = await _dept_agent_task(db, tenant, is_team_lead=True, depth=5)
         await execute_control_tool(
-            db, tenant_id=tenant, agent=lead, task=task,
+            db,
+            tenant_id=tenant,
+            agent=lead,
+            task=task,
             tc=ToolCall(id="c1", name="delegate_task", arguments={"agent_id": "nope"}),
             decision=Decision(Effect.DENY, "invalid agent_id: 'nope'"),
-            assigned_skills=[], active_skills=[], mcp_conn=None, originating_operator=None,
+            assigned_skills=[],
+            active_skills=[],
+            mcp_conn=None,
+            originating_operator=None,
         )
         events = (
             await db.execute(
@@ -374,10 +485,16 @@ async def test_invoking_a_skill_activates_it(app_session: Any) -> None:
     async with app_session(tenant) as db:
         agent, task = await _dept_agent_task(db, tenant)
         outcome = await execute_control_tool(
-            db, tenant_id=tenant, agent=agent, task=task,
+            db,
+            tenant_id=tenant,
+            agent=agent,
+            task=task,
             tc=ToolCall(id="c1", name="skill_x", arguments={}),
-            decision=Decision(Effect.ALLOW), assigned_skills=[skill], active_skills=[],
-            mcp_conn=None, originating_operator=None,
+            decision=Decision(Effect.ALLOW),
+            assigned_skills=[skill],
+            active_skills=[],
+            mcp_conn=None,
+            originating_operator=None,
         )
         assert outcome is not None
     assert outcome.activated_skill is skill
@@ -391,10 +508,16 @@ async def test_re_invoking_an_active_skill_is_a_harmless_no_op(app_session: Any)
     async with app_session(tenant) as db:
         agent, task = await _dept_agent_task(db, tenant)
         outcome = await execute_control_tool(
-            db, tenant_id=tenant, agent=agent, task=task,
+            db,
+            tenant_id=tenant,
+            agent=agent,
+            task=task,
             tc=ToolCall(id="c1", name="skill_x", arguments={}),
-            decision=Decision(Effect.ALLOW), assigned_skills=[skill], active_skills=[skill],
-            mcp_conn=None, originating_operator=None,
+            decision=Decision(Effect.ALLOW),
+            assigned_skills=[skill],
+            active_skills=[skill],
+            mcp_conn=None,
+            originating_operator=None,
         )
         assert outcome is not None
     assert outcome.activated_skill is None
@@ -409,10 +532,16 @@ async def test_a_non_control_tool_is_not_handled_here(app_session: Any) -> None:
     async with app_session(tenant) as db:
         agent, task = await _dept_agent_task(db, tenant)
         outcome = await execute_control_tool(
-            db, tenant_id=tenant, agent=agent, task=task,
+            db,
+            tenant_id=tenant,
+            agent=agent,
+            task=task,
             tc=ToolCall(id="c1", name="create_record", arguments={}),
-            decision=Decision(Effect.ALLOW), assigned_skills=[], active_skills=[],
-            mcp_conn=None, originating_operator=None,
+            decision=Decision(Effect.ALLOW),
+            assigned_skills=[],
+            active_skills=[],
+            mcp_conn=None,
+            originating_operator=None,
         )
     assert outcome is None
 
@@ -442,9 +571,12 @@ async def test_in_process_skill_instruction_lands_after_the_tool_result(
     from oc8.skills.schema import parse_definition
 
     DEF = {
-        "oc8_skill": 1, "id": "sk-x", "version": "1.0.0",
+        "oc8_skill": 1,
+        "id": "sk-x",
+        "version": "1.0.0",
         "instruction": "FOLGE DIESEM VERFAHREN.",
-        "requires": {"tools": [], "kbs": []}, "guardrails": [],
+        "requires": {"tools": [], "kbs": []},
+        "guardrails": [],
     }
 
     seen: list[list[str]] = []
@@ -458,12 +590,20 @@ async def test_in_process_skill_instruction_lands_after_the_tool_result(
             seen.append([msg.role for msg in req.messages])
             if self.calls == 1:
                 return CompletionResult(
-                    text="", tool_calls=[ToolCall(id="c1", name="skill_sk_x", arguments={})],
-                    usage=Usage(1, 1), stop_reason="tool_use", provider="ollama", model="m",
+                    text="",
+                    tool_calls=[ToolCall(id="c1", name="skill_sk_x", arguments={})],
+                    usage=Usage(1, 1),
+                    stop_reason="tool_use",
+                    provider="ollama",
+                    model="m",
                 )
             return CompletionResult(
-                text="fertig", tool_calls=[], usage=Usage(1, 1),
-                stop_reason="stop", provider="ollama", model="m",
+                text="fertig",
+                tool_calls=[],
+                usage=Usage(1, 1),
+                stop_reason="stop",
+                provider="ollama",
+                model="m",
             )
 
         async def stream(self, req: Any) -> Any:
@@ -477,22 +617,32 @@ async def test_in_process_skill_instruction_lands_after_the_tool_result(
         db.add(dept)
         await db.flush()
         agent = m.Agent(
-            tenant_id=tenant, department_id=dept.id, name="Nora", status="running",
-            narrowing={}, definition={}, presentation={},
+            tenant_id=tenant,
+            department_id=dept.id,
+            name="Nora",
+            status="running",
+            narrowing={},
+            definition={},
+            presentation={},
         )
         skill = m.Skill(tenant_id=tenant, name="X", description="d", author="t")
         db.add_all([agent, skill])
         await db.flush()
         version = m.SkillVersion(
-            tenant_id=tenant, skill_id=skill.id, semver="1.0.0",
-            definition=DEF, artifact_hash=b"\x00" * 32,
+            tenant_id=tenant,
+            skill_id=skill.id,
+            semver="1.0.0",
+            definition=DEF,
+            artifact_hash=b"\x00" * 32,
         )
         db.add(version)
         await db.flush()
         skill.current_version_id = version.id
-        db.add(m.SkillAssignment(
-            tenant_id=tenant, agent_id=agent.id, skill_version_id=version.id, enabled=True
-        ))
+        db.add(
+            m.SkillAssignment(
+                tenant_id=tenant, agent_id=agent.id, skill_version_id=version.id, enabled=True
+            )
+        )
         await db.flush()
         _ = parse_definition(DEF)
         await run_agent(db, agent=agent, task_text="mach ein Angebot", tenant_id=tenant)
@@ -512,13 +662,20 @@ async def test_render_component_is_refused_without_a_grant(app_session: Any) -> 
     async with app_session(tenant) as db:
         agent, task = await _dept_agent_task(db, tenant)
         outcome = await execute_control_tool(
-            db, tenant_id=tenant, agent=agent, task=task,
+            db,
+            tenant_id=tenant,
+            agent=agent,
+            task=task,
             tc=ToolCall(
-                id="c1", name="render_component",
+                id="c1",
+                name="render_component",
                 arguments={"component_key": "record_card", "props": {"title": "x"}},
             ),
-            decision=Decision(Effect.ALLOW), assigned_skills=[], active_skills=[],
-            mcp_conn=None, originating_operator=None,
+            decision=Decision(Effect.ALLOW),
+            assigned_skills=[],
+            active_skills=[],
+            mcp_conn=None,
+            originating_operator=None,
         )
         assert outcome is not None
     assert outcome.output.startswith("ERROR:")
@@ -530,19 +687,30 @@ async def test_render_component_rejects_an_unknown_component_key(app_session: An
     tenant = uuid.uuid4()
     async with app_session(tenant) as db:
         agent, task = await _dept_agent_task(db, tenant)
-        db.add(m.ComponentGrant(
-            tenant_id=tenant, component_key="record_card",
-            grantee_type="agent", grantee_id=agent.id,
-        ))
+        db.add(
+            m.ComponentGrant(
+                tenant_id=tenant,
+                component_key="record_card",
+                grantee_type="agent",
+                grantee_id=agent.id,
+            )
+        )
         await db.flush()
         outcome = await execute_control_tool(
-            db, tenant_id=tenant, agent=agent, task=task,
+            db,
+            tenant_id=tenant,
+            agent=agent,
+            task=task,
             tc=ToolCall(
-                id="c1", name="render_component",
+                id="c1",
+                name="render_component",
                 arguments={"component_key": "nope", "props": {}},
             ),
-            decision=Decision(Effect.ALLOW), assigned_skills=[], active_skills=[],
-            mcp_conn=None, originating_operator=None,
+            decision=Decision(Effect.ALLOW),
+            assigned_skills=[],
+            active_skills=[],
+            mcp_conn=None,
+            originating_operator=None,
         )
         assert outcome is not None
     assert outcome.output == "ERROR: no such component 'nope'"
@@ -553,19 +721,30 @@ async def test_render_component_rejects_invalid_props(app_session: Any) -> None:
     tenant = uuid.uuid4()
     async with app_session(tenant) as db:
         agent, task = await _dept_agent_task(db, tenant)
-        db.add(m.ComponentGrant(
-            tenant_id=tenant, component_key="record_card",
-            grantee_type="agent", grantee_id=agent.id,
-        ))
+        db.add(
+            m.ComponentGrant(
+                tenant_id=tenant,
+                component_key="record_card",
+                grantee_type="agent",
+                grantee_id=agent.id,
+            )
+        )
         await db.flush()
         outcome = await execute_control_tool(
-            db, tenant_id=tenant, agent=agent, task=task,
+            db,
+            tenant_id=tenant,
+            agent=agent,
+            task=task,
             tc=ToolCall(
-                id="c1", name="render_component",
+                id="c1",
+                name="render_component",
                 arguments={"component_key": "record_card", "props": {"no_title": "x"}},
             ),
-            decision=Decision(Effect.ALLOW), assigned_skills=[], active_skills=[],
-            mcp_conn=None, originating_operator=None,
+            decision=Decision(Effect.ALLOW),
+            assigned_skills=[],
+            active_skills=[],
+            mcp_conn=None,
+            originating_operator=None,
         )
         assert outcome is not None
     assert outcome.output.startswith("ERROR: invalid props for 'record_card'")
@@ -576,22 +755,33 @@ async def test_a_granted_agent_can_render_a_record_card(app_session: Any) -> Non
     tenant = uuid.uuid4()
     async with app_session(tenant) as db:
         agent, task = await _dept_agent_task(db, tenant)
-        db.add(m.ComponentGrant(
-            tenant_id=tenant, component_key="record_card",
-            grantee_type="agent", grantee_id=agent.id,
-        ))
+        db.add(
+            m.ComponentGrant(
+                tenant_id=tenant,
+                component_key="record_card",
+                grantee_type="agent",
+                grantee_id=agent.id,
+            )
+        )
         await db.flush()
         outcome = await execute_control_tool(
-            db, tenant_id=tenant, agent=agent, task=task,
+            db,
+            tenant_id=tenant,
+            agent=agent,
+            task=task,
             tc=ToolCall(
-                id="c1", name="render_component",
+                id="c1",
+                name="render_component",
                 arguments={
                     "component_key": "record_card",
                     "props": {"title": "Acme GmbH — 12.400 €"},
                 },
             ),
-            decision=Decision(Effect.ALLOW), assigned_skills=[], active_skills=[],
-            mcp_conn=None, originating_operator=None,
+            decision=Decision(Effect.ALLOW),
+            assigned_skills=[],
+            active_skills=[],
+            mcp_conn=None,
+            originating_operator=None,
         )
         assert outcome is not None
     assert not outcome.output.startswith("ERROR")
@@ -612,19 +802,30 @@ async def test_a_department_wide_grant_covers_every_agent_in_it(app_session: Any
     tenant = uuid.uuid4()
     async with app_session(tenant) as db:
         agent, task = await _dept_agent_task(db, tenant)
-        db.add(m.ComponentGrant(
-            tenant_id=tenant, component_key="record_card",
-            grantee_type="department", grantee_id=agent.department_id,
-        ))
+        db.add(
+            m.ComponentGrant(
+                tenant_id=tenant,
+                component_key="record_card",
+                grantee_type="department",
+                grantee_id=agent.department_id,
+            )
+        )
         await db.flush()
         outcome = await execute_control_tool(
-            db, tenant_id=tenant, agent=agent, task=task,
+            db,
+            tenant_id=tenant,
+            agent=agent,
+            task=task,
             tc=ToolCall(
-                id="c1", name="render_component",
+                id="c1",
+                name="render_component",
                 arguments={"component_key": "record_card", "props": {"title": "x"}},
             ),
-            decision=Decision(Effect.ALLOW), assigned_skills=[], active_skills=[],
-            mcp_conn=None, originating_operator=None,
+            decision=Decision(Effect.ALLOW),
+            assigned_skills=[],
+            active_skills=[],
+            mcp_conn=None,
+            originating_operator=None,
         )
         assert outcome is not None
     assert not outcome.output.startswith("ERROR")
@@ -658,15 +859,26 @@ async def test_run_agent_publishes_a_rendered_component(
             self.calls += 1
             if self.calls == 1:
                 return CompletionResult(
-                    text="", tool_calls=[ToolCall(
-                        id="c1", name="render_component",
-                        arguments={"component_key": "record_card", "props": {"title": "x"}},
-                    )],
-                    usage=Usage(1, 1), stop_reason="tool_use", provider="ollama", model="m",
+                    text="",
+                    tool_calls=[
+                        ToolCall(
+                            id="c1",
+                            name="render_component",
+                            arguments={"component_key": "record_card", "props": {"title": "x"}},
+                        )
+                    ],
+                    usage=Usage(1, 1),
+                    stop_reason="tool_use",
+                    provider="ollama",
+                    model="m",
                 )
             return CompletionResult(
-                text="fertig", tool_calls=[], usage=Usage(1, 1),
-                stop_reason="stop", provider="ollama", model="m",
+                text="fertig",
+                tool_calls=[],
+                usage=Usage(1, 1),
+                stop_reason="stop",
+                provider="ollama",
+                model="m",
             )
 
         async def stream(self, req: Any) -> Any:
@@ -677,10 +889,14 @@ async def test_run_agent_publishes_a_rendered_component(
     tenant = uuid.uuid4()
     async with app_session(tenant) as db:
         agent, _task = await _dept_agent_task(db, tenant)
-        db.add(m.ComponentGrant(
-            tenant_id=tenant, component_key="record_card",
-            grantee_type="agent", grantee_id=agent.id,
-        ))
+        db.add(
+            m.ComponentGrant(
+                tenant_id=tenant,
+                component_key="record_card",
+                grantee_type="agent",
+                grantee_id=agent.id,
+            )
+        )
         run = m.AgentRun(tenant_id=tenant, agent_id=agent.id, state="running", context={})
         db.add(run)
         await db.flush()
@@ -694,11 +910,98 @@ async def test_run_agent_publishes_a_rendered_component(
             "run_id": str(run.id),
             "component_key": "record_card",
             "props": {
-                "title": "x", "subtitle": None, "fields": [],
-                "link_label": None, "link_url": None,
+                "title": "x",
+                "subtitle": None,
+                "fields": [],
+                "link_label": None,
+                "link_url": None,
             },
         },
     ) in published
+
+
+@pytest.mark.asyncio
+async def test_run_agent_returns_rendered_components_durably(
+    app_session: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The WS event above is live-only -- an unattended run (chat/cron) has
+    no viewer to catch it. RunResult.rendered_components is the durable copy
+    GET /runs/{id} actually reads back (see runtime/executor.py's
+    merge_context call and api/v1/run.py's _to_dto)."""
+    from oc8.agent.engine import run_agent
+    from oc8.modelrouter import CompletionResult, ToolCall, Usage, chunk_from_result
+
+    class _NoopBus:
+        async def publish_event(self, *a: Any, **kw: Any) -> None:
+            return None
+
+    monkeypatch.setattr("oc8.realtime.bus.get_event_bus", lambda: _NoopBus())
+
+    class _RendersThenStops:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def complete(self, req: Any) -> CompletionResult:
+            self.calls += 1
+            if self.calls == 1:
+                return CompletionResult(
+                    text="",
+                    tool_calls=[
+                        ToolCall(
+                            id="c1",
+                            name="render_component",
+                            arguments={"component_key": "record_card", "props": {"title": "x"}},
+                        )
+                    ],
+                    usage=Usage(1, 1),
+                    stop_reason="tool_use",
+                    provider="ollama",
+                    model="m",
+                )
+            return CompletionResult(
+                text="fertig",
+                tool_calls=[],
+                usage=Usage(1, 1),
+                stop_reason="stop",
+                provider="ollama",
+                model="m",
+            )
+
+        async def stream(self, req: Any) -> Any:
+            yield chunk_from_result(await self.complete(req))
+
+    monkeypatch.setattr("oc8.agent.engine.get_model_router", lambda: _RendersThenStops())
+
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        agent, _task = await _dept_agent_task(db, tenant)
+        db.add(
+            m.ComponentGrant(
+                tenant_id=tenant,
+                component_key="record_card",
+                grantee_type="agent",
+                grantee_id=agent.id,
+            )
+        )
+        run = m.AgentRun(tenant_id=tenant, agent_id=agent.id, state="running", context={})
+        db.add(run)
+        await db.flush()
+        result = await run_agent(
+            db, agent=agent, task_text="mach ein Angebot", tenant_id=tenant, run_id=run.id
+        )
+
+    assert result.rendered_components == [
+        {
+            "component_key": "record_card",
+            "props": {
+                "title": "x",
+                "subtitle": None,
+                "fields": [],
+                "link_label": None,
+                "link_url": None,
+            },
+        },
+    ]
 
 
 @pytest.mark.asyncio
@@ -710,23 +1013,38 @@ async def test_a_direct_and_a_department_grant_can_coexist(app_session: Any) -> 
     tenant = uuid.uuid4()
     async with app_session(tenant) as db:
         agent, task = await _dept_agent_task(db, tenant)
-        db.add(m.ComponentGrant(
-            tenant_id=tenant, component_key="record_card",
-            grantee_type="agent", grantee_id=agent.id,
-        ))
-        db.add(m.ComponentGrant(
-            tenant_id=tenant, component_key="record_card",
-            grantee_type="department", grantee_id=agent.department_id,
-        ))
+        db.add(
+            m.ComponentGrant(
+                tenant_id=tenant,
+                component_key="record_card",
+                grantee_type="agent",
+                grantee_id=agent.id,
+            )
+        )
+        db.add(
+            m.ComponentGrant(
+                tenant_id=tenant,
+                component_key="record_card",
+                grantee_type="department",
+                grantee_id=agent.department_id,
+            )
+        )
         await db.flush()
         outcome = await execute_control_tool(
-            db, tenant_id=tenant, agent=agent, task=task,
+            db,
+            tenant_id=tenant,
+            agent=agent,
+            task=task,
             tc=ToolCall(
-                id="c1", name="render_component",
+                id="c1",
+                name="render_component",
                 arguments={"component_key": "record_card", "props": {"title": "x"}},
             ),
-            decision=Decision(Effect.ALLOW), assigned_skills=[], active_skills=[],
-            mcp_conn=None, originating_operator=None,
+            decision=Decision(Effect.ALLOW),
+            assigned_skills=[],
+            active_skills=[],
+            mcp_conn=None,
+            originating_operator=None,
         )
         assert outcome is not None
     assert not outcome.output.startswith("ERROR")

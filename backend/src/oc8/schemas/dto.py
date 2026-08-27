@@ -689,6 +689,41 @@ class RunDTO(CamelModel):
     tool_calls: list[dict[str, object]] = []
     task_id: str | None = None
     question: str | None = None
+    # Durable copy of every render_component call this run made (agent/engine.py's
+    # RunResult.rendered_components / internal_agent.py's ctx["rendered_components"]).
+    # Unlike the live-only `run.component_rendered` WS event, this survives a page
+    # reload or an unattended run nobody watched live.
+    rendered_components: list[dict[str, object]] = []
+
+
+class ChatSessionDTO(CamelModel):
+    id: str
+    agent_id: str
+    title: str
+    created_at: str
+    last_message_at: str | None = None
+
+
+class ChatMessageDTO(CamelModel):
+    id: str
+    session_id: str
+    role: str
+    content: str
+    run_id: str | None = None
+    rendered_components: list[dict[str, object]] = []
+    created_at: str
+
+
+class ReportDTO(CamelModel):
+    """One finished run that rendered at least one component -- the "My
+    work" Reports list reads this, not `RunDTO` directly, since a report is
+    read across MANY agents/runs at once rather than one run in focus."""
+
+    run_id: str
+    agent_id: str
+    agent_name: str
+    created_at: str
+    rendered_components: list[dict[str, object]] = []
 
 
 class WorkspaceFileDTO(CamelModel):

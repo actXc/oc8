@@ -34,10 +34,48 @@ class RecordCardProps(BaseModel):
     link_url: str | None = Field(default=None, max_length=2048)
 
 
+class DataTableColumn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    key: str = Field(..., max_length=100)
+    label: str = Field(..., max_length=200)
+
+
+class DataTableProps(BaseModel):
+    """Props for the "data_table" layout: a multi-row grid, e.g. a daily
+    report (timesheet summary, ticket backlog). `rows` keys must match a
+    `columns[].key` -- extra/missing keys just render as an empty cell,
+    since this is display data, not something re-parsed downstream."""
+
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(..., max_length=200)
+    columns: list[DataTableColumn] = Field(..., min_length=1, max_length=20)
+    rows: list[dict[str, str]] = Field(default_factory=list, max_length=500)
+    caption: str | None = Field(default=None, max_length=500)
+
+
+class ChartSeries(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(..., max_length=100)
+    values: list[float] = Field(..., max_length=100)
+
+
+class ChartProps(BaseModel):
+    """Props shared by "bar_chart" and "line_chart" -- one category axis
+    (`labels`) and one or more numeric series plotted against it."""
+
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(..., max_length=200)
+    labels: list[str] = Field(..., min_length=1, max_length=100)
+    series: list[ChartSeries] = Field(..., min_length=1, max_length=10)
+
+
 #: The whole catalogue. A component_key not in here does not exist -- the
 #: first of the three governance checks (exists / granted / valid props).
 #: Every entry here is implicitly available to a granted agent; nothing is
 #: staged here that isn't meant to be used yet.
 COMPONENT_CATALOG: dict[str, type[BaseModel]] = {
     "record_card": RecordCardProps,
+    "data_table": DataTableProps,
+    "bar_chart": ChartProps,
+    "line_chart": ChartProps,
 }

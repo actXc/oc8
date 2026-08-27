@@ -26,6 +26,7 @@ import { Route as FlowsRouteImport } from './routes/flows'
 import { Route as DepartmentsRouteImport } from './routes/departments'
 import { Route as CredentialsRouteImport } from './routes/credentials'
 import { Route as CostsRouteImport } from './routes/costs'
+import { Route as ChatRouteImport } from './routes/chat'
 import { Route as CapasRouteImport } from './routes/capas'
 import { Route as AuditRouteImport } from './routes/audit'
 import { Route as AppStoreRouteImport } from './routes/app-store'
@@ -125,6 +126,11 @@ const CostsRoute = CostsRouteImport.update({
   path: '/costs',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ChatRoute = ChatRouteImport.update({
+  id: '/chat',
+  path: '/chat',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CapasRoute = CapasRouteImport.update({
   id: '/capas',
   path: '/capas',
@@ -199,6 +205,7 @@ export interface FileRoutesByFullPath {
   '/app-store': typeof AppStoreRoute
   '/audit': typeof AuditRoute
   '/capas': typeof CapasRoute
+  '/chat': typeof ChatRoute
   '/costs': typeof CostsRoute
   '/credentials': typeof CredentialsRoute
   '/departments': typeof DepartmentsRouteWithChildren
@@ -230,6 +237,7 @@ export interface FileRoutesByTo {
   '/app-store': typeof AppStoreRoute
   '/audit': typeof AuditRoute
   '/capas': typeof CapasRoute
+  '/chat': typeof ChatRoute
   '/costs': typeof CostsRoute
   '/credentials': typeof CredentialsRoute
   '/flows': typeof FlowsRoute
@@ -261,6 +269,7 @@ export interface FileRoutesById {
   '/app-store': typeof AppStoreRoute
   '/audit': typeof AuditRoute
   '/capas': typeof CapasRoute
+  '/chat': typeof ChatRoute
   '/costs': typeof CostsRoute
   '/credentials': typeof CredentialsRoute
   '/departments': typeof DepartmentsRouteWithChildren
@@ -295,6 +304,7 @@ export interface FileRouteTypes {
     | '/app-store'
     | '/audit'
     | '/capas'
+    | '/chat'
     | '/costs'
     | '/credentials'
     | '/departments'
@@ -326,6 +336,7 @@ export interface FileRouteTypes {
     | '/app-store'
     | '/audit'
     | '/capas'
+    | '/chat'
     | '/costs'
     | '/credentials'
     | '/flows'
@@ -356,6 +367,7 @@ export interface FileRouteTypes {
     | '/app-store'
     | '/audit'
     | '/capas'
+    | '/chat'
     | '/costs'
     | '/credentials'
     | '/departments'
@@ -389,6 +401,7 @@ export interface RootRouteChildren {
   AppStoreRoute: typeof AppStoreRoute
   AuditRoute: typeof AuditRoute
   CapasRoute: typeof CapasRoute
+  ChatRoute: typeof ChatRoute
   CostsRoute: typeof CostsRoute
   CredentialsRoute: typeof CredentialsRoute
   DepartmentsRoute: typeof DepartmentsRouteWithChildren
@@ -528,6 +541,13 @@ declare module '@tanstack/react-router' {
       path: '/costs'
       fullPath: '/costs'
       preLoaderRoute: typeof CostsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/chat': {
+      id: '/chat'
+      path: '/chat'
+      fullPath: '/chat'
+      preLoaderRoute: typeof ChatRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/capas': {
@@ -671,6 +691,7 @@ const rootRouteChildren: RootRouteChildren = {
   AppStoreRoute: AppStoreRoute,
   AuditRoute: AuditRoute,
   CapasRoute: CapasRoute,
+  ChatRoute: ChatRoute,
   CostsRoute: CostsRoute,
   CredentialsRoute: CredentialsRoute,
   DepartmentsRoute: DepartmentsRouteWithChildren,

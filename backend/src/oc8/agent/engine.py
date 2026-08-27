@@ -126,6 +126,9 @@ class RunResult:
     # it holds a transaction whose tenant binding is transaction-local, and the
     # worker could read a run whose row isn't durably visible yet.
     pending_runs: list[uuid.UUID] = field(default_factory=list)
+    # Every render_component call this run made, in call order -- see the
+    # accumulator's own comment in run_agent for why this must be durable.
+    rendered_components: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _call_sig(tc: ToolCall) -> str:
@@ -480,6 +483,11 @@ async def run_agent(
         # Sub-runs created by delegate_task. run_agent must not publish them (see
         # _delegate); every return below hands them to execute_run instead.
         pending_runs: list[uuid.UUID] = []
+        # Every render_component call this run makes, in order -- durable (see
+        # RunResult.rendered_components), unlike the WS-only publish alongside
+        # it: an unattended run (chat/cron) has no live viewer to catch that
+        # event, so this is the only copy that survives past the moment it fired.
+        rendered_components: list[dict[str, Any]] = []
         session_state = {"started": False}
 
         def _hook_ctx(**extra: Any) -> dict[str, Any]:
@@ -568,6 +576,7 @@ async def run_agent(
                         tool_trace,
                         steps,
                         pending_runs,
+                        rendered_components,
                     )
                 # Operator chat (§ live steering): drain any messages an operator
                 # sent to this running agent and inject them as user turns, so the
@@ -754,6 +763,7 @@ async def run_agent(
                             tool_trace,
                             steps,
                             pending_runs,
+                            rendered_components,
                         )
                     task.state = "done"
                     await record_activity(
@@ -778,7 +788,14 @@ async def run_agent(
                     )
                     await dispatch_claude_event(tenant_id, "Stop", _hook_ctx())
                     return RunResult(
-                        task.id, agent.id, "done", result.text, tool_trace, steps, pending_runs
+                        task.id,
+                        agent.id,
+                        "done",
+                        result.text,
+                        tool_trace,
+                        steps,
+                        pending_runs,
+                        rendered_components,
                     )
 
                 messages.append(
@@ -975,6 +992,7 @@ async def run_agent(
                                 tool_trace,
                                 steps,
                                 pending_runs,
+                                rendered_components,
                             )
 
                         control = await execute_control_tool(
@@ -1007,6 +1025,7 @@ async def run_agent(
                             if control.rendered_component is not None and run_id is not None:
                                 from oc8.realtime.bus import get_event_bus
 
+                                rendered_components.append(control.rendered_component)
                                 await get_event_bus().publish_event(
                                     tenant_id,
                                     "run.component_rendered",
@@ -1023,6 +1042,7 @@ async def run_agent(
                                     tool_trace,
                                     steps,
                                     pending_runs,
+                                    rendered_components,
                                 )
                         elif decision.effect is Effect.DENY or server is None:
                             output = f"ERROR: {decision.reason or 'no tool server available'}"
@@ -1074,9 +1094,7 @@ async def run_agent(
                         )
                         checkpoint_trace_delta.append(tool_trace[-1])
                         post_event = (
-                            "PostToolUseFailure"
-                            if output.startswith("ERROR:")
-                            else "PostToolUse"
+                            "PostToolUseFailure" if output.startswith("ERROR:") else "PostToolUse"
                         )
                         await dispatch_claude_event(
                             tenant_id,
@@ -1124,7 +1142,14 @@ async def run_agent(
             )
             await dispatch_claude_event(tenant_id, "Stop", _hook_ctx())
             return RunResult(
-                task.id, agent.id, "done", "Reached step limit.", tool_trace, steps, pending_runs
+                task.id,
+                agent.id,
+                "done",
+                "Reached step limit.",
+                tool_trace,
+                steps,
+                pending_runs,
+                rendered_components,
             )
 
         async def _run_with_session_end() -> RunResult:

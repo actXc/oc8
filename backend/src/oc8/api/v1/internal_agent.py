@@ -389,11 +389,7 @@ async def step(
 
         result = await _complete(resolved_params, request_id)
         await _record(result, request_id)
-        if (
-            result.stop_reason == "length"
-            and not result.tool_calls
-            and not result.text.strip()
-        ):
+        if result.stop_reason == "length" and not result.tool_calls and not result.text.strip():
             # See engine.py's identical check: a reasoning-capable model can
             # spend its whole completion budget on hidden reasoning and hit
             # max_tokens before writing anything visible. One retry with
@@ -609,6 +605,13 @@ async def tool(
             # next /step). The skill's procedure travels in the tool result itself,
             # so no extra message is injected -- see execute_control_tool.
         if control.rendered_component is not None:
+            # Durable copy first -- an unattended run (chat/cron) has no live
+            # viewer to catch the WS-only event below, so this is the only
+            # copy that survives past the moment it fired (see GET /runs/{id}).
+            ctx["rendered_components"] = [
+                *ctx.get("rendered_components", []),
+                control.rendered_component,
+            ]
             # Unlike pending_run above, this event carries its whole payload
             # inline (run_id + props) -- no consumer needs to look up a row
             # that isn't committed yet, so publishing before the request's

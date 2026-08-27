@@ -1,4 +1,6 @@
 import type { ReactElement } from "react";
+import { DataTable } from "@/components/run-data-table";
+import { BarChart, LineChart } from "@/components/run-chart";
 
 interface RecordCardField {
   label: string;
@@ -13,7 +15,9 @@ function asFields(v: unknown): RecordCardField[] {
   if (!Array.isArray(v)) return [];
   return v.filter(
     (f): f is RecordCardField =>
-      typeof f === "object" && f !== null && typeof (f as RecordCardField).label === "string" &&
+      typeof f === "object" &&
+      f !== null &&
+      typeof (f as RecordCardField).label === "string" &&
       typeof (f as RecordCardField).value === "string",
   );
 }
@@ -76,4 +80,7 @@ export const RUN_COMPONENT_REGISTRY: Record<
   (props: { props: Record<string, unknown> }) => ReactElement
 > = {
   record_card: RecordCard,
+  data_table: DataTable,
+  bar_chart: BarChart,
+  line_chart: LineChart,
 };

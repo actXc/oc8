@@ -15,6 +15,7 @@ import {
   KeyRound,
   LayoutGrid,
   LogOut,
+  MessageSquare,
   Moon,
   Puzzle,
   Settings,
@@ -402,6 +403,9 @@ export function AppShell() {
       needs: "department:view",
     },
     { to: "/agents", label: t("Agents", "Agenten"), icon: Users, needs: "agent:view" },
+    // Direct 1:1 chat with any agent the reader can already see -- gated on
+    // the same `agent:view` the picker itself reads from, not a new right.
+    { to: "/chat", label: t("Chat", "Chat"), icon: MessageSquare, needs: "agent:view" },
     { to: "/skills", label: t("Skills", "Skills"), icon: Sparkles, needs: "skill:view" },
     { to: "/handoffs", label: t("Handoffs", "Übergaben"), icon: Handshake, needs: "handoff:view" },
     { to: "/flows", label: t("Flows", "Abläufe"), icon: GitBranch, needs: "flow:view" },

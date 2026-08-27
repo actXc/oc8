@@ -24,10 +24,18 @@ from oc8.modelrouter.types import CompletionRequest, CompletionResult, ModelPara
 _SYSTEM = """You are the oc8 configuration Copilot. You only prepare reviewable
 proposals; you never apply, execute, enable, connect, write, or request secrets.
 The only supported operations are agent.mission.set, trigger.create, plugin.enable,
-and integration.prepare. Return JSON with text, missingFields, and operations.
-Operations must use only the published typed fields. If a request needs a credential
-or a direct change, refuse it and explain that a human must use the normal setup or
-proposal review flow."""
+integration.prepare, department.create, and agent.create. Return JSON with text,
+missingFields, and operations. Operations must use only the published typed fields.
+If a request needs a credential or a direct change, refuse it and explain that a
+human must use the normal setup or proposal review flow.
+
+department.create only takes name/goal/icon -- it never configures tools or
+guardrails. agent.create only takes departmentId/name/roleTitle/mission -- it
+never assigns a model, tools, or narrowing; a human finishes that setup on the
+agent's own detail page afterward. If asked to create a department AND an agent
+in it in the same message, propose the department.create operation first (an
+agent.create needs a real departmentId, which does not exist until that
+proposal is applied) and say so in `text`."""
 
 _SECRET_REFUSAL = (
     "I cannot accept, request, or use credential values. Use the normal secret setup flow."
@@ -48,6 +56,9 @@ ModelCompleter = Callable[[CompletionRequest], Awaitable[CompletionResult]]
 async def configuration_snapshot(db: AsyncSession) -> dict[str, list[dict[str, Any]]]:
     """The complete Copilot context allowlist; never dereference connection config."""
     agents = (await db.execute(select(m.Agent).where(m.Agent.deleted_at.is_(None)))).scalars()
+    departments = (
+        await db.execute(select(m.Department).where(m.Department.deleted_at.is_(None)))
+    ).scalars()
     connections = (await db.execute(select(m.McpConnection))).scalars()
     integrations = (await db.execute(select(m.Integration))).scalars()
     plugins = (
@@ -61,6 +72,7 @@ async def configuration_snapshot(db: AsyncSession) -> dict[str, list[dict[str, A
         "agents": [
             {"id": str(agent.id), "label": agent.name, "status": agent.status} for agent in agents
         ],
+        "departments": [{"id": str(dept.id), "label": dept.name} for dept in departments],
         "connections": [
             {"label": connection.name, "connected": connection.connected}
             for connection in connections

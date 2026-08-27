@@ -74,6 +74,7 @@ import {
 } from "@/lib/mock-data";
 import { type Skill } from "@/lib/skills";
 import { AgentRuntimePanel } from "@/components/agent-runtime-panel";
+import { ChatWindow } from "@/components/chat-window";
 import { AgentInstructionsPanel } from "@/components/agent-instructions-panel";
 import { KnowledgeAssignment } from "@/components/knowledge-assignment";
 import { RUN_COMPONENT_REGISTRY } from "@/components/run-record-card";
@@ -408,17 +409,7 @@ function AgentDetail() {
         <LiveLog agentId={agent.id} runId={runId ?? agent.currentRunId ?? null} />
       )}
 
-      {tab === "chat" && (
-        <Panel className="p-10 text-center">
-          <MessageSquare className="mx-auto mb-3 h-6 w-6 text-muted-foreground/60" />
-          <p className="text-sm text-muted-foreground">
-            {t(
-              "Direct chat with this agent is not available yet.",
-              "Direkter Chat mit diesem Agenten ist noch nicht verfügbar.",
-            )}
-          </p>
-        </Panel>
-      )}
+      {tab === "chat" && <ChatWindow agentId={agent.id} agentName={agent.name} />}
 
       {tab === "files" && <WorkspaceFilesPanel agentId={agent.id} />}
 

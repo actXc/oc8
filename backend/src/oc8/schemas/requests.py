@@ -10,6 +10,14 @@ from pydantic import AwareDatetime, ConfigDict, Field
 from oc8.schemas.base import CamelModel
 
 
+class CreateChatSessionRequest(CamelModel):
+    agent_id: uuid.UUID
+
+
+class SendChatMessageRequest(CamelModel):
+    message: str = Field(min_length=1, max_length=20_000)
+
+
 class CreateAgentRequest(CamelModel):
     name: str
     department_id: uuid.UUID

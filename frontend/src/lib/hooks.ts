@@ -1097,6 +1097,24 @@ export function useRun(runId: string | null) {
   });
 }
 
+export interface ReportDTO {
+  runId: string;
+  agentId: string;
+  agentName: string;
+  createdAt: string;
+  renderedComponents: RunComponentDTO[];
+}
+
+// Finished runs that rendered at least one component (chart/table/record
+// card) -- the "My work" Reports section. Scoped server-side to the
+// caller's visible agents, same as /agents itself.
+export function useReports(agentId?: string) {
+  return useQuery({
+    queryKey: ["reports", agentId ?? "all"],
+    queryFn: () => api.get<ReportDTO[]>(`/reports${agentId ? `?agentId=${agentId}` : ""}`),
+  });
+}
+
 // Answer a run suspended in `waiting_for_input`. Operator/admin-gated on the
 // backend; on success the run re-enqueues (state flips to `queued`), so the
 // invalidation here re-fetches the run and the caller's waiting-for-input UI

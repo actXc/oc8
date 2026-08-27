@@ -15,6 +15,7 @@ from oc8.api.v1 import (
     capas,
     catalog,
     channels,
+    chat,
     clarifications,
     contracts,
     copilot,
@@ -34,6 +35,7 @@ from oc8.api.v1 import (
     oauth,
     onboarding,
     reconciliation,
+    reports,
     roles,
     run,
     runtimes,
@@ -56,6 +58,7 @@ api_router.include_router(catalog.router, tags=["catalog"])
 api_router.include_router(model_prices.router, tags=["catalog"])
 api_router.include_router(reconciliation.router, tags=["catalog"])
 api_router.include_router(channels.router, tags=["channels"])
+api_router.include_router(chat.router, tags=["chat"])
 api_router.include_router(skills_write.router, tags=["skills"])
 api_router.include_router(budgets.router, tags=["budgets"])
 api_router.include_router(knowledge.router, tags=["knowledge"])
@@ -70,6 +73,7 @@ api_router.include_router(oauth.router, tags=["oauth"])
 api_router.include_router(capas.router, tags=["capas"])
 api_router.include_router(roles.router, tags=["roles"])
 api_router.include_router(run.router, tags=["run"])
+api_router.include_router(reports.router, tags=["reports"])
 api_router.include_router(runtimes.router, tags=["runtimes"])
 # internal_agent is deliberately NOT included here: the operator API refuses
 # agent tokens as a whole (see main.py), and this is the one path under

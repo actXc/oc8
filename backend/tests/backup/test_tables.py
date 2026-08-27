@@ -22,9 +22,10 @@ def test_exported_tables_excludes_the_denylist() -> None:
     exported = exported_tables()
     assert exported.isdisjoint(EXCLUDED_TABLES)
     assert "agent_run" in exported and "run_message" in exported and "task" in exported
-    # 54 TenantMixin tables minus the 6-name denylist (totp_credential added
-    # by the standalone 2FA design's migration 0071).
-    assert len(exported) == 48
+    # 56 TenantMixin tables minus the 6-name denylist (chat_session +
+    # chat_message added by migration 0077 -- chat history is legitimate
+    # company data, portable like any other tenant-scoped table).
+    assert len(exported) == 50
 
 
 def test_table_by_name_returns_a_real_table() -> None:

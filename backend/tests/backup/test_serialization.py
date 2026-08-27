@@ -112,7 +112,7 @@ def test_null_round_trips_as_null_for_every_nullable_column() -> None:
 
 def test_every_exported_table_round_trips_a_fully_populated_row() -> None:
     tables = exported_tables()
-    assert len(tables) == 48  # guards against a silently-shrunk table list
+    assert len(tables) == 50  # guards against a silently-shrunk table list
     for name in sorted(tables):
         table = table_by_name(name)
         row = {col.name: _sample_value(col.type, i) for i, col in enumerate(table.columns)}

@@ -33,6 +33,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { Panel } from "@/components/app-shell";
+import { ReportsSection } from "@/components/reports-section";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -528,6 +529,8 @@ function WorkspacePage() {
           )}
         </Panel>
       </div>
+
+      <ReportsSection />
     </div>
   );
 }

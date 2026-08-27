@@ -43,9 +43,7 @@ async def _cancellation_kind(db: AsyncSession, run_id: uuid.UUID) -> str | None:
     under READ COMMITTED."""
     return (
         await db.execute(
-            select(m.RunCancellation.cancellation_kind).where(
-                m.RunCancellation.run_id == run_id
-            )
+            select(m.RunCancellation.cancellation_kind).where(m.RunCancellation.run_id == run_id)
         )
     ).scalar_one_or_none()
 
@@ -320,9 +318,7 @@ async def _resolve_mcp_connection(
     # connection NAMES (the frame keys tools by name, not id) -- the same shape
     # `PUT /agents/{id}/narrowing` validates against.
     enabled = sorted(
-        key
-        for key, policy in tools.items()
-        if isinstance(policy, dict) and policy.get("enabled")
+        key for key, policy in tools.items() if isinstance(policy, dict) and policy.get("enabled")
     )
 
     #: Which of this agent's enabled tool keys name a Credential-backed login.
@@ -523,9 +519,7 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
                     agent.status = "idle"
                     await publish_agent_status(agent)
                 await repo.transition(run, RunState.INTERRUPTED)
-                logger.info(
-                    "run %s interrupted before start (cancelled while queued)", run_id
-                )
+                logger.info("run %s interrupted before start (cancelled while queued)", run_id)
                 record_run_outcome(RunState.INTERRUPTED.value)
                 return
 
@@ -548,22 +542,24 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
             # reintroduced by the fix for it. The lock is released by the commit
             # that happens before the container runs, so it never spans the run
             # itself; after the transition, RUNNING is its own guard.
-            await db.execute(
-                select(m.Agent.id).where(m.Agent.id == run.agent_id).with_for_update()
-            )
+            await db.execute(select(m.Agent.id).where(m.Agent.id == run.agent_id).with_for_update())
             busy = (
                 await db.execute(
-                    select(m.AgentRun.id).where(
+                    select(m.AgentRun.id)
+                    .where(
                         m.AgentRun.agent_id == run.agent_id,
                         m.AgentRun.id != run.id,
                         m.AgentRun.state == RunState.RUNNING.value,
-                    ).limit(1)
+                    )
+                    .limit(1)
                 )
             ).scalar_one_or_none()
             if busy is not None:
                 logger.info(
                     "run %s deferred: agent %s is already working on run %s",
-                    run_id, run.agent_id, busy,
+                    run_id,
+                    run.agent_id,
+                    busy,
                 )
                 raise RunDeferred(str(run_id))
 
@@ -653,15 +649,19 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
                 # Returns undelivered messages oldest-first and marks them
                 # delivered so each is injected exactly once.
                 rows = (
-                    await db.execute(
-                        select(m.RunMessage)
-                        .where(
-                            m.RunMessage.run_id == run_id,
-                            m.RunMessage.delivered.is_(False),
+                    (
+                        await db.execute(
+                            select(m.RunMessage)
+                            .where(
+                                m.RunMessage.run_id == run_id,
+                                m.RunMessage.delivered.is_(False),
+                            )
+                            .order_by(m.RunMessage.created_at)
                         )
-                        .order_by(m.RunMessage.created_at)
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
                 bodies: list[str] = []
                 for row in rows:
                     bodies.append(row.body)
@@ -732,9 +732,7 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
                     if wake_id is not None:
                         pending_runs.append(wake_id)
                 except Exception:
-                    logger.exception(
-                        "run %s: failed to wake parent after sub-task failure", run_id
-                    )
+                    logger.exception("run %s: failed to wake parent after sub-task failure", run_id)
                 await repo.transition(run, RunState.FAILED)
                 await record_activity(
                     db,
@@ -768,6 +766,7 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
                             "toolCalls": result.tool_calls,
                             "steps": result.steps,
                             "pending_question": result.output,
+                            "rendered_components": result.rendered_components,
                         },
                     )
                     # Mirror the waiting_for_approval path: the run is suspended,
@@ -786,6 +785,7 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
                             "output": result.output,
                             "toolCalls": result.tool_calls,
                             "steps": result.steps,
+                            "rendered_components": result.rendered_components,
                         },
                     )
                     new_state = _STATUS_TO_STATE.get(result.status)
@@ -835,6 +835,14 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
                     await repo.transition(run, new_state)
                     logger.info("run %s finished in state %s", run_id, new_state.value)
                     record_run_outcome(new_state.value)
+                    if run.source == "chat" and new_state in (RunState.DONE, RunState.FAILED):
+                        # A chat turn IS a run (see oc8.chat.service) so it gets the
+                        # exact same guardrail/approval suspend-resume for free; this
+                        # is the one place that turns its outcome back into the
+                        # durable transcript message the Chat UI actually reads.
+                        from oc8.chat.service import record_assistant_reply
+
+                        await record_assistant_reply(db, run=run, output=result.output)
                     if new_state is RunState.WAITING_FOR_APPROVAL:
                         # Close the parking race (see requeue_if_already_decided):
                         # an operator may have decided the held call while this run

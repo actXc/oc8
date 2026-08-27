@@ -188,20 +188,25 @@ SEARCH_MEMORY = NeutralTool(
 RENDER_COMPONENT = NeutralTool(
     name="render_component",
     description=(
-        "Show the human a structured card instead of describing it in prose. "
-        "Use this for one concrete record you already looked up (a deal, a "
+        "Show the human a structured visual instead of describing it in prose. "
+        "'record_card': one concrete record you already looked up (a deal, a "
         "ticket, an order) -- a title, a few key facts as label/value pairs, "
-        "and an optional link back to the source system. Only use data you "
-        "already obtained through a real tool call in this conversation; "
-        "never invent field values. `component_key` must be one you have "
-        "been granted -- if you are unsure, try 'record_card'."
+        "and an optional link back to the source system. 'data_table': a "
+        "multi-row report (e.g. a daily timesheet summary) -- columns + rows. "
+        "'bar_chart'/'line_chart': one or more numeric series plotted against "
+        "labels. Only use data you already obtained through a real tool call "
+        "in this conversation; never invent values. `component_key` must be "
+        "one you have been granted -- if you are unsure, try 'record_card'."
     ),
     parameters={
         "type": "object",
         "properties": {
             "component_key": {
                 "type": "string",
-                "description": "Which card layout to render, e.g. 'record_card'.",
+                "description": (
+                    "Which layout to render: 'record_card', 'data_table', "
+                    "'bar_chart', or 'line_chart'."
+                ),
             },
             "props": {
                 "type": "object",
@@ -383,9 +388,7 @@ async def _model_locality(db: AsyncSession, agent: m.Agent) -> str:
     return str(getattr(config, "locality", "cloud") or "cloud")
 
 
-async def _has_component_grant(
-    db: AsyncSession, *, agent: m.Agent, component_key: str
-) -> bool:
+async def _has_component_grant(db: AsyncSession, *, agent: m.Agent, component_key: str) -> bool:
     """Whether AGENT -- directly, or via its department -- has been granted
     this component. Mirrors oc8.knowledge.retrieval.granted_kb_ids: the same
     department/agent grant shape, keyed on a fixed catalogue string instead
@@ -695,9 +698,7 @@ async def execute_control_tool(
         try:
             props = props_model.model_validate(raw_props)
         except ValidationError as exc:
-            return ControlOutcome(
-                output=f"ERROR: invalid props for '{component_key}': {exc}"
-            )
+            return ControlOutcome(output=f"ERROR: invalid props for '{component_key}': {exc}")
         await append_event(
             db,
             tenant_id=tenant_id,
