@@ -1,0 +1,24 @@
+kind = "preset"
+connection = "primary"
+key = "internal_crm_work_no_outreach"
+label = "Internal CRM work, no outreach"
+label_en = "Internal CRM work, no outreach"
+summary = "Maintains records, properties and associations on its own, but never logs an engagement -- no note, call, email or meeting is ever created or edited on a record."
+summary_en = "Maintains records, properties and associations on its own, but never logs an engagement -- no note, call, email or meeting is ever created or edited on a record."
+recommended = false
+read = true
+write = false
+send = true
+approval_actions = []
+approval_eur = ""
+# `hubspot-create-engagement`/`hubspot-update-engagement` are this
+# connection's outward tools (see `outward_tools` in tool_pack.toml) -- the
+# only ones that can put something in front of a contact or in a shared
+# timeline. Withholding them is the whole preset: an agent may maintain
+# records all day and still be unable to log anything a colleague or a
+# contact would read as communication.
+only = [
+    "hubspot-batch-create-objects", "hubspot-batch-update-objects",
+    "hubspot-create-property", "hubspot-update-property",
+    "hubspot-batch-create-associations",
+]

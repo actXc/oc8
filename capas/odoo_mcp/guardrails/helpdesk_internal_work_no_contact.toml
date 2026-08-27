@@ -1,0 +1,22 @@
+# Curated use-case library entry (design doc §7) -- one of odoo_mcp's 28
+# documented ERP scenarios, written as documentation by example for anyone
+# building an oc8 tool-pack plugin. Every entry is built from the SAME 9
+# generic tools (tool_pack.toml's connection scopes); none of them can restrict
+# a call to one Odoo model, so entries differ in prose and in the specific
+# approval_eur/approval_actions/only chosen, not in a deeper technical
+# restriction. No tool is classified `write`, so every `write` here is false.
+# Each summary says what it grants AND what it deliberately does not cover.
+
+kind = "library"
+key = "helpdesk_internal_work_no_contact"
+label = "Tickets intern bearbeiten, nie an Kundschaft schreiben"
+label_en = "Work tickets internally, never write to the customer"
+summary = "Bearbeitet und weist Tickets selbstständig zu, aber post_message und delete_record stehen nicht zur Verfügung. Deckt nicht ab, ob eine interne Notiz versehentlich kundenrelevante Inhalte enthält -- dieses Werkzeug prüft keine Inhalte. Deckt auch keine Bereichsgrenze ab: dieselbe Regel gilt für jedes Odoo-Modell, das die Verbindung erreicht, nicht nur für Tickets."
+summary_en = "Updates and assigns tickets on its own, but post_message and delete_record are withheld. Does not cover an internal note accidentally containing customer-sensitive content -- this tool inspects no content. Also does not cover a domain boundary: the same rule applies to any Odoo model the connection reaches, not only tickets."
+use_case = "helpdesk"
+read = true
+write = false
+send = true
+approval_eur = ""
+approval_actions = []
+only = ["search_records", "get_record", "list_models", "list_resource_templates", "aggregate_records", "create_record", "update_record"]

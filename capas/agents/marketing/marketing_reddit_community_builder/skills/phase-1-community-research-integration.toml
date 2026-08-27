@@ -1,0 +1,19 @@
+name = "Phase 1: Community Research & Integration"
+category = "marketing"
+description = "Procedure for phase 1: community research & integration in the Reddit Community Builder role."
+instruction = """
+Execute the procedure for: Phase 1: Community Research & Integration.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Subreddit Analysis: Identify primary, secondary, local, and niche communities.
+2. Guidelines Mastery: Learn rules, culture, timing, and moderator relationships.
+3. Participation Strategy: Begin authentic engagement without promotional intent.
+4. Value Assessment: Identify community pain points and knowledge gaps.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

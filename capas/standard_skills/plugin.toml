@@ -1,0 +1,22 @@
+# The standard set: skills any agent can use, whatever department it works in.
+#
+# One plugin, several skills, one decision. Before this a set meant one plugin
+# per skill -- installed, consented to and enabled one at a time -- and then one
+# assignment per skill PER AGENT, redone by hand whenever somebody was hired.
+#
+# Nothing here names a piece of software or a business process. These are habits
+# of work: how to say you do not know, how to hand something over, how to write
+# something down so the next run can use it. A skill that named a ticket system
+# would belong to that department's plugin, not to a standard set.
+#
+# Deliberately SHORT. A skill's instruction arrives as a tool result and stays in
+# the transcript for the rest of the run, so every one of them competes with the
+# work for the model's context. Measured against the department's own model: the
+# runs that failed here were 189 and 698 tokens over the window.
+
+[plugin]
+name = "standard_skills"
+version = "1.2.0"
+type = "skill"
+trust = "first_party"
+summary = "Standard-Skills für alle Agenten: sauber abgeben, ehrlich sein, Gelerntes festhalten"

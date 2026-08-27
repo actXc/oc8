@@ -1,0 +1,17 @@
+kind = "library"
+key = "schema_lock_no_property_changes"
+label = "Schema lock, no property changes"
+label_en = "Schema lock, no property changes"
+summary = "A cross-department safety net rather than a specific scenario: everything except hubspot-create-property and hubspot-update-property stays usable autonomously, with no approval. For an organization that treats the CRM's object schema as owned by RevOps alone -- an agent can fill in and act on existing fields all day, but adding or redefining one is always a human decision, independent of whatever other guardrail also applies."
+summary_en = "A cross-department safety net rather than a specific scenario: everything except hubspot-create-property and hubspot-update-property stays usable autonomously, with no approval. For an organization that treats the CRM's object schema as owned by RevOps alone -- an agent can fill in and act on existing fields all day, but adding or redefining one is always a human decision, independent of whatever other guardrail also applies."
+use_case = "cross-department"
+read = true
+write = false
+send = true
+approval_eur = ""
+approval_actions = []
+only = [
+    "hubspot-batch-create-objects", "hubspot-batch-update-objects",
+    "hubspot-batch-create-associations", "hubspot-create-engagement",
+    "hubspot-update-engagement",
+]

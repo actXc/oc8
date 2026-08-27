@@ -1,0 +1,17 @@
+# Skill plugin: turn a customer's fault report into a development ticket.
+#
+# The whole second system lived in the agent's mission -- twelve lines naming a
+# repository, an owner, a dedup rule and a memory write, read on EVERY run and
+# needed on few. Moved here it arrives only when a ticket actually describes a
+# fault, which is also when it is worth the model's attention.
+#
+# `requires_tools` names the connection KEY "gitea", the same neutral seam the
+# department frame uses. The core learns nothing about issues or Git from this.
+
+[plugin]
+name = "product_defect_report_skill"
+version = "1.0.1"
+type = "skill"
+trust = "first_party"
+summary = "Einen echten Produktfehler an die Entwicklung melden und die Nummer zurücktragen"
+

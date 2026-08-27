@@ -1,0 +1,17 @@
+name = "Phase 0 — Pre-Arrival (no screenshot)"
+category = "design"
+description = "Procedure for phase 0 — pre-arrival (no screenshot) in the Persona Walkthrough Specialist role."
+instruction = """
+Execute the procedure for: Phase 0 — Pre-Arrival (no screenshot).
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Set the scene. Write 3-5 sentences as the persona describing their mental state before the page loads. What are they expecting? Hoping for? Worried about? This establishes the emotional baseline..
+2. Then define the relevance contract: based on the Google query and arrival source, what must the page deliver in the first 3 seconds to not lose this person?.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

@@ -1,0 +1,27 @@
+# Operator setup form, interpreted generically by the core. The connection
+# profile (site URL, account email, API token) lives entirely in the shared
+# credentials store -- one credential = one Jira site, reusable across
+# departments/connections.
+title = "Set up Jira"
+description = "Connect a Jira Cloud site so agents can work issues, sprints and projects."
+submit_label = "Save & test"
+
+[[fields]]
+key = "department"
+label = "Department"
+kind = "department"
+required = false
+help = "Agents in this department will use this connection automatically."
+
+# Required: nothing on this form is prefilled from an existing connection,
+# and this one field carries the site URL, account email and API token
+# together -- leaving it blank on a resubmit would silently wipe all three
+# from an already-working connection instead of leaving it unchanged
+# (env_fields/secret_env_fields only replace what THIS submission actually
+# provides).
+[[fields]]
+key = "system"
+label = "Jira system"
+kind = "credential"
+credential_type = "jira_login"
+help = "Site URL, account email, and API token, resolved from the shared credentials store only while the bridge starts."

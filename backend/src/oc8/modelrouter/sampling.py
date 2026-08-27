@@ -1,0 +1,82 @@
+"""Where a run's sampling parameters come from.
+
+Both runtimes used to hardcode ``ModelParams(temperature=0.0, max_tokens=512)``,
+and ``ModelConfig.params`` was read only for ``base_url``. Tuning an agent
+therefore required a code change -- and temperature 0.0 means one task yields
+byte-identical output every time, which reads as "the agent has no ideas" when it
+is really "the agent was told to be deterministic".
+
+Resolution order, narrowest first:
+
+    agent.definition["model_params"]  ->  ModelConfig.params  ->  framework default
+
+Same shape as ``max_steps`` (§8.3), which an agent plugin may already raise per
+agent. Shared by both runtimes on purpose: sampling drifting apart between
+in-process and isolated runs would be invisible and maddening to debug.
+
+Values come from free-form JSONB an operator edits, so nothing here may raise: a
+typo degrades to the default and a wild number is clamped, because a failed run
+is a much worse answer to a misconfiguration than a sane one.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from oc8 import models as m
+from oc8.modelrouter.types import ModelParams
+
+# Slightly above zero: enough variation that an agent doesn't repeat itself word
+# for word, low enough to stay reliable at tool calling.
+DEFAULT_TEMPERATURE = 0.3
+# Room for a multi-line tool call (several order lines plus a note) and a short
+# summary. The old 512 truncated exactly that kind of call.
+DEFAULT_MAX_TOKENS = 1536
+
+# Providers hard-error outside this range, which would surface as a failed run
+# rather than as the configuration mistake it is.
+_MIN_TEMPERATURE = 0.0
+_MAX_TEMPERATURE = 2.0
+
+
+def _temperature(raw: Any) -> float | None:
+    """A usable temperature, or None if this value says nothing."""
+    # bool is an int subclass; True would silently become 1.0.
+    if isinstance(raw, bool) or not isinstance(raw, int | float):
+        return None
+    return max(_MIN_TEMPERATURE, min(_MAX_TEMPERATURE, float(raw)))
+
+
+def _max_tokens(raw: Any) -> int | None:
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        return None
+    return raw if raw > 0 else None
+
+
+def resolve_params(
+    config: m.ModelConfig | None,
+    *,
+    agent: m.Agent | None = None,
+) -> ModelParams:
+    """Sampling parameters for one model call.
+
+    ``agent`` may be None for callers that have no agent (e.g. the coding loop).
+    """
+    temperature = DEFAULT_TEMPERATURE
+    max_tokens = DEFAULT_MAX_TOKENS
+
+    # Widest scope first, so a narrower one simply overwrites it. Each key is
+    # considered independently: setting only temperature on an agent must not
+    # discard the model config's max_tokens.
+    for source in (
+        (config.params or {}) if config is not None else {},
+        ((agent.definition or {}).get("model_params") or {}) if agent is not None else {},
+    ):
+        if not isinstance(source, dict):
+            continue
+        if (t := _temperature(source.get("temperature"))) is not None:
+            temperature = t
+        if (mt := _max_tokens(source.get("max_tokens"))) is not None:
+            max_tokens = mt
+
+    return ModelParams(temperature=temperature, max_tokens=max_tokens)

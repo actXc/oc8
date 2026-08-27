@@ -1,0 +1,974 @@
+"""Response DTOs mirroring the frontend interfaces (src/lib/*.ts)."""
+
+from __future__ import annotations
+
+from typing import Any, Literal
+
+from oc8.schemas.base import CamelModel
+
+
+class AgentDTO(CamelModel):
+    id: str
+    name: str
+    role: str
+    llm: str
+    provider: str
+    status: str  # running | warning | error | paused | waiting_for_task
+    tools: list[str]
+    last_action: str
+    last_run: str
+    tasks_today: int
+    guardrails: list[str]
+    schedule: str
+    avatar_color: str
+    department_id: str | None = None
+    model_config_id: str | None = None
+    is_lead: bool = False
+    deleted_at: str | None = None
+
+
+class DepartmentDTO(CamelModel):
+    id: str
+    name: str
+    icon: str
+    goal: str
+    okr: str
+    kpi_label: str
+    kpi_value: str
+    activity: int
+    accent: str
+    prompt_caching_enabled: bool
+    deleted_at: str | None = None
+
+
+class TaskDTO(CamelModel):
+    id: str
+    department_id: str
+    title: str
+    agent_id: str | None = None
+    column: str  # backlog | in_progress | waiting | done
+    meta: str | None = None
+
+
+class ActivityDTO(CamelModel):
+    id: str
+    agent_id: str | None = None
+    status: str  # success | warning | error | info
+    message: str
+    time: str
+    detail: str | None = None
+    cache_hit: bool = False
+
+
+class BoardDTO(CamelModel):
+    """A page of a department's board, plus what it is NOT showing.
+
+    The totals are not decoration: without them a truncated board looks exactly
+    like a finished one, and the operator has no way to tell that 40 more tasks
+    exist below the fold.
+    """
+
+    tasks: list[TaskDTO] = []
+    totals: dict[str, int] = {}
+
+
+class ApprovalOptionDTO(CamelModel):
+    key: str
+    label: str
+    detail: str = ""
+
+
+class ApprovalDTO(CamelModel):
+    id: str
+    agent_id: str
+    title: str
+    detail: str
+    amount: str | None = None
+    time: str
+    status: str  # pending | approved | rejected | expired
+    #: What kind of decision this is. "decision" ones carry options and are
+    #: answered with one of them; everything else is a plain yes/no on a held
+    #: action.
+    action_type: str = ""
+    #: The alternatives the agent proposed, and the one it would pick. The point
+    #: is that a human can decide here rather than opening the source system.
+    options: list[ApprovalOptionDTO] = []
+    recommendation: str | None = None
+    #: Which option was picked, once decided.
+    decision_option: str | None = None
+    reason: str | None = None
+    # Whether deciding this approval actually resumed the suspended run. False on
+    # a decision that could not be carried out (no run left to resume), so the UI
+    # can say "recorded, but the held action never ran" instead of implying the
+    # agent picked the work back up. Only meaningful on a decision response; a
+    # listed approval reports False.
+    resumed: bool = False
+
+    # ------------------------------------------------------------------ §5, new
+    #
+    # Everything below is additive. Nothing above it changed name or meaning --
+    # `time` in particular is left exactly as it was (it comes from
+    # `payload["time"]`, which only the demo seed writes, so it is `""` on every
+    # real row) because a client reading it must not start seeing a different
+    # string in the same release that gives it `createdAt`.
+
+    #: Whose approval this is. `null` means TENANT-WIDE, which today is only ever
+    #: the tenant-scope budget incident, and only somebody unrestricted is shown
+    #: one at all.
+    department_id: str | None = None
+    #: Resolved for the screen, which shows a department chip when the caller
+    #: covers more than one. Empty when the department row is gone -- a renamed or
+    #: archived department must not delete the approval from the queue.
+    department_name: str = ""
+    agent_name: str = ""
+    task_id: str | None = None
+    task_title: str = ""
+    #: ISO-8601. What "vor 2 Std." on the row is computed from. There was no
+    #: timestamp on this DTO at all, so the inbox could not say how long anything
+    #: had been waiting.
+    created_at: str = ""
+    #: The person who answered it, by name. Empty while pending, and empty for a
+    #: row decided before `decided_by` was ever written (it is declared in
+    #: migration 0001 and was assigned nowhere in `src/` until this slice).
+    decided_by_name: str = ""
+    #: The heart of the detail pane: exactly which call is being held, and with
+    #: which arguments. Both come out of `payload`, which is NEVER serialized
+    #: wholesale -- `_announce` writes `channel_handles` into it, i.e. which
+    #: messenger accounts were told, and that is nobody's business on a screen.
+    tool_name: str | None = None
+    tool_arguments: dict[str, Any] = {}
+
+
+class ClarificationDTO(CamelModel):
+    """A question an agent parked mid-run, waiting for a person.
+
+    The other half of the workspace queue, and the half that had no endpoint and
+    no screen at all: the only way to answer one was `POST /runs/{id}/answer`,
+    gated on `run:control`, which no seat carries.
+    """
+
+    id: str
+    run_id: str
+    agent_id: str
+    agent_name: str
+    #: Resolved through the agent -- `Clarification.agent_id` is NOT NULL and
+    #: `Agent.department_id` is NOT NULL, so this is never null for a row that is
+    #: listed at all.
+    department_id: str
+    department_name: str = ""
+    question: str
+    status: str  # open | answered
+    created_at: str = ""
+
+
+class ClarificationAnswerDTO(CamelModel):
+    """What answering one gives back.
+
+    Deliberately small. The run it re-queued is named so the screen can follow
+    it, but nothing about the run's own state is echoed: it is published onto the
+    run stream after the commit and a worker may already have moved it on, so any
+    state reported here would be a claim this request cannot stand behind.
+    """
+
+    id: str
+    run_id: str
+    status: str
+    answer: str
+
+
+class SeatDTO(CamelModel):
+    """One person standing in one department."""
+
+    department_id: str
+    #: Empty only when the department row is gone. A seat the screen can render
+    #: only as a uuid is a subtitle nobody can read.
+    department_name: str = ""
+    seat_role: str  # dept_viewer | dept_approver
+    #: WRITE authority over Agent, in this department. Independent of
+    #: seat_role. Never a resource:action string -- see
+    #: `OrgMemberDepartment.agent_manage`.
+    agent_manage: bool
+
+
+class MemberDTO(CamelModel):
+    id: str
+    subject: str
+    display_name: str = ""
+    #: Sees and decides in every department, including ones created after the row
+    #: was written. Written at an authenticated moment and revocable; never
+    #: inferred.
+    all_departments: bool = False
+    #: When this tenant first saw the person -- the row is minted on their first
+    #: workspace request. Deliberately NOT called `lastSeenAt`: nothing records a
+    #: last request anywhere, and a "last seen" that never moves is worse than no
+    #: column, because an administrator would use it to decide who to offboard.
+    first_seen_at: str = ""
+    seats: list[SeatDTO] = []
+    #: The role an administrator ASSIGNED this person, and its name. `null` /
+    #: `""` is the token floor -- not "no permissions", and the screen must not
+    #: render it as one.
+    #:
+    #: On the wire because until it was, nothing in the product could answer
+    #: "what does Anna hold": the only view of an assignment was a role's holder
+    #: list, so the question cost one panel expansion per role, and the picker
+    #: offered somebody whose current role it could not show and then replaced it
+    #: silently.
+    role_id: str | None = None
+    role_name: str = ""
+
+
+class MeDTO(CamelModel):
+    """The caller, and where they stand.
+
+    `subject` / `role` / `kind` / `scopes` all keep their names and meanings; what
+    this route used to return was the raw `Principal`, so the ONE rename on the
+    wire is `tenant_id` -> `tenantId`, which every other body in this API already
+    uses and which no in-repo consumer reads (`src/lib/hooks.ts` reads `subject`,
+    `role` and `kind`). It is named in the release note rather than hidden: an
+    out-of-repo client reading `tenant_id` sees it disappear.
+
+    `seats` and `viewsAllDepartments` together are what let the screen tell its
+    two empty states apart. "Nichts wartet auf dich" and "Du bist keiner
+    Abteilung zugeordnet" are the same blank page today, and one of them is the
+    system working while the other is a person locked out of their own job.
+    """
+
+    subject: str
+    tenant_id: str
+    role: str
+    kind: str
+    #: Plugin-token scopes, verbatim from the `Principal` this route used to
+    #: return. Empty for every human. Kept because dropping it was a silent
+    #: subtraction from a response somebody outside this repository may read, and
+    #: an empty list costs nothing.
+    scopes: list[str] = []
+    display_name: str = ""
+    #: `null` only for a principal that cannot stand in a department at all (a
+    #: plugin token). Every operator has one from their first request on, which is
+    #: also what keeps `approval_request.decided_by` from being NULL.
+    member_id: str | None = None
+    views_all_departments: bool = False
+    #: SIGNS OFF everywhere, which is not the same person as `viewsAllDepartments`
+    #: and must not be folded into it. `authz/scope.py` keeps the two apart for
+    #: one holder -- the `auditor`, who is unrestricted through
+    #: `approval:view_any` and holds `approval:decide` nowhere -- and the screen
+    #: could not see the distinction, so it drew Approve and Reject on every row
+    #: for a role the backend 403s on every click.
+    decides_all_departments: bool = False
+    seats: list[SeatDTO] = []
+    #: Drives the frontend's /welcome redirect. None only for a principal
+    #: with no member/scope at all (the existing PermissionError branch in
+    #: `me()`) -- never a human admin, so the redirect check never sees it.
+    onboarding_status: str | None = None
+
+
+class IntegrationDTO(CamelModel):
+    id: str
+    name: str
+    category: str
+    connected: bool
+    used_by: list[str] = []
+    desc: str
+    hue: int
+
+
+class ModelDTO(CamelModel):
+    id: str
+    provider: str
+    name: str
+    status: str  # healthy | degraded | error | unknown
+    cost_tier: str
+    latency: str
+    assigned_to: list[str] = []
+    note: str
+    model: str = ""
+    locality: str = "cloud"
+    display_name: str | None = None
+    context_window: int | None = None
+    used_by_copilot: bool = False
+    credential_id: str | None = None
+    #: Set only when `status` is "error"/"unknown" -- the real reason from
+    #: the last POST /models/{id}/test check (see catalog.py).
+    health_error: str | None = None
+    health_checked_at: str | None = None
+
+
+class ModelDiscoverResponse(CamelModel):
+    models: list[str]
+
+
+class ModelPriceDTO(CamelModel):
+    id: str
+    provider: str
+    model_pattern: str
+    price_in_usd_per_1m: float
+    price_out_usd_per_1m: float
+    effective_from: str
+    active: bool
+
+
+class ReconciliationDTO(CamelModel):
+    provider: str
+    report_date: str
+    oc8_calculated_cost_micros: int
+    provider_reported_cost_micros: int | None
+    fetched_at: str
+
+
+class SkillDTO(CamelModel):
+    id: str
+    name: str
+    description: str
+    category: str
+    origin: str
+    version: str
+    author: str
+    tools: list[str]
+    knowledge: list[str] = []
+    guardrails: list[str]
+    instructions: str
+    used_by_agents: int
+    installs: int | None = None
+    price: str | float | None = None
+    updated_at: str
+    current_version_id: str | None = None
+    deleted_at: str | None = None
+
+
+class DataSourceDTO(CamelModel):
+    id: str
+    kind: str
+    name: str
+    connected: bool
+    last_sync: str | None = None
+    doc_count: int | None = None
+    schedule: str | None = None
+    sensitivity: str | None = None
+    scope: str | None = None
+    connector_type: str
+    #: `ok` | `held`. A hold nothing can see is a hold nobody acts on: core
+    #: refused an attested listing as implausible and is doing nothing about this
+    #: source until a human looks, and the API is the only place an operator
+    #: could learn that. The note says why in words, and names the endpoint that
+    #: clears it -- "held" on its own sends an operator hunting for a bug in the
+    #: sweep.
+    reconcile_state: str | None = None
+    reconcile_note: str | None = None
+    #: `ok` | `failed` | null (never synced yet). Separate from `connected`
+    #: (transport/credentials reachable), which a failed sync does not move.
+    last_sync_status: str | None = None
+    #: Set only while `last_sync_status == "failed"`.
+    last_sync_error: str | None = None
+    deleted_at: str | None = None
+    #: Non-secret connector config only (e.g. `bucket`, `prefix`, and a
+    #: `credential`-typed property's CREDENTIAL ID -- never a resolved
+    #: secret value; a credential-typed key only ever holds an id, per the
+    #: Unified Credentials Framework's own write-only-secrets discipline).
+    #: Lets the edit UI show/change which credential a source uses without
+    #: reopening its full config for editing.
+    config: dict[str, Any] = {}
+
+
+class KnowledgeDocumentDTO(CamelModel):
+    """One document of a knowledge base. A document is a group of chunks sharing
+    a `(dataSourceId, sourceUri)`, not a row, so this has no id of its own --
+    `sourceUri` is what the delete and restore routes take."""
+
+    source_uri: str
+    data_source_id: str | None = None
+    kb_id: str
+    chunks: int
+    created_at: str | None = None
+    deleted_at: str | None = None
+    deleted_reason: str | None = None
+    reduced_at: str | None = None
+
+
+class KbChunkDTO(CamelModel):
+    id: str
+    kb_id: str
+    source_uri: str
+    content: str
+    classification: str
+    chunk_metadata: dict[str, Any]
+    created_at: str
+
+
+class SimilarChunkDTO(CamelModel):
+    id: str
+    kb_id: str
+    source_uri: str
+    content: str
+    classification: str
+    chunk_metadata: dict[str, Any]
+    created_at: str
+    similarity: float
+
+
+class DocumentRemovalDTO(CamelModel):
+    """The receipt for erasing one document.
+
+    `auditSeq` addresses the ledger entry that names the digest of what was
+    destroyed, so "prove it" is a lookup rather than a support ticket, and
+    `sourcesTouched` reports the blast radius of an omitted `dataSourceId`
+    rather than hiding it.
+    """
+
+    source_uri: str
+    sources_touched: int
+    documents: int
+    chunks: int
+    sha256: str | None = None
+    audit_seq: int | None = None
+
+
+class DocumentRestoreDTO(CamelModel):
+    """What came back. No digest and no `auditSeq` of a destruction, because a
+    restorable tombstone is one where nothing was destroyed."""
+
+    source_uri: str
+    chunks: int
+
+
+class SourceRemovalDTO(CamelModel):
+    """The same receipt for a whole source or base. The digest is over the sorted
+    distinct URI list, not over content -- see `tombstone._reduce_scope`."""
+
+    source_id: str
+    documents: int
+    chunks: int
+    sha256: str | None = None
+    audit_seq: int | None = None
+
+
+class BaseRemovalDTO(CamelModel):
+    """A base delete's receipt. Its own type rather than `SourceRemovalDTO` with
+    a kb id in `sourceId`: a field that names the wrong kind of object is how a
+    caller ends up passing it back to the wrong endpoint."""
+
+    kb_id: str
+    documents: int
+    chunks: int
+    sha256: str | None = None
+    audit_seq: int | None = None
+
+
+class SourceUnlinkedFromBaseDTO(CamelModel):
+    """A source-from-base unlink's receipt -- narrower than either removal
+    above: neither the source nor the base was deleted, only their content
+    together in this one pairing."""
+
+    kb_id: str
+    data_source_id: str
+    documents: int
+    chunks: int
+    sha256: str | None = None
+    audit_seq: int | None = None
+
+
+class KnowledgeBaseDTO(CamelModel):
+    id: str
+    name: str
+    description: str
+    source_ids: list[str] = []
+    docs: int
+    chunks: int
+    embedding_model: str
+    sensitivity: str
+    updated: str
+    status: str  # current | updating | error
+    linked_departments: list[str] = []
+    linked_agents: list[str] = []
+    roles: list[str] = []
+    local_only: bool = False
+    deleted_at: str | None = None
+
+
+class GrantDTO(CamelModel):
+    id: str
+    kb_id: str
+    grantee_type: str
+    grantee_id: str
+
+
+class IngestionJobDTO(CamelModel):
+    id: str
+    status: str
+    stats: dict[str, Any] = {}
+
+
+class ToolPolicyDTO(CamelModel):
+    enabled: bool
+    read: bool
+    write: bool
+    send: bool
+    approval_eur: int | None = None
+    connection_id: str | None = None
+
+
+class AgentDetailDTO(AgentDTO):
+    mission: str = ""
+    department_name: str | None = None
+    effective_tools: dict[str, ToolPolicyDTO] = {}
+    department_frame_tools: dict[str, ToolPolicyDTO] = {}
+    runtime_ref: str | None = None
+    #: The run this agent is on right now, whoever started it. Without it the
+    #: detail screen can only show a live log for a run started in that same
+    #: browser tab, so a scheduled run happens invisibly.
+    current_run_id: str | None = None
+
+
+class AgentInstructionRevisionDTO(CamelModel):
+    """One `agent.instructions.updated` audit_event, reshaped for the agent
+    detail page's Instructions tab -- paperclip's `agent_config_revisions`
+    pattern, but read off the existing tamper-evident audit chain instead of
+    a dedicated table (oc8 already has one generic append-only log; adding a
+    second, narrower one would just be two places to keep in sync)."""
+
+    ts: str
+    before: str
+    after: str
+    by: str | None = None
+
+
+class AgentInstructionHistoryDTO(CamelModel):
+    revisions: list[AgentInstructionRevisionDTO] = []
+    #: Total revisions across every page -- lets the Instructions tab number
+    #: versions by true position (vN downwards) without loading all of them.
+    total_count: int = 0
+    #: Cursor for the next older page (an audit_event.seq); null once the
+    #: oldest revision has been returned.
+    next_before_seq: int | None = None
+
+
+class PrincipalUsageDTO(CamelModel):
+    group: str
+    tokens_in: int
+    tokens_out: int
+    provider_cost_micros: int
+    saved_tokens_in: int
+    saved_tokens_out: int
+    saved_cost_micros: int
+
+
+class GuardrailPresetDTO(CamelModel):
+    """A named permission set the connection's plugin ships (§ guardrail
+    presets). Data only, mirroring `oc8.capas.manifest.GuardrailPreset` --
+    the picker offers it as a ceiling, the operator still applies it as an
+    ordinary policy."""
+
+    key: str
+    label: str
+    label_en: str
+    summary: str
+    summary_en: str
+    recommended: bool
+    read: bool
+    write: bool
+    send: bool
+    approval_actions: list[str] = []
+    approval_eur: int | None = None
+    #: The ONLY tool names this preset puts within reach; empty means all of
+    #: them. NOT optional decoration: `autonomous_with_limit` is safe precisely
+    #: because it withholds `delete_record`, whose deletions carry no amount and
+    #: so can never meet its euro threshold. A DTO that dropped this would hand
+    #: the browser a preset that applies as "read+write+send above EUR 1000,
+    #: everything reachable" -- the unattended-deletion configuration, under a
+    #: name promising a limit.
+    only: list[str] = []
+
+
+class GuardrailAdjustableDTO(CamelModel):
+    """One number on a `GuardrailDTO` the wizard lets an operator change
+    before applying it. Mirrors `oc8.capas.guardrails.GuardrailAdjustable`
+    field-for-field -- a read-only projection, not a reuse of the
+    plugin-internal model, so the API contract stays independent of the
+    manifest's on-disk shape."""
+
+    field: str
+    label: str
+    label_en: str
+    unit: str | None = None
+    min: float | int | None = None
+    max: float | int | None = None
+
+
+class GuardrailDTO(CamelModel):
+    """One named, documented ERP scenario from a plugin's `guardrails/*.toml`
+    library entries (design §3-4). Mirrors `oc8.capas.guardrails.Guardrail`
+    field-for-field, same reasoning as `GuardrailAdjustableDTO` above."""
+
+    key: str
+    label: str
+    label_en: str
+    summary: str
+    summary_en: str
+    use_case: str
+    read: bool = False
+    write: bool = False
+    send: bool = False
+    approval_eur: float | None = None
+    approval_actions: list[str] = []
+    #: The ONLY tool names this guardrail puts within reach; empty means all
+    #: of the connection's tools. See `GuardrailPresetDTO.only` for the full
+    #: rationale (a euro threshold cannot gate a deletion).
+    only: list[str] = []
+    adjustable: list[GuardrailAdjustableDTO] = []
+
+
+class McpLoginDTO(CamelModel):
+    """A Credential-backed McpConnection -- name, department_id (always None
+    for this flow), scopes, and connection health, never the credential's own
+    field values (those are visible via GET /credentials, per that
+    framework's own write-only-secrets discipline)."""
+
+    id: str
+    name: str
+    credential_id: str
+    department_id: str | None = None
+    connected: bool
+    scopes: list[str] | dict[str, object]
+    health: dict[str, object] = {}
+
+
+class McpConnectionDTO(CamelModel):
+    id: str
+    name: str
+    transport: str
+    server_url: str
+    command: str = ""
+    args: list[str] = []
+    department_id: str | None = None
+    connected: bool
+    scopes: list[str] = []
+    health: dict[str, object] = {}
+    #: Presets the connection's plugin ships, resolved from its manifest on
+    #: disk -- empty for a connection whose plugin ships none or is no longer
+    #: installed. Carried here so the browser learns them from the response it
+    #: already fetches, not a second round trip.
+    guardrail_presets: list[GuardrailPresetDTO] = []
+    #: The connection's plugin's own `guardrails/*.toml` library (design §3-4),
+    #: resolved from disk exactly as `guardrail_presets` is -- `None` for a
+    #: plugin that ships no such folder (the common case) or is no longer
+    #: installed, never an empty list standing in for "none". Additive to
+    #: `guardrail_presets`, which keeps serialising unchanged as the
+    #: connection's fallback generic presets.
+    guardrail_library: list[GuardrailDTO] | None = None
+    #: Whether the manifest connection declares a `value_spec`. Only then can
+    #: a euro-threshold field in a preset ever affect a decision; the spec
+    #: itself stays server-side.
+    has_value_spec: bool = False
+    #: The plugin this connection was created from (the same `_plugin_name`
+    #: stamp `materialise.py` writes at enable time), or None for a connection
+    #: an operator created by hand via "Add connection" rather than through a
+    #: plugin's setup flow.
+    plugin_name: str | None = None
+    #: Which credential_types/*.toml entry a login for this connection must be
+    #: (`ToolPackConnection.credential_type`, resolved from the manifest on
+    #: disk exactly like `guardrail_presets`) -- lets a "New login" flow pick
+    #: the right credential type automatically instead of asking the operator
+    #: to choose from every registered type, most of which are irrelevant to
+    #: this tool. None for a connection whose plugin doesn't declare one yet
+    #: (predates the Unified Credentials Framework) or is no longer installed.
+    credential_type: str | None = None
+
+
+class RunDTO(CamelModel):
+    id: str
+    agent_id: str
+    state: str
+    phase: str | None = None
+    output: str | None = None
+    steps: int = 0
+    tool_calls: list[dict[str, object]] = []
+    task_id: str | None = None
+    question: str | None = None
+
+
+class WorkspaceFileDTO(CamelModel):
+    name: str
+    path: str  # posix-style, relative to the run's workspace root
+    size: int
+
+
+class WorkspaceFilesDTO(CamelModel):
+    # False for an agent whose runtime never wrote a host workspace directory
+    # (e.g. the in-process "Standard" runtime) -- the frontend shows a
+    # "not applicable" message instead of an empty file list in that case.
+    applicable: bool
+    run_id: str | None = None
+    files: list[WorkspaceFileDTO] = []
+    message: str | None = None
+
+
+class WorkspaceFileContentDTO(CamelModel):
+    path: str
+    content: str
+    truncated: bool = False
+
+
+class BudgetDTO(CamelModel):
+    id: str
+    department_id: str | None
+    soft_limit_tokens: int | None
+    hard_limit_tokens: int | None
+    dollar_budget_usd: float | None = None
+    dollar_reference_provider: str | None = None
+    dollar_reference_model: str | None = None
+
+
+class BudgetStatusDTO(CamelModel):
+    scope: str  # "tenant" | "department"
+    department_id: str | None
+    soft_limit_tokens: int | None
+    hard_limit_tokens: int | None
+    current_tokens: int
+    soft_exceeded: bool
+    hard_exceeded: bool
+
+
+class TriggerDTO(CamelModel):
+    id: str
+    agent_id: str
+    kind: str  # cron | event | webhook
+    task_text: str
+    enabled: bool
+    cron_expression: str | None = None
+    next_run_at: str | None = None
+    last_run_at: str | None = None
+    event_source: str | None = None
+    event_type: str | None = None
+    #: kind='webhook' only -- the full POST /webhooks/{token} URL, built
+    #: server-side from the same base URL external OAuth redirects use
+    #: (oauth_redirect_base_url). Not one-time-reveal: unlike a password, an
+    #: operator needs to come back and re-copy this into the external
+    #: system's config, possibly more than once.
+    webhook_url: str | None = None
+
+
+class AuthConfig(CamelModel):
+    mode: str  # "dev" | "community"
+    auth_server_url: str
+    realm: str
+    client_id: str
+    #: Whether this instance already has an administrator, so the browser can
+    #: show the login form instead of the first-run setup form. Without it the
+    #: login page had to guess, guessed "not initialized" every time, and an
+    #: operator whose session expired was asked to create an account that
+    #: already existed -- discovering the truth only from the 422 that
+    #: followed. Only meaningful for `community`; `false` for `dev`, which
+    #: does not have a setup form at all.
+    initialized: bool = False
+
+
+class SecretDTO(CamelModel):
+    """Secret metadata only — the plaintext value is never serialized or returned."""
+
+    id: str
+    name: str
+    kind: str
+    key_version: str
+    created_at: str
+
+
+class CredentialDTO(CamelModel):
+    """Credential metadata -- never the secret field values. Non-secret
+    field values ARE included (they were never secret in the first place;
+    an S3 credential's region is not sensitive)."""
+
+    id: str
+    name: str
+    credential_type: str
+    field_values: dict[str, Any]
+    last_tested_at: str | None
+    last_test_ok: bool | None
+    created_at: str
+    updated_at: str
+
+
+class CredentialTypeDTO(CamelModel):
+    name: str
+    display_name: str
+    fields: list[dict[str, Any]]
+
+
+class AuditEventDTO(CamelModel):
+    id: str
+    seq: int
+    ts: str
+    actor_type: str
+    actor_id: str | None = None
+    category: str
+    action: str
+    resource: dict[str, Any]
+    decision: str | None = None
+    reason: str | None = None
+    responsible_type: str | None = None
+    responsible_id: str | None = None
+    hash: str
+    prev_hash: str
+
+
+class AuditPageDTO(CamelModel):
+    events: list[AuditEventDTO]
+    next_before_seq: int | None = None
+
+
+class AuditIntegrityDTO(CamelModel):
+    status: str  # ok | broken | unverifiable | never
+    verified_through_seq: int
+    head_hash: str | None = None
+    verified_at: str | None = None
+    broken_at_seq: int | None = None
+    # hash_mismatch | truncation, None unless status is "broken". The two need
+    # different operator advice: a full re-verification is the remedy path for
+    # a hash mismatch after a legitimate restore, but it can never clear a
+    # truncation -- only the missing rows coming back does that.
+    break_kind: str | None = None
+    # Write-once residue: when a break was FIRST observed. Survives a later
+    # successful full verification (which may legitimately set status back to
+    # "ok"), so the operator screen can keep showing that integrity was once
+    # in doubt.
+    first_break_at: str | None = None
+    # COUNT, not a seq. A seq range implies a claim about WHICH entries are
+    # gone -- true for a head/trailing truncation, false for a deletion in the
+    # middle of the chain (broken_at_seq there is just "the last verified
+    # position", not "everything after this is missing"). The count is exact
+    # either way: verified_count minus how many of those rows are still
+    # present. None unless break_kind is "truncation".
+    missing_count: int | None = None
+    event_count: int
+
+
+class OAuthStartDTO(CamelModel):
+    authorization_url: str
+
+
+class OAuthConnectionDTO(CamelModel):
+    """Connection metadata only — token material is never serialized."""
+
+    id: str
+    provider: str
+    account_label: str
+    scopes: list[str]
+    status: str
+    client_source: str
+    expires_at: str | None = None
+    created_at: str
+
+
+class DeviceLoginStartDTO(CamelModel):
+    """What `POST /models/chatgpt-subscription/device/start` hands the
+    frontend to show the user-facing code and start polling (Task 12).
+    `expires_in` is used client-side to compute the `expiresAt` deadline
+    echoed back on every `/device/poll` call -- see `DeviceLoginPollDTO`."""
+
+    device_auth_id: str
+    user_code: str
+    verification_uri: str
+    expires_in: int
+    interval: int
+
+
+class DeviceLoginPollDTO(CamelModel):
+    """One poll attempt's outcome. Stateless on this end -- see
+    `poll_chatgpt_device_login`'s docstring in catalog.py for why the
+    `expired` deadline lives entirely on the request, not here."""
+
+    status: Literal["pending", "complete", "expired", "error"]
+    #: Set only when status == "complete".
+    credential_id: str | None = None
+    #: Set only when status == "error".
+    error: str | None = None
+
+
+class PermissionInfoDTO(CamelModel):
+    """One right, in words the person ticking the box can act on.
+
+    The refused ones are RETURNED with their reason rather than filtered out. A
+    hidden control produces a support ticket asking where the setting went;
+    a disabled one with a sentence beside it answers the question on the screen
+    where it was asked.
+    """
+
+    permission: str
+    label: str
+    description: str = ""
+    label_en: str = ""
+    description_en: str = ""
+    delegatable: bool
+    #: Why a tenant-defined role may not hold it. Empty when it may.
+    reason: str = ""
+
+
+class RoleHolderDTO(CamelModel):
+    """One person holding a role -- the blast radius of an edit, by name."""
+
+    member_id: str
+    subject: str
+    display_name: str = ""
+
+
+class RoleSummaryDTO(CamelModel):
+    """A role on the list screen.
+
+    `id` is null for a built-in role this tenant has no `role` row for. Both
+    spellings exist in the wild -- provisioning writes five rows and Globex has
+    one -- and the built-in ladder is identical either way because it is compiled
+    in, so the list is built from code and the id is carried through only when
+    there happens to be a row to address.
+    """
+
+    id: str | None = None
+    name: str
+    description: str = ""
+    kind: str = "human"
+    builtin: bool = False
+    #: False for every built-in: their grants come from code, so an editor over
+    #: one would save cleanly and change nothing at any gate.
+    can_edit: bool = True
+    #: How many people this edit would change. Shown BEFORE Save.
+    holder_count: int = 0
+    permissions: list[str] = []
+
+
+class RoleDetailDTO(RoleSummaryDTO):
+    """A role and the people holding it, which is what an edit is about.
+
+    `holders` is a PREVIEW and `holder_count` is exact, and the asymmetry is the
+    point: "how many people does this change" is the number an administrator is
+    asked to decide on, and "which of them" is a list somebody reads. This DTO is
+    the response model of `POST /roles`, `PUT /roles/{id}`, `DELETE /roles/{id}`
+    and `PUT /members/{id}/role`, so an unbounded list put four hundred names into
+    the body of every O(1) write on the five-hundred-person tenant, and four
+    hundred chips on the screen. The cap is `api/v1/roles.HOLDER_PREVIEW`; the
+    screen says how many it is showing whenever the two differ.
+    """
+
+    holders: list[RoleHolderDTO] = []
+
+
+class RuntimeOptionDTO(CamelModel):
+    """One entry in the runtime picker `GET /runtimes` returns.
+
+    `id` is null for the built-in default -- there is no plugin row to name --
+    and that entry is ALWAYS present and ALWAYS `available`, so a tenant that
+    has installed no runtime plugin at all still has something to hire an
+    agent onto. A plugin whose implementation cannot be loaded stays in the
+    list with `available=False` rather than being dropped, so an
+    administrator who installed it can see it and learn why it does not work
+    instead of wondering where it went.
+    """
+
+    id: str | None
+    name: str
+    label: str
+    summary: str
+    capabilities: list[str]
+    is_default: bool
+    available: bool
+    unavailable_reason: str | None = None
+
+
+class VapidPublicKeyDTO(CamelModel):
+    public_key: str

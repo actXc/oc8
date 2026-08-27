@@ -1,0 +1,21 @@
+name = "jira_login"
+display_name = "Jira system"
+
+[[fields]]
+key = "url"
+label = "Jira site URL"
+kind = "url"
+placeholder = "https://yourcompany.atlassian.net"
+help = "The base URL of your Jira Cloud site."
+
+[[fields]]
+key = "username"
+label = "Atlassian account email"
+kind = "text"
+help = "The email address of the Atlassian account the API token belongs to."
+
+[[fields]]
+key = "api_token"
+label = "API token"
+kind = "password"
+help = "Created at id.atlassian.com/manage-profile/security/api-tokens."

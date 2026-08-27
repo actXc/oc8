@@ -1,0 +1,9 @@
+[plugin]
+name = "demo_connector"
+version = "1.0.0"
+type = "connector"
+trust = "first_party"
+summary = "Test fixture: contributes a demo connector"
+
+[plugin.entry_points]
+connectors = "demo_connector.connector:register"

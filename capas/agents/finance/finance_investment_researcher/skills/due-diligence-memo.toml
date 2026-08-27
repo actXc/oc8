@@ -1,0 +1,20 @@
+name = "Due diligence memo"
+category = "finance"
+description = "Structured diligence findings for a company, deal, or investment with open questions and risk ranking."
+instruction = """
+Write a due diligence memo for the target named in the task.
+
+1. Scope: what was reviewed vs out of scope.
+2. Findings by area relevant to the task (financial quality, customers, competition, legal/regulatory, team, tech) — only with evidence.
+3. Red flags and concentration risks ranked by severity.
+4. Open questions and requested documents/data room items.
+5. Synergy or integration claims: validate or challenge; never accept management figures uncritically without support.
+6. Recommendation frame for humans: proceed / proceed with conditions / pause / walk — with rationale.
+
+Do not claim site visits, reference calls, or audits that did not happen in this run.
+"""
+guardrails = [
+  "Never fabricate diligence interviews, documents, or confirmations.",
+  "Separate verified findings from management assertions.",
+  "Rank risks; do not bury material red flags in appendices-only language.",
+]

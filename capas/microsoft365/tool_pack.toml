@@ -1,0 +1,62 @@
+# The tool-pack half of the microsoft365 plugin. This file's TOP LEVEL *is* the
+# `tool_pack` table (design §2/§3) -- there is no `[plugin.tool_pack]` wrapper.
+
+[[connections]]
+key = "primary"
+name = "microsoft365"
+transport = "stdio"
+server_url = ""
+
+# read/send classification (design doc §4.3). Nothing here is `write` -- same
+# reasoning odoo_mcp's own manifest states: granting it would confer nothing
+# while reading, on a permissions screen, as though it did.
+[connections.scopes]
+read = [
+    "mail_search", "mail_get", "mail_list_folders",
+    "calendar_list_events", "calendar_get_event", "calendar_check_free_busy",
+    "files_list", "files_get_content", "files_search", "sites_list",
+    "word_get_text", "excel_read_range", "excel_list_worksheets",
+    "teams_list_channels", "teams_list_chats",
+    "contacts_search", "contacts_get", "powerpoint_get_text",
+]
+send = [
+    "mail_send", "mail_reply", "mail_create_draft", "mail_move", "mail_delete", "mail_mark_read",
+    "calendar_create_event", "calendar_update_event", "calendar_cancel_event", "calendar_respond_to_invite",
+    "files_upload", "files_update_content", "files_delete",
+    "word_replace_text", "excel_write_range", "excel_append_row",
+    "powerpoint_replace_file",
+]
+# No Teams send tools: Graph has no application permission for posting a Teams
+# channel or chat message (delegated-only `ChannelMessage.Send`/`Chat.ReadWrite`),
+# so under this plugin's app-only grant they could only 403. See
+# mcp_bridge/tools/teams.py's docstring and design doc §4.2.
+
+# How the bridge is launched. `-m mcp_bridge` needs the plugin's own directory
+# on PYTHONPATH -- /app/capas is this repo's existing Docker mount
+# (docker-compose.yml), the same container-path assumption odoo_mcp's own
+# ODOO_URL already makes for its own environment. The package is `mcp_bridge`
+# and NOT `mcp`, deliberately: with the plugin root on PYTHONPATH a local
+# `mcp/` would shadow the installed MCP SDK the bridge itself imports.
+# GRAPH_ACCESS_TOKEN is resolved fresh per bridge launch by the core
+# (get_access_token, Task 2), never stored in this file.
+[connections.config]
+command = "python"
+args = ["-m", "mcp_bridge"]
+
+# Reaches a human directly (design doc §4.3) -- subject to the core's own
+# "at most one message per record per task" rule, same as odoo_mcp's
+# post_message: this lives inside `config`, not `scopes`, because that is
+# where the core's outward-tools reader (materialise.py, engine.py,
+# internal_agent.py, mcp_gateway.py, outward.py) actually looks for it.
+outward_tools = ["mail_send", "mail_reply"]
+
+[connections.config.env]
+PYTHONPATH = "/app/capas/microsoft365"
+
+# NOT a secret-store name: the `oauth:` prefix tells the core (agent/mcp_env.py)
+# to mint a FRESH Graph access token from this connection's OAuthConnection at
+# every bridge launch. A Graph token lives about an hour, so a stored copy would
+# be expired on nearly every run. Everything after the prefix is for a human
+# reading this file.
+[connections.config.secret_env]
+GRAPH_ACCESS_TOKEN = "oauth:graph_access_token"

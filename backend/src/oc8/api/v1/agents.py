@@ -1,0 +1,213 @@
+"""Agent read endpoints (list + detail with effective permissions).
+
+Both routes are `require_departmental(perm(AGENT, VIEW))` -- READ graduates for
+any live seat, with no toggle (decision 2 of the department-scoped-agent-
+authority design): `agent:view` joined `SEAT_PERMISSIONS`'s view level for both
+seat roles, so the existing, unmodified `require_departmental` gate is enough;
+no new gate shape was needed for the read side. Both bodies go through
+`agents.repo.visible_agent(s)` -- the scoped repository funnel -- rather than a
+raw `select(m.Agent)`, which is what makes `tests/agents/test_reads_go_
+through_the_scoped_repository.py`'s sweep pass for this module: a screen that
+reads an `Agent` outside this file has to walk around the funnel to do it, and
+that sweep is what makes doing so a decision instead of a typo.
+
+`tenant_wide` is resolved via `authz.authority.tenant_wide_read`, not by testing
+`perm(AGENT, VIEW) in authority.tenant_wide` directly: that string is now
+DELEGATABLE (a tenant-defined role may hold it), and a role assignment must
+never widen a caller past `scope.viewable` -- `tenant_wide_read` admits only a
+genuinely tenant-wide grant (the token floor, or an explicitly assigned
+`builtin=True` role), the same "company-wide role, not a composed one" fact
+`actor.scope.is_unrestricted` (`approval:view_any`, a different grant entirely)
+answers for approvals.
+"""
+
+from __future__ import annotations
+
+import uuid
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import func, select
+
+from oc8 import models as m
+from oc8.agents.repo import visible_agent, visible_agents
+from oc8.api.deps import DbSession, require_departmental
+from oc8.api.v1._serializers import agent_to_dto
+from oc8.authz.authority import authority_for_principal, tenant_wide_read
+from oc8.authz.pdp import agent_tool_rights, effective_tool_policies
+from oc8.authz.permissions import AGENT, VIEW, perm
+from oc8.authz.scope import HumanActor
+from oc8.runtime.states import TERMINAL
+from oc8.schemas.dto import (
+    AgentDetailDTO,
+    AgentDTO,
+    AgentInstructionHistoryDTO,
+    AgentInstructionRevisionDTO,
+    ToolPolicyDTO,
+)
+from oc8.schemas.paging import Page
+
+router = APIRouter()
+
+
+@router.get(
+    "/agents",
+    response_model=Page[AgentDTO],
+)
+async def list_agents(
+    request: Request,
+    db: DbSession,
+    actor: Annotated[HumanActor, Depends(require_departmental(perm(AGENT, VIEW)))],
+    # `Query(alias="departmentId")`: every other query/body field on the wire is
+    # camelCase (`CamelModel`'s convention), and a bare `department_id` here
+    # silently accepted nothing, so `?departmentId=` was intersecting against
+    # `None` -- the caller's own scope, unfiltered -- rather than the requested
+    # department. Caught by `tests/api/test_department_reads_department_scoped.py`.
+    department_id: Annotated[uuid.UUID | None, Query(alias="departmentId")] = None,
+    search: str | None = None,
+    status: str | None = None,
+    group_by: Annotated[str | None, Query(alias="groupBy")] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    include_archived: Annotated[bool, Query(alias="includeArchived")] = False,
+) -> Page[AgentDTO]:
+    authority = await authority_for_principal(request, db, actor.principal)
+    tenant_wide = tenant_wide_read(authority, perm(AGENT, VIEW))
+    rows, total = await visible_agents(
+        db,
+        scope=actor.scope,
+        tenant_wide=tenant_wide,
+        department_id=department_id,
+        search=search,
+        status=status,
+        group_by=group_by,
+        limit=limit,
+        offset=offset,
+        include_archived=include_archived,
+    )
+    return Page(items=[agent_to_dto(a) for a in rows], total_count=total)
+
+
+@router.get(
+    "/agents/{agent_id}",
+    response_model=AgentDetailDTO,
+)
+async def get_agent(
+    agent_id: uuid.UUID,
+    request: Request,
+    db: DbSession,
+    actor: Annotated[HumanActor, Depends(require_departmental(perm(AGENT, VIEW)))],
+) -> AgentDetailDTO:
+    authority = await authority_for_principal(request, db, actor.principal)
+    tenant_wide = tenant_wide_read(authority, perm(AGENT, VIEW))
+    agent = await visible_agent(db, scope=actor.scope, tenant_wide=tenant_wide, agent_id=agent_id)
+    if agent is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "agent not found")
+    return await _agent_detail_dto(db, agent)
+
+
+_HISTORY_MAX_LIMIT = 100
+
+
+@router.get(
+    "/agents/{agent_id}/instructions/history",
+    response_model=AgentInstructionHistoryDTO,
+)
+async def get_agent_instruction_history(
+    agent_id: uuid.UUID,
+    request: Request,
+    db: DbSession,
+    actor: Annotated[HumanActor, Depends(require_departmental(perm(AGENT, VIEW)))],
+    before_seq: Annotated[int | None, Query(alias="beforeSeq")] = None,
+    limit: int = 20,
+) -> AgentInstructionHistoryDTO:
+    authority = await authority_for_principal(request, db, actor.principal)
+    tenant_wide = tenant_wide_read(authority, perm(AGENT, VIEW))
+    agent = await visible_agent(db, scope=actor.scope, tenant_wide=tenant_wide, agent_id=agent_id)
+    if agent is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "agent not found")
+    limit = max(1, min(limit, _HISTORY_MAX_LIMIT))
+    where = (
+        m.AuditEvent.action == "agent.instructions.updated",
+        m.AuditEvent.resource["agent_id"].astext == str(agent_id),
+    )
+    # A separate COUNT, not len(rows) -- the panel numbers versions by their
+    # true position (vN downwards) even when only one page is loaded, and
+    # that needs the total regardless of how much of it is on this page.
+    total_count = (
+        await db.execute(select(func.count()).select_from(m.AuditEvent).where(*where))
+    ).scalar_one()
+    stmt = select(m.AuditEvent).where(*where)
+    if before_seq is not None:
+        stmt = stmt.where(m.AuditEvent.seq < before_seq)
+    rows = (
+        (await db.execute(stmt.order_by(m.AuditEvent.seq.desc()).limit(limit + 1))).scalars().all()
+    )
+    page = rows[:limit]
+    next_before_seq = page[-1].seq if len(rows) > limit and page else None
+    return AgentInstructionHistoryDTO(
+        revisions=[
+            AgentInstructionRevisionDTO(
+                ts=ev.ts.isoformat(),
+                before=str(ev.resource.get("before", "")),
+                after=str(ev.resource.get("after", "")),
+                by=ev.resource.get("by"),
+            )
+            for ev in page
+        ],
+        total_count=total_count,
+        next_before_seq=next_before_seq,
+    )
+
+
+async def _agent_detail_dto(db: DbSession, agent: m.Agent) -> AgentDetailDTO:
+    """The DTO body for an agent already loaded and already authorized.
+
+    Split out of `get_agent` so `agents_write.py`'s four internal re-serializes
+    (after a write this same request just made) can call this directly instead
+    of re-running the read gate on an agent the write gate already authorized --
+    `require_departmental` would need a fresh `HumanActor`/`Request` shape
+    `agents_write.py`'s routes have no reason to carry twice, and the agent is
+    already known-visible: the write that just happened proved it.
+    """
+    dept = await db.get(m.Department, agent.department_id)
+    frame = dept.frame if dept else {}
+    dept_name = dept.name if dept else None
+
+    effective = effective_tool_policies(
+        frame, agent.narrowing, role_rights=await agent_tool_rights(db, agent)
+    )
+    frame_tools = {k: ToolPolicyDTO(**v) for k, v in _frame_tools_json(frame).items()}
+    base = agent_to_dto(agent).model_dump(by_alias=False)
+    # The newest run that has not finished. Newest, because a run abandoned by a
+    # dead worker can sit in `running` indefinitely and the one worth watching is
+    # the latest; queued counts, so a scheduled fire is visible before its
+    # container is even up.
+    current_run = (
+        await db.execute(
+            select(m.AgentRun.id)
+            .where(
+                m.AgentRun.agent_id == agent.id,
+                m.AgentRun.state.notin_([s.value for s in TERMINAL]),
+            )
+            # id breaks the tie: created_at is the TRANSACTION time in
+            # Postgres, so two runs enqueued together share it exactly. The ids
+            # are time-ordered (uuid7), so this stays "newest" either way.
+            .order_by(m.AgentRun.created_at.desc(), m.AgentRun.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return AgentDetailDTO(
+        **base,
+        mission=agent.mission,
+        department_name=dept_name,
+        effective_tools={k: ToolPolicyDTO(**p.to_json()) for k, p in effective.items()},
+        department_frame_tools=frame_tools,
+        runtime_ref=agent.runtime_ref,
+        current_run_id=str(current_run) if current_run else None,
+    )
+
+
+def _frame_tools_json(frame: dict[str, object]) -> dict[str, dict[str, object]]:
+    tools = frame.get("tools", {}) if frame else {}
+    return tools if isinstance(tools, dict) else {}

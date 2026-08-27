@@ -1,0 +1,20 @@
+# Google Drive as a knowledge source.
+#
+# This is a CODE-CARRYING plugin: it ships a Python package that contributes a
+# real Connector. It is therefore only loaded when trust is first_party/verified
+# AND a tenant has installed and enabled it.
+#
+# It needs a Google OAuth connection (provider "google"), which the OAuth
+# framework supplies -- the connector itself never sees a token store, only an
+# AuthContext that hands out a fresh access token.
+
+[plugin]
+name = "gdrive_source"
+version = "1.0.0"
+type = "connector"
+trust = "first_party"
+summary = "Google Drive als Wissensquelle — Dokumente, Tabellen und Textdateien"
+permissions = ["knowledge:write"]
+
+[plugin.entry_points]
+connectors = "connector.connector:register"

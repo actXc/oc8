@@ -1,0 +1,29 @@
+# One origin in front of the whole stack.
+# - Plain http on :80 for IP-only testing.
+# - To get automatic HTTPS, replace `:80` with your domain (e.g. oc8.example.com)
+#   and expose 443 in the compose; Caddy provisions a Let's Encrypt cert.
+:80 {
+	# Backend: the API and the root-level liveness endpoint.
+	handle /api/* {
+		reverse_proxy backend:8099
+	}
+	handle /health {
+		reverse_proxy backend:8099
+	}
+	# The two agent-facing gateways. Agent containers do NOT come through here --
+	# they reach backend:8099 directly on the internal `agents` network -- but
+	# without these routes the stack cannot be exercised from outside itself, and
+	# every operator ends up hand-rolling a socat container to test a run. Both
+	# demand an agent token (`kind=agent`, scope `run:<id>`): an operator token is
+	# refused, so publishing them widens the surface no further than /api does.
+	handle /llm/* {
+		reverse_proxy backend:8099
+	}
+	handle /mcp* {
+		reverse_proxy backend:8099
+	}
+	# Everything else is the SSR frontend.
+	handle {
+		reverse_proxy frontend:3000
+	}
+}

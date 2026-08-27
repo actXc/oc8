@@ -1,0 +1,13 @@
+kind = "library"
+key = "marketing_outreach_needs_approval"
+label = "Marketing outreach needs approval"
+label_en = "Marketing outreach needs approval"
+summary = "Maintains contacts, companies, properties and associations on its own; logging an engagement (a note, call, email or meeting on a record) needs approval instead, since an engagement is the one action here that can put words in front of a contact or a colleague reading the timeline. Does not cover which workflow enrolls the contact -- there is no tool that changes that."
+summary_en = "Maintains contacts, companies, properties and associations on its own; logging an engagement (a note, call, email or meeting on a record) needs approval instead, since an engagement is the one action here that can put words in front of a contact or a colleague reading the timeline. Does not cover which workflow enrolls the contact -- there is no tool that changes that."
+use_case = "marketing"
+read = true
+write = false
+send = true
+approval_eur = ""
+approval_actions = ["hubspot-create-engagement", "hubspot-update-engagement"]
+only = []

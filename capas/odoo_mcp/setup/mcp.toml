@@ -1,0 +1,15 @@
+# Must stay IDENTICAL to tool_pack.toml's own `connections.config` command/args:
+# both describe launching the same bridge.
+connection_key = "primary"
+name = "odoo"
+command = "uv"
+args = ["tool", "run", "mcp-server-odoo"]
+department_field = "department"
+
+[env_fields]
+ODOO_URL = "url"
+ODOO_DB = "database"
+ODOO_USER = "username"
+
+[secret_env_fields]
+ODOO_PASSWORD = "system"

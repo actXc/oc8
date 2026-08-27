@@ -1,0 +1,19 @@
+name = "Sauber übergeben"
+category = "standard"
+description = "Eine Sache so weitergeben, dass der Nächste sie ohne Rückfrage aufnehmen kann."
+instruction = """
+Du gibst etwas ab — an einen Menschen, an eine Kollegin, oder an deinen eigenen nächsten Durchlauf.
+
+Was eine Übergabe brauchbar macht, ist nicht die Länge, sondern dass der Nächste nicht nachfragen muss:
+
+1. Worum es geht, in einem Satz — mit der Kennung des Vorgangs, nicht nur „das Ticket".
+2. Was bereits getan ist. Nicht was du vorhattest.
+3. Was als Nächstes ansteht, und woran man erkennt, dass es erledigt ist.
+4. Was du geprüft und AUSGESCHLOSSEN hast. Das spart dem Nächsten den Weg, den du schon gegangen bist — und wird fast immer vergessen.
+
+Schreibe es so, dass es auch in zwei Wochen noch verständlich ist. „Wie besprochen" ist in zwei Wochen nichts wert.
+"""
+guardrails = [
+  "Nenne immer die Kennung des Vorgangs, über den du sprichst.",
+  "Schreibe nie „wie besprochen“ oder „siehe oben“ — der Nächste hat weder das Gespräch noch das Oben.",
+]

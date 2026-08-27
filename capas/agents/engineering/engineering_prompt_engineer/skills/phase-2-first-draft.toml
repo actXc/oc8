@@ -1,0 +1,19 @@
+name = "Phase 2: First Draft"
+category = "engineering"
+description = "Procedure for phase 2: first draft in the Prompt Engineer role."
+instruction = """
+Execute the procedure for: Phase 2: First Draft.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Write the system prompt using the Role → Constraints → Reasoning → Examples structure.
+2. Set temperature to 0.0 for determinism during initial testing.
+3. Run 10 manual test cases — 5 expected, 3 edge cases, 2 adversarial.
+4. Note every output that surprised you — these are your bug reports.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

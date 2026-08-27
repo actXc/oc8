@@ -1,0 +1,112 @@
+"""Authenticated per-tenant WebSocket endpoint. The token (query param, since
+browsers can't set WS headers) is verified; the connection joins ONLY its own
+tenant's fan-out set."""
+
+from __future__ import annotations
+
+import logging
+
+from fastapi import APIRouter, WebSocket, status
+from sqlalchemy.exc import SQLAlchemyError
+
+from oc8.auth.provider import InvalidToken, get_identity_provider
+from oc8.authz.authority import resolve_authority
+from oc8.authz.permissions import RUN, VIEW, perm
+from oc8.db.session import tenant_session
+from oc8.realtime.manager import ConnectionManager
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+#: The socket carries the ACTIVITY FEED, live, as free text: `activity.logged`
+#: ships `message` and `detail` verbatim, and among its producers are
+#: `control_tools.py` ("Entscheidung angefragt: {question}", with `context[:500]`
+#: as detail -- the very question `GET /clarifications` now scopes),
+#: `agent/engine.py` ("Operator: {msg}", "{agent} completed: {task_text}") and
+#: `note_focus` (what an agent is working on right now).
+#:
+#: `GET /activity`, which serves the same rows over HTTP, has always been
+#: `run:view`. The socket asked for nothing but a valid token, which cost nothing
+#: while every account in the system was an administrator -- and this slice is
+#: what creates a population that is NOT: a `member` holds `frozenset()` and needs
+#: no seat at all, so he 403'd at `/activity` and was simultaneously joined to the
+#: tenant-wide fan-out carrying its contents. Same rows, same permission.
+#:
+#: Not per-department rooms: that is §10 item 5 and slice 2. This makes the
+#: socket's audience exactly the HTTP route's, which is the claim §9 already
+#: makes ("this slice adds no leak") and did not hold for the socket.
+_FEED_PERMISSION = perm(RUN, VIEW)
+
+
+@router.websocket("/events/ws")
+async def events_ws(websocket: WebSocket) -> None:
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    try:
+        principal = get_identity_provider().verify(token)
+    except InvalidToken:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    # This feed is the operator's view of a tenant. An agent token is minted for a
+    # container and belongs to the two gateways, not here -- subscribing with one
+    # would let a container watch every run, approval and activity in its tenant.
+    # Checked in place rather than as a router dependency: `deny_agent_principals`
+    # is an HTTP dependency and a WebSocket route cannot carry one.
+    if principal.kind == "agent":
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    # A `totp:enroll`/`totp:challenge`-scoped token (standalone 2FA design)
+    # proves a password at most -- the second factor is still outstanding --
+    # so it must not be able to open this feed and stream the tenant's entire
+    # live event stream (every run, approval, clarification, activity event)
+    # for as long as the socket stays open. The operator API refuses these
+    # tokens through `deny_totp_pending_principals`, a router dependency; a
+    # WebSocket cannot carry one, so it is refused here in place, same reason
+    # and same shape as the agent-kind check just above.
+    if "totp:enroll" in principal.scopes or "totp:challenge" in principal.scopes:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    # And the same permission the HTTP route serving these rows declares --
+    # resolved the same way too, which is the half that is easy to skip. A
+    # WebSocket route cannot carry an HTTP dependency (the same reason the agent
+    # check above is written in place rather than at the router), so the session
+    # is opened here by hand rather than the answer being read off the token: an
+    # administrator demoted to a tenant-defined role holds `run:view` nowhere,
+    # and a socket that kept asking the code table would have gone on streaming
+    # him every run, approval and clarification in the company for as long as his
+    # tab stayed open. `run:view` is `NOT_YET_DELEGATABLE`, so no tenant-defined
+    # role can grant it back.
+    #
+    # Fail closed on a database error: this feed carries the same rows
+    # `GET /activity` refuses, and during a blip that route answers nothing
+    # either.
+    try:
+        async with tenant_session(principal.tenant_id) as db:
+            authority = await resolve_authority(db, principal)
+    except SQLAlchemyError:
+        logger.exception("could not resolve the caller's authority for the realtime feed")
+        await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+        return
+    if _FEED_PERMISSION not in authority.tenant_wide:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    manager: ConnectionManager = websocket.app.state.realtime_manager
+    tenant_id = principal.tenant_id
+    await websocket.accept()
+    await manager.connect(tenant_id, websocket)
+    # Handshake: connect() only returns once the tenant subscription is live,
+    # so this genuinely means events are now being received. The client uses
+    # it to (re)sync.
+    await websocket.send_json({"type": "realtime.connected"})
+    try:
+        while True:
+            # We don't consume client messages; block on receive to detect close.
+            await websocket.receive_text()
+    except Exception:
+        pass
+    finally:
+        await manager.disconnect(tenant_id, websocket)

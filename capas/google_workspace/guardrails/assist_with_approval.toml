@@ -1,0 +1,13 @@
+kind = "preset"
+connection = "primary"
+key = "assist_with_approval"
+label = "Unterstützen mit Freigabe"
+label_en = "Assist with approval"
+summary = "Arbeitet mit, aber nichts wird versendet ohne eine Freigabe."
+summary_en = "Works alongside you, but nothing goes out without a person approving it."
+recommended = true
+read = true
+write = false
+send = true
+approval_actions = ["send"]
+approval_eur = ""

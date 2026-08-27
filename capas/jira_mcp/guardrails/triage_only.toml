@@ -1,0 +1,24 @@
+kind = "preset"
+connection = "primary"
+key = "triage_only"
+label = "Triage only, no new issues"
+label_en = "Triage only, no new issues"
+summary = "Updates, comments on and moves existing tickets on its own, but creates no new ones and deletes none."
+summary_en = "Updates, comments on and moves existing tickets on its own, but creates no new ones and deletes none."
+recommended = false
+read = true
+write = false
+send = true
+approval_actions = []
+approval_eur = ""
+# For a bot that works down an existing backlog (triage, reassignment,
+# sprint hygiene) without being trusted to grow the backlog or shrink it by
+# deleting -- both jira_create_issue/jira_batch_create_issues and
+# jira_delete_issue are withheld.
+only = [
+    "jira_update_issue", "jira_assign_issue", "jira_move_issue",
+    "jira_add_comment", "jira_edit_comment", "jira_transition_issue",
+    "jira_link_to_epic", "jira_create_issue_link", "jira_remove_issue_link",
+    "jira_add_worklog", "jira_add_watcher", "jira_remove_watcher",
+    "jira_create_sprint", "jira_update_sprint", "jira_add_issues_to_sprint",
+]

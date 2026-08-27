@@ -1,0 +1,18 @@
+name = "1. Architecture Planning"
+category = "game_development"
+description = "Procedure for 1. architecture planning in the Godot Multiplayer Engineer role."
+instruction = """
+Execute the procedure for: 1. Architecture Planning.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Choose topology: client-server (peer 1 = dedicated/host server) or P2P (each peer is authority of their own entities).
+2. Define which nodes are server-owned vs. peer-owned — diagram this before coding.
+3. Map all RPCs: who calls them, who executes them, what validation is required.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

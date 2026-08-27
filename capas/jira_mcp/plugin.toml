@@ -1,0 +1,32 @@
+# Jira over the Model Context Protocol, via the mcp-atlassian bridge
+# (PyPI `mcp-atlassian`, sooperset). That package also speaks Confluence; this
+# plugin never sets any CONFLUENCE_* variable, so the bridge process only ever
+# knows about Jira. Confluence is a separate plugin's problem if one is ever
+# built, not a checkbox on this one.
+#
+# As with odoo_mcp and gitea_mcp, every Jira specific lives HERE. The core
+# learns nothing about issues, sprints or projects.
+#
+# This file is the slim core only. The tool pack lives in tool_pack.toml, the
+# guardrail presets and curated library in guardrails/<key>.toml, and the
+# setup form in setup/{fields,mcp}.toml (design §2/§3).
+#
+# `skills/<slug>.toml` below rides along on this SAME plugin folder rather
+# than a separate skill plugin: enabling Jira should hand an agent both the
+# connection AND the ready-made ways to use it in one install, one consent,
+# one enable -- not a second plugin an operator has to find and turn on
+# afterward.
+
+[plugin]
+name = "jira_mcp"
+label = "Jira"
+version = "1.1.3"
+type = "tool_pack"
+# first_party like odoo_mcp and gitea_mcp: the manifest, the seams and the
+# right classification are ours. The bridge itself is a published, actively
+# maintained package (PyPI `mcp-atlassian`).
+trust = "first_party"
+summary = "Connect Jira — issues, sprints and projects over the Model Context Protocol"
+permissions = ["mcp:connect", "secrets:use"]
+capabilities = ["integration:issues"]
+

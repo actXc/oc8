@@ -1,0 +1,22 @@
+# Curated use-case library entry (design doc §7) -- one of odoo_mcp's 28
+# documented ERP scenarios, written as documentation by example for anyone
+# building an oc8 tool-pack plugin. Every entry is built from the SAME 9
+# generic tools (tool_pack.toml's connection scopes); none of them can restrict
+# a call to one Odoo model, so entries differ in prose and in the specific
+# approval_eur/approval_actions/only chosen, not in a deeper technical
+# restriction. No tool is classified `write`, so every `write` here is false.
+# Each summary says what it grants AND what it deliberately does not cover.
+
+kind = "library"
+key = "cross_read_only_everything"
+label = "Nur lesen, über alle Bereiche hinweg"
+label_en = "Read only, across every area"
+summary = "Darf suchen, nachschlagen und auswerten, unabhängig davon, welches Odoo-Modell die Anfrage betrifft -- nichts wird verändert oder gesendet. Deckt keine bereichsspezifische Einschränkung ab; ein Agent mit diesem Guardrail kann potenziell alles lesen, was die Odoo-Verbindung liefert, nicht nur einen Bereich."
+summary_en = "Can search, look up and aggregate, whichever Odoo model the call touches -- nothing gets changed or sent. Does not cover a domain-specific restriction; an agent with this guardrail can potentially read anything the Odoo connection can read, not just one area."
+use_case = "cross_cutting"
+read = true
+write = false
+send = false
+approval_eur = ""
+approval_actions = []
+only = []

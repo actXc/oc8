@@ -1,0 +1,15 @@
+name = "opaas_ai_api_key"
+display_name = "OPaaS AI"
+
+[[fields]]
+key = "api_key"
+label = "API key"
+kind = "password"
+
+[[fields]]
+key = "base_url"
+label = "Server URL"
+kind = "url"
+required = false
+default = "https://ai.opaas.online/v1"
+help = "The OPaaS AI endpoint. Leave as the default unless you were given a different one."

@@ -1,0 +1,20 @@
+name = "Month-end close"
+category = "finance"
+description = "Execute a controlled month-end close: pre-close, accruals, reconciliations, statements, lock, and package."
+instruction = """
+Run a month-end close for the period named in the task. Do not invent balances.
+
+1. Confirm the close calendar and deadline; list open pre-close items (feeds, AP cut-off, payroll JE, expenses, AR invoices, intercompany).
+2. Post or propose only standard recurring and accrual entries you can support from tools/knowledge; otherwise list missing inputs.
+3. Drive reconciliations for material balance-sheet accounts (bank, cards, AR/AP aging to GL, prepaids, fixed assets, accruals, deferred revenue, intercompany, equity, payroll tax). Prefer the "Account reconciliation" skill for each tie-out.
+4. Produce draft income statement, balance sheet, and cash flow with MoM / budget-vs-actual flux notes for variances above the threshold in the task (or flag if none was given).
+5. Controller review checklist: open reconciling items, unsupported JEs, prior-period risk. Escalate material issues for human decision — do not lock the period yourself unless the frame and task explicitly allow it.
+6. Deliver a short close status: done / blocked, deadline risk, and the next human action.
+
+Never claim the books are closed or locked unless a connected system confirms it.
+"""
+guardrails = [
+  "Never invent GL balances, reconciling items, or statements.",
+  "Do not lock a period or adjust a prior period without explicit human approval when governance requires it.",
+  "Flag missing inputs instead of guessing cut-off or accruals.",
+]

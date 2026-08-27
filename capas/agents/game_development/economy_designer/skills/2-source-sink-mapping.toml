@@ -1,0 +1,17 @@
+name = "2. Source/Sink Mapping"
+category = "game_development"
+description = "Procedure for 2. source/sink mapping in the Economy Designer role."
+instruction = """
+Execute the procedure for: 2. Source/Sink Mapping.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Enumerate every faucet and drain; diagram the full flow graph.
+2. Identify orphan currencies (no meaningful sink) and dead ends before they ship.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

@@ -1,0 +1,8 @@
+name = "github_pat"
+display_name = "GitHub personal access token"
+
+[[fields]]
+key = "token"
+label = "Personal access token"
+kind = "password"
+help = "A fine-grained PAT scoped to Contents, Issues, Pull requests (read & write)."

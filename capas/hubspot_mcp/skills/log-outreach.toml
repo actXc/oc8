@@ -1,0 +1,17 @@
+name = "HubSpot: Log an outreach"
+category = "sales"
+description = "Record a call, email, or note against a CRM record."
+requires_tools = ["hubspot"]
+
+instruction = """
+How to log an outreach:
+
+1. First make sure you have the right record in front of you (see the "HubSpot: Research a contact or deal" skill). A note on the wrong record is worse than none.
+2. Create the matching type with hubspot-create-engagement (Note/Call/Email/Meeting), with a short factual summary and the link to the record.
+3. If a note you already created was wrong or incomplete, correct it with hubspot-update-engagement -- do NOT create a second one. Two notes about the same event make the history unreadable.
+"""
+
+guardrails = [
+  "Never create a second note to correct a previous one -- update the existing one instead.",
+  "An engagement always needs a link to the exact record it's about.",
+]

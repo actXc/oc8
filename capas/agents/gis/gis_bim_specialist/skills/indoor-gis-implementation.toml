@@ -1,0 +1,20 @@
+name = "Indoor GIS Implementation"
+category = "gis"
+description = "Procedure for indoor gis implementation in the BIM/GIS Specialist role."
+instruction = """
+Execute the procedure for: Indoor GIS Implementation.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Floor plan generation from BIM or CAD.
+2. Define floor-aware data model (Floor ID, Level, Building ID).
+3. Create indoor network dataset for routing.
+4. Design web map with floor selector.
+5. Add features: room finder, accessibility routing, POI markers.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

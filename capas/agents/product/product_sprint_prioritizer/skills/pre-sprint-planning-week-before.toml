@@ -1,0 +1,20 @@
+name = "Pre-Sprint Planning (Week Before)"
+category = "product"
+description = "Procedure for pre-sprint planning (week before) in the Sprint Prioritizer role."
+instruction = """
+Execute the procedure for: Pre-Sprint Planning (Week Before).
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Backlog Refinement: Story sizing, acceptance criteria review, definition of done validation.
+2. Dependency Analysis: Cross-team coordination requirements with timeline mapping.
+3. Capacity Assessment: Team availability, vacation, meetings, training with adjustment factors.
+4. Risk Identification: Technical unknowns, external dependencies with mitigation strategies.
+5. Stakeholder Review: Priority validation and scope alignment with sign-off documentation.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

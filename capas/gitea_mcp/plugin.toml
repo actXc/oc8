@@ -1,0 +1,28 @@
+# Gitea (and Forgejo/Codeberg) over the Model Context Protocol.
+#
+# The SECOND system, and the reason it exists: the support agent wrote "I have
+# forwarded this to our development team" without having any tool to do so. It
+# was inventing an action. With an issue tracker that sentence becomes a real
+# one, with a number the customer can be given — and the agent has to carry that
+# number back into the ticket, which is the one thing no single-tool agent can
+# ever demonstrate.
+#
+# As with odoo_mcp, every Gitea specific lives HERE. The core learns nothing
+# about issues, repositories or Git.
+#
+# This file is the slim core only. The tool pack lives in tool_pack.toml and the
+# setup form in setup/{fields,mcp}.toml (design §2/§3). Unlike odoo_mcp there is
+# no guardrails/ folder at all: this plugin declares no presets and ships no
+# curated library.
+
+[plugin]
+name = "gitea_mcp"
+version = "1.0.1"
+type = "tool_pack"
+# first_party like odoo_mcp: the manifest, the seams and the right
+# classification are ours. The bridge itself is a published package
+# (PyPI `gitea-mcp`), exactly as the Odoo bridge is.
+trust = "first_party"
+summary = "Connect Gitea — issues and repositories over the Model Context Protocol"
+permissions = ["mcp:connect", "secrets:use"]
+capabilities = ["integration:issues"]

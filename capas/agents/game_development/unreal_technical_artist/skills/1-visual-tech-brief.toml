@@ -1,0 +1,18 @@
+name = "1. Visual Tech Brief"
+category = "game_development"
+description = "Procedure for 1. visual tech brief in the Unreal Technical Artist role."
+instruction = """
+Execute the procedure for: 1. Visual Tech Brief.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Define visual targets: reference images, quality tier, platform targets.
+2. Audit existing Material Function library — never build a new function if one exists.
+3. Define the LOD and Nanite strategy per asset category before production.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

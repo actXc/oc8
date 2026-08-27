@@ -1,0 +1,22 @@
+title = "Telegram verbinden"
+description = "Der Bot-Token von @BotFather. Verlässt den Secret Store nie unverschlüsselt."
+submit_label = "Speichern & testen"
+# No top-level validate_entry_point here anymore: configure_plugin's
+# credential-kind branch (Task 7) only resolves-and-copies an
+# already-selected credential's value into `secret_ref` -- it does not also
+# call the credential type's own validate_entry_point a second time. That
+# entry point now lives on credential_types/telegram_bot.toml instead, run
+# when the credential itself is created/tested via <CredentialPicker>, not
+# on every setup-form submit. This is a deliberate, accepted behavior change:
+# Telegram's setup used to test-on-save every time; now a stale-but-already-
+# tested credential can be picked without a fresh re-test at bind time. See
+# the migration's task notes for why the simpler version ships first.
+
+[[fields]]
+key = "bot_token"
+label = "Bot-Token"
+kind = "credential"
+credential_type = "telegram_bot"
+required = true
+help = "Von @BotFather per /newbot erhalten, Format 123456:ABC-DEF..."
+secret_ref = "telegram/bot_token"

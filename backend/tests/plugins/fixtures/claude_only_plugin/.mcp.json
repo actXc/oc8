@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "demo-server": {
+      "command": "echo",
+      "args": ["demo"],
+      "env": {
+        "PLUGIN_ROOT": "${CLAUDE_PLUGIN_ROOT}"
+      }
+    }
+  }
+}

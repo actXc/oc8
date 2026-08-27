@@ -1,0 +1,28 @@
+# Operator setup form (rendered by the generic core interpreter; no vendor logic
+# in core). The connection profile (URL, database, login) lives entirely in the
+# shared credentials store -- one credential = one Odoo system, reusable across
+# departments/connections, so a tenant can hold several different Odoo systems
+# side by side and just pick which one each connection uses.
+title = "Set up Odoo"
+description = "Connect your Odoo instance. The Odoo 'MCP Server' add-on must already be installed."
+submit_label = "Save & test"
+
+[[fields]]
+key = "department"
+label = "Department"
+kind = "department"
+required = false
+help = "Agents in this department will use this connection automatically."
+
+# Required (not `required = false` like a bare password field would be):
+# nothing on this form is prefilled from an existing connection, and this one
+# field now carries URL/database/login together -- leaving it blank on a
+# resubmit would silently wipe all three from an already-working connection
+# instead of leaving it unchanged (env_fields/secret_env_fields only replace
+# what THIS submission actually provides).
+[[fields]]
+key = "system"
+label = "Odoo system"
+kind = "credential"
+credential_type = "odoo_login"
+help = "URL, database, and login, resolved from the shared credentials store only while the bridge starts."

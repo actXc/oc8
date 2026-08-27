@@ -1,0 +1,18 @@
+name = "Structured Interviews"
+category = "specialized"
+description = "Procedure for structured interviews in the Recruitment Specialist role."
+instruction = """
+Execute the procedure for: Structured Interviews.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Design standardized interview scorecards with clear rating criteria and behavioral anchors for each dimension.
+2. Build interview question banks categorized by position type and seniority level.
+3. Ensure interviewer consistency — train interviewers and calibrate scoring standards.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

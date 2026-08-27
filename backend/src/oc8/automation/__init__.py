@@ -1,0 +1,1 @@
+"""Domain-neutral automation configuration."""

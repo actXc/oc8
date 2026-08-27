@@ -1,0 +1,9 @@
+[plugin]
+name = "demo_provider"
+version = "1.0.0"
+type = "model_adapter"
+trust = "first_party"
+summary = "Test fixture: contributes an LLM provider"
+
+[plugin.entry_points]
+providers = "demo_provider.provider:register"

@@ -1,0 +1,13 @@
+kind = "library"
+key = "repo_admin_needs_approval"
+label = "Repository administration needs approval"
+label_en = "Repository administration needs approval"
+summary = "Everyday work -- issues, branches, commits, PRs, reviews, comments -- stays autonomous; creating a new repository or forking one always needs a human, since either changes what exists in the organization, not just what's inside one repo."
+summary_en = "Everyday work -- issues, branches, commits, PRs, reviews, comments -- stays autonomous; creating a new repository or forking one always needs a human, since either changes what exists in the organization, not just what's inside one repo."
+use_case = "platform / org admin"
+read = true
+write = false
+send = true
+approval_eur = ""
+approval_actions = ["create_repository", "fork_repository"]
+only = []

@@ -1,0 +1,10 @@
+# Must stay IDENTICAL to tool_pack.toml's own `connections.config` command/args:
+# both describe launching the same bridge.
+connection_key = "primary"
+name = "hubspot"
+command = "npx"
+args = ["-y", "@hubspot/mcp-server"]
+department_field = "department"
+
+[secret_env_fields]
+PRIVATE_APP_ACCESS_TOKEN = "private_app_access_token"

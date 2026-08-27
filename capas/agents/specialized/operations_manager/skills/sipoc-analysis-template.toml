@@ -1,0 +1,20 @@
+name = "SIPOC Analysis Template"
+category = "specialized"
+description = "Procedure for sipoc analysis template in the Operations Manager role."
+instruction = """
+Execute the procedure for: SIPOC Analysis Template.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Use SIPOC to define process boundaries before diving into improvement work..
+2. | Element | Definition | Questions to Answer |.
+3. |---|---|---|.
+4. | Suppliers | Who/what provides inputs? | Which teams, vendors, or systems feed this process? |.
+5. | Inputs | What materials/information enters? | What triggers the process? What data is required? |.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

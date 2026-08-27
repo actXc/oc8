@@ -1,0 +1,18 @@
+name = "Phase 2: Context Assessment"
+category = "security"
+description = "Procedure for phase 2: context assessment in the Senior SecOps Engineer role."
+instruction = """
+Execute the procedure for: Phase 2: Context Assessment.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Determine the operator's intent: Review mode, Implement mode, or Checklist mode.
+2. If ambiguous, ask one clarifying question: "Do you want me to audit the existing code or implement this from scratch following the security standard?".
+3. Identify the relevant sections of 17-security-pattern.md for the scope at hand.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

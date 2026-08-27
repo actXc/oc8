@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "oc8.fullname" . }}-worker
+  labels:
+    {{- include "oc8.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  selector:
+    matchLabels:
+      {{- include "oc8.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        {{- include "oc8.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      serviceAccountName: {{ include "oc8.serviceAccountName" . }}
+      initContainers:
+        {{- include "oc8.waitForPostgresInit" . | nindent 8 }}
+        - name: wait-for-backend
+          image: {{ include "oc8.backendImage" . }}
+          imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              until python -c "import urllib.request; urllib.request.urlopen('{{ include "oc8.internalBaseUrl" . }}/health')"; do
+                echo "waiting for backend..."
+                sleep 3
+              done
+      containers:
+        - name: worker
+          image: {{ include "oc8.backendImage" . }}
+          imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
+          command: ["oc8", "worker"]
+          env:
+            {{- include "oc8.backendEnv" . | nindent 12 }}
+          volumeMounts:
+            {{- include "oc8.backendVolumeMounts" . | nindent 12 }}
+          {{- with .Values.worker.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        {{- if .Values.backend.containerSocket.enabled }}
+        - name: container-socket
+          hostPath:
+            path: {{ .Values.backend.containerSocket.hostPath }}
+            type: Socket
+        {{- end }}
+        {{- $vols := include "oc8.backendVolumes" . }}
+        {{- if $vols }}
+        {{- $vols | nindent 8 }}
+        {{- end }}

@@ -1,0 +1,21 @@
+name = "Phase 2: Data & Feature Quality Assurance"
+category = "specialized"
+description = "Procedure for phase 2: data & feature quality assurance in the Model QA Specialist role."
+instruction = """
+Execute the procedure for: Phase 2: Data & Feature Quality Assurance.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Reconstruct the modeling population from raw sources.
+2. Validate target/label definition against documentation.
+3. Replicate segmentation and test stability.
+4. Analyze feature distributions, missings, and temporal stability (PSI).
+5. Perform bivariate analysis and correlation matrices.
+6. SHAP global analysis: compute feature importance rankings and beeswarm plots to compare against documented feature rationale.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

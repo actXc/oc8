@@ -1,0 +1,12 @@
+[plugin]
+name = "claude_hybrid_plugin"
+version = "2.0.0"
+type = "agent_template"
+trust = "first_party"
+summary = "Hybrid capa with oc8 governance overlay"
+permissions = ["hooks:claude:command"]
+
+[plugin.agent_template]
+name = "Hybrid Agent"
+role_title = "Hybrid Agent"
+mission = "Oc8 overlay mission takes precedence over Claude agent body when both exist."

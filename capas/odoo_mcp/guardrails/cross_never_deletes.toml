@@ -1,0 +1,22 @@
+# Curated use-case library entry (design doc §7) -- one of odoo_mcp's 28
+# documented ERP scenarios, written as documentation by example for anyone
+# building an oc8 tool-pack plugin. Every entry is built from the SAME 9
+# generic tools (tool_pack.toml's connection scopes); none of them can restrict
+# a call to one Odoo model, so entries differ in prose and in the specific
+# approval_eur/approval_actions/only chosen, not in a deeper technical
+# restriction. No tool is classified `write`, so every `write` here is false.
+# Each summary says what it grants AND what it deliberately does not cover.
+
+kind = "library"
+key = "cross_never_deletes"
+label = "Nie löschen, über alle Bereiche hinweg"
+label_en = "Never delete, across every area"
+summary = "Legt Datensätze an, bearbeitet und versendet sie, aber delete_record steht nie zur Verfügung, unabhängig vom Modell. Deckt eine Löschung nicht ab, die als Statusänderung (z. B. 'archiviert') statt als echtes delete_record modelliert ist -- das bleibt möglich."
+summary_en = "Creates, updates and sends records, but delete_record is never available, regardless of the model. Does not cover a deletion modelled as a status change (e.g. 'archived') instead of a real delete_record call -- that stays possible."
+use_case = "cross_cutting"
+read = true
+write = false
+send = true
+approval_eur = ""
+approval_actions = []
+only = ["search_records", "get_record", "list_models", "list_resource_templates", "aggregate_records", "create_record", "update_record", "post_message"]

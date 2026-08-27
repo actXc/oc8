@@ -1,0 +1,21 @@
+name = "3D Scene Workflow"
+category = "gis"
+description = "Procedure for 3d scene workflow in the 3D & Scene Developer role."
+instruction = """
+Execute the procedure for: 3D Scene Workflow.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Data inventory: terrain, buildings, imagery, 3D models, point clouds.
+2. CRS alignment: ensure all data shares the same vertical and horizontal datum.
+3. Scene composition: terrain base → imagery overlay → 3D features → labels → interactions.
+4. Performance optimization: tile, simplify, merge, cache.
+5. Styling: lighting, atmosphere, contrast, camera defaults.
+6. Access configuration: public, authenticated, or mixed.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

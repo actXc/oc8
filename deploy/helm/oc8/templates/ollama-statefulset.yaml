@@ -1,0 +1,60 @@
+{{- if .Values.ollama.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "oc8.fullname" . }}-ollama
+  labels:
+    {{- include "oc8.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ollama
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 11434
+      targetPort: http
+  selector:
+    {{- include "oc8.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: ollama
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "oc8.fullname" . }}-ollama
+  labels:
+    {{- include "oc8.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ollama
+spec:
+  serviceName: {{ include "oc8.fullname" . }}-ollama
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "oc8.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: ollama
+  template:
+    metadata:
+      labels:
+        {{- include "oc8.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: ollama
+    spec:
+      containers:
+        - name: ollama
+          image: {{ .Values.images.ollama.repository }}:{{ .Values.images.ollama.tag }}
+          imagePullPolicy: {{ .Values.images.ollama.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 11434
+          volumeMounts:
+            - name: data
+              mountPath: /root/.ollama
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.ollama.storageClassName }}
+        storageClassName: {{ .Values.ollama.storageClassName | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.ollama.storage }}
+{{- end }}

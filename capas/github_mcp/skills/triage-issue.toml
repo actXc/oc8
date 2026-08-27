@@ -1,0 +1,19 @@
+name = "GitHub: Triage an issue"
+category = "engineering"
+description = "Triage a new GitHub issue: check for duplicates, apply the right labels, comment briefly."
+requires_tools = ["github"]
+
+instruction = """
+How to triage a new GitHub issue:
+
+1. Search with search_issues for similar or identical issues -- BEFORE you comment or label.
+2. If it's a duplicate: comment with add_issue_comment naming the original's number and link, then mark it accordingly with issue_write (e.g. as Duplicate). Done.
+3. Not a duplicate: read the full context with issue_read.
+4. Check with get_label which labels actually exist in THIS repository -- don't invent any. Set the matching ones with issue_write (e.g. Bug, Feature, Question).
+5. Comment briefly with add_issue_comment on how you're classifying the issue.
+"""
+
+guardrails = [
+  "Never invent labels -- check with get_label which ones actually exist in the repository.",
+  "Only close an issue as a duplicate if you've actually read and linked the original.",
+]

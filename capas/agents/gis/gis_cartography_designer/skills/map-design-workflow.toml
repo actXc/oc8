@@ -1,0 +1,21 @@
+name = "Map Design Workflow"
+category = "gis"
+description = "Procedure for map design workflow in the Cartography Designer role."
+instruction = """
+Execute the procedure for: Map Design Workflow.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Purpose definition: Who is this map for? What should they learn?.
+2. Format selection: Print (PDF), web (tiles), presentation (slide), dashboard.
+3. Basemap selection: appropriate context for the data.
+4. Thematic styling: color scheme, classification, symbology.
+5. Labeling: hierarchy, typography, placement.
+6. Layout: map frame, legend, scale, north arrow, title, credits.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

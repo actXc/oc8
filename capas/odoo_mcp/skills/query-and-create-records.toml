@@ -1,0 +1,20 @@
+name = "Odoo: Query and create records safely"
+category = "operations"
+description = "Explains how to correctly search and write with Odoo's generic tools (search_records, create_record, ...) without tripping over field syntax or duplicates."
+requires_tools = ["odoo"]
+
+instruction = """
+How to work safely with Odoo:
+
+1. Odoo has only generic tools, none per model -- every call needs the exact technical model name (e.g. "crm.lead", "sale.order", "res.partner"). If you're unsure which model is meant, check with list_models instead of guessing.
+2. In domain, order, and fields: ONLY direct field names, NEVER dot notation. So not "partner_id.name" or "stage_id.name" -- that fails or returns wrong results. If you need to know what a linked record is called, read it with its own get_record or search_records call.
+3. Keep domain filters simple -- one or two conditions cover almost every case. Sort with order, e.g. "expected_revenue desc".
+4. Before calling create_record or update_record: check with search_records or get_record whether the record doesn't already exist, or whether the values have genuinely changed. An extra check costs less time than cleaning up a duplicated record later.
+5. post_message is the only action a human sees directly in the chatter -- use it at most once per record and per run, otherwise it reads as spam.
+"""
+
+guardrails = [
+  "Never use dot notation on a linked field in domain, order, or fields -- direct field names only.",
+  "Never call create_record without first checking with search_records whether the record already exists.",
+  "Call post_message at most once per record and per run.",
+]

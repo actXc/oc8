@@ -1,0 +1,20 @@
+name = "BIM-to-GIS Workflow"
+category = "gis"
+description = "Procedure for bim-to-gis workflow in the BIM/GIS Specialist role."
+instruction = """
+Execute the procedure for: BIM-to-GIS Workflow.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Source assessment: Revit version, IFC export quality, available parameters.
+2. Georeferencing: establish correct coordinate transformation.
+3. Format conversion: RVT/IFC → FBX/OBJ/GLTF → GIS feature class / scene layer.
+4. Attribute mapping: BIM parameters → GIS attribute schema.
+5. Validation: visual check + attribute completeness + spatial accuracy.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

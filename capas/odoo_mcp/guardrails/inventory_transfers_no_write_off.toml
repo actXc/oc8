@@ -1,0 +1,22 @@
+# Curated use-case library entry (design doc §7) -- one of odoo_mcp's 28
+# documented ERP scenarios, written as documentation by example for anyone
+# building an oc8 tool-pack plugin. Every entry is built from the SAME 9
+# generic tools (tool_pack.toml's connection scopes); none of them can restrict
+# a call to one Odoo model, so entries differ in prose and in the specific
+# approval_eur/approval_actions/only chosen, not in a deeper technical
+# restriction. No tool is classified `write`, so every `write` here is false.
+# Each summary says what it grants AND what it deliberately does not cover.
+
+kind = "library"
+key = "inventory_transfers_no_write_off"
+label = "Transfers anlegen, nie Bestand abschreiben"
+label_en = "Create transfers, never write off stock"
+summary = "Legt Lagertransfers an und pflegt sie; delete_record steht nicht zur Verfügung. Deckt eine Abschreibung nicht ab, wenn sie als Mengenänderung statt als Löschung erfasst wird -- das bleibt technisch möglich und diese Regel erkennt es nicht. Deckt auch keine Bereichsgrenze ab: das Ausschließen von delete_record gilt für jedes Odoo-Modell, das die Verbindung erreicht, nicht nur für Lagertransfers."
+summary_en = "Creates and maintains stock transfers; delete_record is withheld. Does not cover a write-off recorded as a quantity change instead of a deletion -- that stays technically possible and this rule cannot see it. Also does not cover a domain boundary: excluding delete_record applies to any Odoo model the connection reaches, not only stock transfers."
+use_case = "inventory"
+read = true
+write = false
+send = true
+approval_eur = ""
+approval_actions = []
+only = ["search_records", "get_record", "list_models", "list_resource_templates", "aggregate_records", "create_record", "update_record", "post_message"]

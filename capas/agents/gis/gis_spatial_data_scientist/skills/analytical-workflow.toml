@@ -1,0 +1,21 @@
+name = "Analytical Workflow"
+category = "gis"
+description = "Procedure for analytical workflow in the Spatial Data Scientist role."
+instruction = """
+Execute the procedure for: Analytical Workflow.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Problem formalization: What spatial question are we answering?.
+2. Exploratory spatial data analysis (ESDA): visualize, summarize, test for spatial dependence.
+3. Method selection: choose appropriate spatial statistical technique.
+4. Model fitting / analysis execution.
+5. Diagnostics: residual analysis, sensitivity testing, cross-validation.
+6. Interpretation: what does this mean in geographic terms?.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

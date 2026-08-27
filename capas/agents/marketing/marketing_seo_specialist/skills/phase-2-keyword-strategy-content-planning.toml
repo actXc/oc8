@@ -1,0 +1,19 @@
+name = "Phase 2: Keyword Strategy & Content Planning"
+category = "marketing"
+description = "Procedure for phase 2: keyword strategy & content planning in the SEO Specialist role."
+instruction = """
+Execute the procedure for: Phase 2: Keyword Strategy & Content Planning.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Keyword Research: Build comprehensive keyword universe grouped by topic cluster and search intent.
+2. Content Audit: Map existing content to target keywords, identify gaps and cannibalization.
+3. Topic Cluster Architecture: Design pillar pages and supporting content with internal linking strategy.
+4. Content Calendar: Prioritize content creation/optimization by impact potential (volume × achievability).
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

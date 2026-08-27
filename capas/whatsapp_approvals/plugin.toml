@@ -1,0 +1,48 @@
+# Approvals on WhatsApp (§5.6), through Meta's Cloud API.
+#
+# The second channel, and the one that shows the seam was worth having: nothing
+# in core changes to add it. What differs is entirely inside this plugin, and it
+# differs a lot.
+#
+# WhatsApp only allows free-form messages for 24 hours after the person last
+# wrote to the business. Outside that window ONLY pre-approved templates may be
+# sent. So this channel declares `unsolicited = false`, and an approval that
+# arrives at 3 a.m. reaches somebody as a template pointing at oc8 rather than
+# as the request itself -- which is the same shape the classification ceiling
+# produces, for a completely different reason.
+#
+# Two secrets, both in the tenant store (§12.3): the Cloud API access token and
+# the app secret Meta signs its webhooks with.
+
+[plugin]
+name = "whatsapp_approvals"
+version = "1.1.0"
+type = "approval_channel"
+trust = "first_party"
+summary = "Freigaben auf WhatsApp erhalten und dort entscheiden"
+permissions = ["approvals:notify"]
+
+[plugin.entry_points]
+channels = "channel.channel:register"
+
+[plugin.config]
+secret_ref = "whatsapp/access_token"
+max_classification = "public"
+# Set per tenant through the setup wizard above (channels/registry.py merges
+# PluginInstallation.config over this); the empty default here is deliberate --
+# a WhatsApp Business number is never shared across tenants.
+phone_number_id = ""
+# The pre-approved template used outside the 24-hour window. Its body must NOT
+# contain approval content: outside the window we are allowed to say that
+# something waits, not what it is.
+template_name = "oc8_approval_waiting"
+template_language = "de"
+
+# The access token above is an ADMIN's one-time setup. A person who should
+# actually receive/decide approvals still has to link THEIR OWN chat -- see
+# telegram_approvals/plugin.toml's identical block and
+# PersonalSettingsSpec's docstring (capas/manifest.py).
+[plugin.personal_settings]
+label = "WhatsApp verbinden"
+label_en = "Link WhatsApp"
+location = "approval_channels"

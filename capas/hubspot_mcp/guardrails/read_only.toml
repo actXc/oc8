@@ -1,0 +1,16 @@
+# Guardrail preset (odoo_mcp's design §4 shape): one of the five answers an
+# operator actually has, so the wizard stops asking a sales question of every
+# agent.
+kind = "preset"
+connection = "primary"
+key = "read_only"
+label = "Read only"
+label_en = "Read only"
+summary = "Can search and read CRM records, properties and engagements, but change nothing."
+summary_en = "Can search and read CRM records, properties and engagements, but change nothing."
+recommended = false
+read = true
+write = false
+send = false
+approval_actions = []
+approval_eur = ""

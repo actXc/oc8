@@ -1,0 +1,144 @@
+# The tool-pack half of the github_mcp plugin. This file's TOP LEVEL *is* the
+# `tool_pack` table (design §2/§3) -- there is no `[plugin.tool_pack]`
+# wrapper. The guardrail presets and the curated use-case library live one
+# file per key in guardrails/.
+
+[[connections]]
+key = "primary"
+name = "github"
+transport = "stdio"
+server_url = ""
+credential_type = "github_pat"
+
+# Right classification, restricted to the server's five DEFAULT toolsets
+# (context, issues, pull_requests, repos, users) -- see `GITHUB_TOOLSETS`
+# below. The `actions` (CI workflow runs) and `code_security` (secret/code
+# scanning alerts) toolsets exist upstream and are deliberately never opted
+# into: a support/dev-assistant agent has no business triggering a workflow
+# run or reading a security alert, and every guardrail below assumes this
+# connection can never reach either.
+[connections.scopes]
+read = [
+    "get_me", "get_team_members", "get_teams", "get_label", "issue_read",
+    "list_issue_fields", "list_issue_types", "list_issues", "search_issues",
+    "list_pull_requests", "pull_request_read", "search_pull_requests",
+    "get_commit", "get_file_contents", "get_latest_release", "get_release_by_tag",
+    "get_tag", "list_branches", "list_commits", "list_releases",
+    "list_repository_collaborators", "list_tags", "search_code", "search_commits",
+    "search_repositories", "search_users",
+]
+send = [
+    "add_issue_comment", "issue_write", "sub_issue_write",
+    "add_comment_to_pending_review", "add_reply_to_pull_request_comment",
+    "create_pull_request", "merge_pull_request", "pull_request_review_write",
+    "update_pull_request", "update_pull_request_branch", "create_branch",
+    "create_or_update_file", "create_repository", "delete_file",
+    "fork_repository", "push_files",
+]
+
+[connections.config]
+command = "github-mcp-server"
+args = ["stdio"]
+
+# NEUTRAL SEAM (outward_tools): the four calls that post something a human
+# collaborator actually sees and gets notified about -- a normal issue
+# comment, a reply on a PR thread, a comment left as part of a pending
+# review, and submitting the review itself. Everything else here changes
+# repository state, not a person's notifications.
+outward_tools = [
+    "add_issue_comment", "add_reply_to_pull_request_comment",
+    "add_comment_to_pending_review", "pull_request_review_write",
+]
+
+[connections.config.env]
+# Explicit, not left to the server's own default, so a future upstream
+# default change can never silently add `actions` or `code_security` to a
+# running connection -- see the comment on `connections.scopes` above.
+GITHUB_TOOLSETS = "context,issues,pull_requests,repos,users"
+
+[connections.config.secret_env]
+GITHUB_PERSONAL_ACCESS_TOKEN = "github/token"
+
+# GitHub carries no monetary value on any object -- no `value_spec` here, the
+# same way jira_mcp omits one. Every guardrail below gates on
+# `approval_actions`, never on an amount.
+
+# NEUTRAL SEAM (focus_spec): mirrors gitea_mcp's shape -- the entity is
+# mostly in the TOOL NAME, since the official server exposes read/write
+# collapsed per-entity (`issue_read`/`issue_write`) rather than one tool per
+# CRUD verb.
+[connections.config.focus_spec]
+id_field = "issue_number"
+id_fields = ["issue_number", "pullNumber", "pull_number", "number"]
+title_fields = ["title"]
+name_path = ["title"]
+default_verb = "Updates"
+search_label = "Searches"
+search_tools = [
+    "list_issues", "search_issues", "list_pull_requests", "search_pull_requests",
+    "search_repositories", "search_code", "search_commits", "search_users",
+]
+
+[connections.config.focus_spec.tool_entities]
+issue_read = "issue"
+issue_write = "issue"
+add_issue_comment = "issue"
+sub_issue_write = "issue"
+list_issues = "issue"
+search_issues = "issue"
+get_label = "issue"
+pull_request_read = "pull"
+create_pull_request = "pull"
+update_pull_request = "pull"
+update_pull_request_branch = "pull"
+merge_pull_request = "pull"
+list_pull_requests = "pull"
+search_pull_requests = "pull"
+add_comment_to_pending_review = "pull"
+add_reply_to_pull_request_comment = "pull"
+pull_request_review_write = "pull"
+create_repository = "repo"
+fork_repository = "repo"
+search_repositories = "repo"
+list_repository_collaborators = "repo"
+create_branch = "branch"
+list_branches = "branch"
+create_or_update_file = "file"
+delete_file = "file"
+get_file_contents = "file"
+push_files = "file"
+search_code = "file"
+get_commit = "commit"
+list_commits = "commit"
+search_commits = "commit"
+get_latest_release = "release"
+get_release_by_tag = "release"
+list_releases = "release"
+get_tag = "tag"
+list_tags = "tag"
+get_me = "user"
+search_users = "user"
+get_team_members = "team"
+get_teams = "team"
+
+[connections.config.focus_spec.labels]
+issue = "Issue"
+pull = "Pull Request"
+repo = "Repository"
+branch = "Branch"
+file = "File"
+commit = "Commit"
+release = "Release"
+tag = "Tag"
+user = "User"
+team = "Team"
+
+[connections.config.focus_spec.verbs]
+issue_write = "Updates"
+add_issue_comment = "Comments on"
+create_pull_request = "Opens"
+merge_pull_request = "Merges"
+pull_request_review_write = "Reviews"
+create_or_update_file = "Updates"
+delete_file = "Deletes"
+push_files = "Commits to"

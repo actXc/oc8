@@ -1,0 +1,18 @@
+name = "2. Story Structure & Node Mapping"
+category = "game_development"
+description = "Procedure for 2. story structure & node mapping in the Narrative Designer role."
+instruction = """
+Execute the procedure for: 2. Story Structure & Node Mapping.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Build the macro story structure (acts, turning points) before writing any lines.
+2. Map all major branching points with consequence trees before dialogue is authored.
+3. Identify all environmental storytelling zones in the level design document.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

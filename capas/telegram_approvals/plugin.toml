@@ -1,0 +1,43 @@
+# Approvals on Telegram (§5.6).
+#
+# A CODE-CARRYING plugin: it contributes a real ApprovalChannel, so it is only
+# loaded for first_party/verified trust and only for a tenant that installed and
+# enabled it.
+#
+# It needs one secret, the bot token, which lives in the tenant secret store
+# (§12.3) and never in this file. The bot belongs to the TENANT: that is what
+# makes an inbound update unambiguous about whose approval it answers, without
+# oc8 having to read anything across tenants.
+#
+# Nothing here decides anything. It renders a neutral ApprovalNotice as a
+# message with buttons and turns a button press back into a ChannelDecision;
+# core resolves the sender, checks the binding and records the decision through
+# the same path the inbox uses.
+
+[plugin]
+name = "telegram_approvals"
+version = "1.1.0"
+type = "approval_channel"
+trust = "first_party"
+summary = "Freigaben auf Telegram erhalten und dort entscheiden"
+permissions = ["approvals:notify"]
+
+[plugin.entry_points]
+channels = "channel.channel:register"
+
+[plugin.config]
+# Where the bot token is kept. A REFERENCE, not the token.
+secret_ref = "telegram/bot_token"
+# What this channel may carry. Deliberately the most restrictive value: an
+# operator raises it knowingly, having decided that approval text may sit in a
+# third party's chat history.
+max_classification = "public"
+
+# The bot token above is an ADMIN's one-time setup. A person who should
+# actually receive/decide approvals still has to link THEIR OWN chat -- see
+# PersonalSettingsSpec's docstring (capas/manifest.py). Rendered today by
+# frontend/src/routes/profile.tsx's ApprovalChannelsPanel.
+[plugin.personal_settings]
+label = "Telegram verbinden"
+label_en = "Link Telegram"
+location = "approval_channels"

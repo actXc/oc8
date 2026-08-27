@@ -1,0 +1,20 @@
+# Google Workspace as both a knowledge source AND an MCP tool pack -- ONE
+# plugin, deliberately, same reasoning as microsoft365 (design doc §1):
+# neither the connector registry nor tool-pack materialization gates on this
+# file's `type` field.
+#
+# This file is the slim core only. The tool pack lives in tool_pack.toml, the
+# guardrail presets and the curated library in guardrails/<key>.toml, and the
+# setup form in setup/*.toml (design §2/§3).
+
+[plugin]
+name = "google_workspace"
+version = "1.0.1"
+type = "tool_pack"
+trust = "first_party"
+summary = "Connect Google Workspace — Shared Drive knowledge base, plus Gmail, Calendar, Drive, Docs, Sheets and Slides tools"
+permissions = ["knowledge:write", "mcp:connect", "secrets:use"]
+capabilities = ["integration:google_workspace"]
+
+[plugin.entry_points]
+connectors = "connector.connector:register"

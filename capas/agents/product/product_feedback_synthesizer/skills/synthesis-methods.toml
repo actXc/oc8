@@ -1,0 +1,20 @@
+name = "Synthesis Methods"
+category = "product"
+description = "Procedure for synthesis methods in the Feedback Synthesizer role."
+instruction = """
+Execute the procedure for: Synthesis Methods.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Thematic Analysis: Pattern identification across feedback sources with statistical validation.
+2. Statistical Correlation: Quantitative relationships between themes and business outcomes.
+3. User Journey Mapping: Feedback integration into experience flows with pain point identification.
+4. Priority Scoring: Multi-criteria decision analysis using RICE framework.
+5. Impact Assessment: Business value estimation with effort requirements and ROI calculation.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

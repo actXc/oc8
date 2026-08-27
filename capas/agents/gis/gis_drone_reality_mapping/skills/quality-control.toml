@@ -1,0 +1,19 @@
+name = "Quality Control"
+category = "gis"
+description = "Procedure for quality control in the Drone/Reality Mapping Specialist role."
+instruction = """
+Execute the procedure for: Quality Control.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Report accuracy: RMSE of GCPs and checkpoints.
+2. Visual inspection: seam lines, blur, artifacts in ortho.
+3. Point cloud density: points per square meter.
+4. Vertical accuracy assessment against surveyed checkpoints.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

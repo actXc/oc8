@@ -1,0 +1,14 @@
+# Skill plugin: how to answer a support ticket well.
+#
+# Data only -- no Python. It carries CRAFT (how to write to a customer), not
+# process (which ticket, which stage): the process lives in the agent's mission,
+# so the same skill fits any agent that talks to customers over a ticket system.
+# It names no vendor; `requires_tools` refers to the connection KEY "odoo", the
+# same neutral seam the department frame uses.
+
+[plugin]
+name = "helpdesk_first_response_skill"
+version = "1.2.0"
+type = "skill"
+trust = "first_party"
+summary = "Erstantwort auf ein Support-Ticket: verständlich, konkret, ohne Zusagen ins Blaue"

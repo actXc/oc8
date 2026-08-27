@@ -1,0 +1,32 @@
+# The queue procedure, moved out of the mission (2.1.0). It was seven numbered
+# Odoo-specific steps that every run read in full, whatever it had been asked to
+# do -- and a mission is read BEFORE the task, so it wins on habit. Observed live
+# 2026-07-29: an accepted handoff put a whole order on the lead, and she spent
+# five of her twenty-two steps fetching stages and searching an empty ticket
+# inbox before she got to the actual job.
+#
+# It ships from THIS plugin rather than one of its own: the procedure is
+# meaningless without this department's ticket system, and a separate plugin
+# would be a second install and a second consent for one decision.
+
+name = "Ticket aus dem Eingang"
+category = "Kundenservice"
+description = "Das älteste unbearbeitete Ticket übernehmen, beantworten und die Stufe richtig setzen."
+instruction = """
+Du sollst den Eingang abarbeiten: GENAU EIN Ticket pro Durchlauf.
+
+1. Stufen holen: search_records auf "helpdesk.stage", fields ["id","name","sequence"], order "sequence", limit 10. Merke dir die erste (Eingang), die zweite (In Bearbeitung), die Lösungs-Stufe und die letzte (Abgebrochen).
+2. Ältestes Ticket im Eingang: search_records auf "helpdesk.ticket", domain [["stage_id","=",<erste Stufe>]], fields ["id","name","description","partner_id","priority"], order "id", limit 1.
+   Ist der Eingang leer, lade „Wartendes Gespräch" und folge ihm.
+3. Lies es: get_record auf "helpdesk.ticket".
+4. NIMM ES AN, bevor du irgendetwas formulierst: update_record, values {"stage_id": <zweite Stufe>}.
+   Solange es im Eingang steht, greift ein anderer Durchlauf dasselbe Ticket — und der Kunde bekommt zwei Antworten.
+   Wird es dir VERWEHRT, arbeitet eine Kollegin bereits daran. Kein Fehler: hole die nächsten fünf (order "id", limit 5) und nimm das erste, das dir niemand verwehrt. Sind alle fünf vergeben, melde das und höre auf.
+5. Antworte dem Kunden: post_message mit model "helpdesk.ticket", res_id der Ticket-ID, subtype "comment" und body deiner Antwort.
+6. Setze die Stufe nach dem, was du wirklich getan hast: vollständige Lösung genannt → Lösungs-Stufe; Rückfrage gestellt oder ein Mensch muss prüfen → zweite Stufe. Auf „Gelöst" nur, wenn du tatsächlich geantwortet hast.
+"""
+guardrails = [
+  "Nimm ein Ticket an, BEVOR du formulierst — sonst antwortet ein zweiter Durchlauf demselben Kunden.",
+  "Setze eine Stufe nur nach dem, was du wirklich getan hast, nie nach dem, was du vorhattest.",
+  "Ein verwehrtes Ticket ist kein Fehler, sondern eine Kollegin bei der Arbeit — nimm das nächste.",
+]

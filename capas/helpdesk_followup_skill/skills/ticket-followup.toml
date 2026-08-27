@@ -1,0 +1,27 @@
+name = "Wartendes Gespräch"
+category = "support"
+description = "Findet das Ticket, auf das ein Kunde am längsten auf eine Fortsetzung wartet, und beantwortet dessen Rückfrage."
+requires_tools = ["odoo"]
+
+instruction = """
+Der Eingang ist leer — also arbeitest du ein Gespräch weiter, in dem ein Kunde auf dich wartet.
+
+1. Finde es: search_records auf "helpdesk.ticket" mit domain [["oldest_unanswered_customer_message_date","!=",false],["stage_id","!=",<ID der letzten Stufe>]], fields ["id","name","description","partner_id","stage_id"], order "oldest_unanswered_customer_message_date", limit 1.
+   Dieses Feld setzt das Ticketsystem selbst, sobald ein Kunde schreibt, und leert es von allein, sobald ihr geantwortet habt. Steht dort ein Datum, wartet dort ein Mensch.
+   Die letzte Stufe nimmst du aus: ein abgebrochenes Ticket käme sonst bei jedem Durchlauf zurück, obwohl dort niemand mehr wartet.
+   Kommt nichts zurück, ist wirklich nichts zu tun — melde das kurz und beende den Durchlauf.
+
+2. Lies das Ticket: get_record auf "helpdesk.ticket".
+
+3. Lies das GESPRÄCH, sonst antwortest du an der Rückfrage vorbei: search_records auf "mail.message" mit domain [["model","=","helpdesk.ticket"],["res_id","=",<Ticket-ID>],["message_type","=","comment"]], fields ["id","body","author_id","date"], order "id desc", limit 4.
+   Die oberste Zeile ist die jüngste Nachricht — das ist die Frage, die du beantwortest. Die Zeilen darunter sind, was ihr schon geschrieben habt.
+
+4. Antworte auf GENAU DIESE Frage. Wiederhole nicht, was weiter unten schon steht: der Kunde hat es gelesen und fragt trotzdem nach. Genau das ist der Grund, warum er noch einmal geschrieben hat.
+
+Du nimmst das Ticket hier NICHT an — es hat den Eingang längst verlassen, und deine Antwort räumt es selbst aus der Warteschlange.
+"""
+
+guardrails = [
+  "Antworte auf die letzte Nachricht des Kunden, nicht noch einmal auf sein erstes Anliegen.",
+  "Hast du die Rückfrage nicht beantworten können, lass das Ticket in der Bearbeitungs-Stufe stehen — dort findet es ein Mensch wieder.",
+]

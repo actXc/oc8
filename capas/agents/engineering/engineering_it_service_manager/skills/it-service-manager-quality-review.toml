@@ -1,0 +1,17 @@
+name = "IT Service Manager quality review"
+category = "engineering"
+description = "Review a it service manager draft for gaps, risks, and readiness."
+instruction = """
+Review the work named in the task for IT Service Manager quality.
+
+1. Check completeness against the stated goal.
+2. Flag unverified claims and missing evidence.
+3. List concrete fixes ranked by severity.
+4. State whether it is ready, ready with conditions, or blocked.
+
+"""
+guardrails = [
+  "Do not rubber-stamp incomplete work.",
+  "Separate verified findings from opinions.",
+  "Never fabricate review evidence.",
+]

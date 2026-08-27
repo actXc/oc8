@@ -1,0 +1,18 @@
+name = "2. Gap Assessment"
+category = "security"
+description = "Procedure for 2. gap assessment in the Compliance Auditor role."
+instruction = """
+Execute the procedure for: 2. Gap Assessment.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Walk through each control objective against current state.
+2. Rate gaps by severity and remediation complexity.
+3. Produce a prioritized roadmap with owners and deadlines.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

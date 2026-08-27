@@ -1,0 +1,21 @@
+name = "Jira: Triage an issue"
+category = "engineering"
+description = "Triage a new Jira issue: check for duplicates, set type/priority, comment briefly."
+requires_tools = ["jira"]
+
+instruction = """
+How to triage a new Jira issue:
+
+1. Search with jira_search for similar or identical issues FIRST -- before you change anything. A duplicate found only after you've already commented has already cost double attention.
+2. If it's a duplicate: comment with jira_add_comment naming the original's key, then move it to the appropriate status with jira_transition_issue. Done -- no further steps.
+3. Not a duplicate: read the issue fully with jira_get_issue. The title alone isn't enough to judge type or urgency -- that's in the description.
+4. If type or priority is wrong, correct it with jira_update_issue. Don't guess from the title -- go by what's actually described.
+5. Comment briefly with jira_add_comment on how you're classifying the issue and what happens next.
+6. Only assign it with jira_assign_issue if ownership is clear from the ticket itself. A wrong assignment costs more time than an unassigned issue.
+"""
+
+guardrails = [
+  "Never close an issue as a duplicate without naming the original by its key.",
+  "Only change type or priority after actually reading the description -- not guessed from the title.",
+  "Only assign an issue when ownership is unambiguous from the ticket.",
+]

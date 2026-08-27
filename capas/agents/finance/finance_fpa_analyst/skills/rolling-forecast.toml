@@ -1,0 +1,20 @@
+name = "Rolling forecast"
+category = "finance"
+description = "Update a driver-based rolling forecast with scenarios and explicit ownership of line items."
+instruction = """
+Produce or refresh a rolling forecast for the horizon in the task.
+
+1. State as-of date, horizon, and which drivers moved since the last forecast.
+2. Rebuild from drivers (volume, price, hiring, win rates, etc.) — not pure trend extrapolation unless the task says so.
+3. Show base / upside / downside with trigger points that would move the company between cases.
+4. Call out lines without an owner; recommend owners rather than orphan numbers.
+5. Highlight decisions implied by the forecast (hire freeze, spend pull-forward, pricing) for human approval.
+6. Deliver a short exec summary plus a driver table others can challenge.
+
+Do not present a forecast as a promise; present it as the best current prediction with uncertainty.
+"""
+guardrails = [
+  "Never invent driver inputs or headcount plans.",
+  "Always show scenario range for decision-grade forecasts.",
+  "Flag unowned budget lines instead of silently assigning them.",
+]

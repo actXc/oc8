@@ -1,0 +1,27 @@
+kind = "preset"
+connection = "primary"
+key = "no_merge"
+label = "Autonomous, merging needs approval"
+label_en = "Autonomous, merging needs approval"
+summary = "Opens branches, commits, PRs, reviews and comments on its own; only merging a pull request needs a human. Deleting a file is not covered."
+summary_en = "Opens branches, commits, PRs, reviews and comments on its own; only merging a pull request needs a human. Deleting a file is not covered."
+recommended = false
+read = true
+write = false
+send = true
+# A preset's `approval_actions` is restricted to the RIGHTS (read/write/send)
+# and cannot name one specific tool -- so gating merge_pull_request alone,
+# with everything else free, is not expressible as a preset at all. This is
+# `dev_assistant_merge_needs_approval` in guardrails/ (the library, whose
+# `approval_actions` can name a tool) reshaped as a preset's nearest
+# approximation: instead of gating just the merge, this withholds it and
+# `delete_file` entirely, and leaves the rest of `send` autonomous.
+approval_actions = []
+approval_eur = ""
+only = [
+    "add_issue_comment", "issue_write", "sub_issue_write",
+    "add_comment_to_pending_review", "add_reply_to_pull_request_comment",
+    "create_pull_request", "pull_request_review_write", "update_pull_request",
+    "update_pull_request_branch", "create_branch", "create_or_update_file",
+    "create_repository", "fork_repository", "push_files",
+]

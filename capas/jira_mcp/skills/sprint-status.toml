@@ -1,0 +1,19 @@
+name = "Jira: Report sprint status"
+category = "engineering"
+description = "Summarizes the state of an active sprint -- open, blocked and completed issues. Read-only."
+requires_tools = ["jira"]
+
+instruction = """
+How to produce a sprint status report:
+
+1. Find the right board with jira_get_agile_boards, then the active sprint with jira_get_sprints_from_board.
+2. Read every issue in the sprint with jira_get_sprint_issues.
+3. Group them by status: done, in progress, open, blocked. Determine "blocked" from the issue's actual status or label, never by guessing.
+4. For blocked or conspicuously long-open issues, name both the issue key AND the reason -- a bare count ("3 blocked") helps nobody who wants to follow up.
+5. This skill only reads. Do not transition, comment on, or change a single issue during a sprint report -- that would mix your own changes into the report.
+"""
+
+guardrails = [
+  "Never change a single issue's status during a sprint report -- this skill reads only.",
+  "Always name the issue key for blockers, never just a total count.",
+]

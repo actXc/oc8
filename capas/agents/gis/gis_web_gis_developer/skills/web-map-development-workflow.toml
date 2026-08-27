@@ -1,0 +1,21 @@
+name = "Web Map Development Workflow"
+category = "gis"
+description = "Procedure for web map development workflow in the Web GIS Developer role."
+instruction = """
+Execute the procedure for: Web Map Development Workflow.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Requirements: what data, what interactions, what devices?.
+2. Service setup: publish data as map service, vector tiles, or API.
+3. Library selection: MapLibre (custom), ArcGIS JS (Esri ecosystem), Leaflet (simple), Deck.gl (large data).
+4. Implementation: base map → data layers → interactions → UI.
+5. Responsive testing: desktop, tablet, mobile.
+6. Performance optimization: tile, cluster, simplify, cache.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

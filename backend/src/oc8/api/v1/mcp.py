@@ -1,0 +1,301 @@
+"""MCP connection management (create/list). Attaching an MCP server to a
+department makes its tools available to that department's agents."""
+
+from __future__ import annotations
+
+import asyncio
+import uuid
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
+
+from oc8 import models as m
+from oc8.agent.mcp_client import McpSession
+from oc8.agent.mcp_env import resolve_mcp_env
+from oc8.agent.mcp_requirements import wrap_with_requirements
+from oc8.api.deps import CurrentPrincipal, DbSession, require_permission
+from oc8.authz.permissions import INTEGRATION, MANAGE, VIEW, perm
+from oc8.capas.discovery import find_plugin
+from oc8.capas.guardrails import GuardrailLibrary
+from oc8.capas.manifest import ManifestError, ToolPackConnection, parse_manifest
+from oc8.schemas.dto import (
+    GuardrailAdjustableDTO,
+    GuardrailDTO,
+    GuardrailPresetDTO,
+    McpConnectionDTO,
+)
+from oc8.schemas.requests import CreateMcpConnectionRequest, UpdateMcpConnectionRequest
+
+router = APIRouter()
+
+_TEST_TIMEOUT_S = 15.0
+
+
+def _manifest_connection(
+    c: m.McpConnection,
+) -> tuple[ToolPackConnection, GuardrailLibrary | None] | None:
+    """The manifest connection this row was materialised from, paired with its
+    plugin's optional `guardrails/*.toml` library, or None.
+
+    `config` holds INSTANCE data (server URL, env, secret refs); the presets,
+    `value_spec` and guardrail library are PLUGIN data that lives on disk,
+    never copied onto the row. `materialise.py` stamps `_plugin_name`/
+    `_connection_key` onto every row it creates -- the same pair
+    `api/v1/capas.py`'s setup endpoint already matches on -- so this reuses
+    that identifying pair rather than a second way of answering "which
+    manifest connection is this row", which would eventually disagree with it.
+    The guardrail library rides along on the same `find_plugin` lookup rather
+    than a second one, since this is the only caller.
+
+    A connection with no such stamp, whose plugin ships no tool pack, or whose
+    plugin folder is no longer on disk returns None: an operator's connection
+    list must not break because a plugin was removed.
+    """
+    cfg = c.config or {}
+    plugin_name = cfg.get("_plugin_name")
+    connection_key = cfg.get("_connection_key")
+    if not isinstance(plugin_name, str) or not plugin_name:
+        return None
+    discovered = find_plugin(plugin_name)
+    if discovered is None or not discovered.valid or discovered.manifest is None:
+        return None
+    try:
+        manifest = parse_manifest(discovered.manifest)
+    except ManifestError:
+        return None
+    if manifest.tool_pack is None:
+        return None
+    conn = next(
+        (conn for conn in manifest.tool_pack.connections if conn.key == connection_key),
+        None,
+    )
+    if conn is None:
+        return None
+    return conn, discovered.guardrail_library
+
+
+async def _connection_env(db: DbSession, conn: m.McpConnection) -> dict[str, str]:
+    """Build a subprocess environment without ever serialising secret values.
+
+    ``secret_env`` maps an environment-variable name to a tenant Secret name (or
+    to an ``oauth:`` ref minted fresh per launch -- see agent/mcp_env.py). It is
+    intentionally resolved only immediately before launching the MCP subprocess,
+    not when the connection is created or returned to the browser.
+    """
+    return await resolve_mcp_env(
+        db, tenant_id=conn.tenant_id, cfg=conn.config or {}, connection_name=conn.name
+    )
+
+
+def _utcnow_iso() -> str:
+    return datetime.now(tz=UTC).isoformat()
+
+
+def _to_dto(c: m.McpConnection) -> McpConnectionDTO:
+    cfg = c.config or {}
+    # Older seed data used a policy object here, before MCP scopes were
+    # standardised as a list. A single legacy row must not make every MCP
+    # connection unavailable to the UI.
+    scopes = c.scopes if isinstance(c.scopes, list) else []
+    resolved = _manifest_connection(c)
+    manifest_conn, guardrail_library = resolved if resolved is not None else (None, None)
+    presets = (
+        [
+            GuardrailPresetDTO(
+                key=p.key,
+                label=p.label,
+                label_en=p.label_en,
+                summary=p.summary,
+                summary_en=p.summary_en,
+                recommended=p.recommended,
+                read=p.read,
+                write=p.write,
+                send=p.send,
+                approval_actions=p.approval_actions,
+                approval_eur=p.approval_eur,
+                only=p.only,
+            )
+            for p in manifest_conn.guardrail_presets
+        ]
+        if manifest_conn is not None
+        else []
+    )
+    library = (
+        [
+            GuardrailDTO(
+                key=g.key,
+                label=g.label,
+                label_en=g.label_en,
+                summary=g.summary,
+                summary_en=g.summary_en,
+                use_case=g.use_case,
+                read=g.read,
+                write=g.write,
+                send=g.send,
+                approval_eur=g.approval_eur,
+                approval_actions=sorted(g.approval_actions),
+                only=list(g.only),
+                adjustable=[
+                    GuardrailAdjustableDTO(
+                        field=a.field,
+                        label=a.label,
+                        label_en=a.label_en,
+                        unit=a.unit,
+                        min=a.min,
+                        max=a.max,
+                    )
+                    for a in g.adjustable
+                ],
+            )
+            for g in guardrail_library.guardrail
+        ]
+        if guardrail_library is not None
+        else None
+    )
+    has_value_spec = manifest_conn is not None and "value_spec" in manifest_conn.config
+    # The same `_plugin_name` stamp `_manifest_connection` above reads to find
+    # the manifest connection -- read directly off `cfg` rather than through
+    # that resolution, so a connection whose plugin was later removed from
+    # disk (or ships no tool pack) still reports which plugin created it,
+    # rather than silently falling back to None like the guardrail fields do.
+    plugin_name = cfg.get("_plugin_name")
+    return McpConnectionDTO(
+        id=str(c.id),
+        name=c.name,
+        transport=c.transport,
+        server_url=c.server_url,
+        command=cfg.get("command", ""),
+        args=cfg.get("args", []),
+        department_id=str(c.department_id) if c.department_id else None,
+        connected=c.connected,
+        scopes=scopes,
+        health=c.health or {},
+        guardrail_presets=presets,
+        guardrail_library=library,
+        has_value_spec=has_value_spec,
+        plugin_name=plugin_name if isinstance(plugin_name, str) and plugin_name else None,
+        credential_type=manifest_conn.credential_type or None if manifest_conn else None,
+    )
+
+
+@router.get(
+    "/mcp/connections",
+    response_model=list[McpConnectionDTO],
+    dependencies=[Depends(require_permission(perm(INTEGRATION, VIEW)))],
+)
+async def list_connections(db: DbSession) -> list[McpConnectionDTO]:
+    rows = (
+        (await db.execute(select(m.McpConnection).order_by(m.McpConnection.created_at)))
+        .scalars()
+        .all()
+    )
+    return [_to_dto(c) for c in rows]
+
+
+@router.post(
+    "/mcp/connections",
+    response_model=McpConnectionDTO,
+    status_code=201,
+    dependencies=[Depends(require_permission(perm(INTEGRATION, MANAGE)))],
+)
+async def create_connection(
+    body: CreateMcpConnectionRequest,
+    db: DbSession,
+    principal: CurrentPrincipal,
+) -> McpConnectionDTO:
+    conn = m.McpConnection(
+        id=uuid.uuid4(),
+        tenant_id=principal.tenant_id,
+        department_id=body.department_id,
+        name=body.name,
+        transport=body.transport,
+        server_url=body.server_url,
+        scopes=body.scopes,
+        config={
+            "command": body.command,
+            "args": body.args,
+            "env": body.env,
+            "secret_env": body.secret_env,
+        },
+        connected=False,
+    )
+    db.add(conn)
+    await db.flush()
+    return _to_dto(conn)
+
+
+@router.patch(
+    "/mcp/connections/{conn_id}",
+    response_model=McpConnectionDTO,
+    dependencies=[Depends(require_permission(perm(INTEGRATION, MANAGE)))],
+)
+async def update_connection(
+    conn_id: uuid.UUID,
+    body: UpdateMcpConnectionRequest,
+    db: DbSession,
+    principal: CurrentPrincipal,
+) -> McpConnectionDTO:
+    conn = await db.get(m.McpConnection, conn_id)
+    if conn is None or conn.tenant_id != principal.tenant_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "connection not found")
+    if body.name is not None:
+        conn.name = body.name
+    if body.department_id is not None:
+        conn.department_id = body.department_id
+    if body.scopes is not None:
+        conn.scopes = body.scopes
+    cfg = dict(conn.config or {})
+    if body.command is not None:
+        cfg["command"] = body.command
+    if body.args is not None:
+        cfg["args"] = body.args
+    if body.env is not None:
+        cfg["env"] = body.env
+    if body.secret_env is not None:
+        cfg["secret_env"] = body.secret_env
+    conn.config = cfg
+    # A changed command/config invalidates the previous health assertion.
+    conn.connected = False
+    conn.health = {}
+    # Flush, don't commit: the RLS GUC is transaction-local, so committing here
+    # leaves the session unbound and the reload that followed ran with
+    # app.tenant_id = '' and failed the uuid cast -- a 500 for a change that had
+    # already been written. `tenant_session` commits when the request ends.
+    await db.flush()
+    return _to_dto(conn)
+
+
+@router.post(
+    "/mcp/connections/{conn_id}/test",
+    response_model=McpConnectionDTO,
+    dependencies=[Depends(require_permission(perm(INTEGRATION, MANAGE)))],
+)
+async def test_connection(
+    conn_id: uuid.UUID,
+    db: DbSession,
+    principal: CurrentPrincipal,
+) -> McpConnectionDTO:
+    conn = await db.get(m.McpConnection, conn_id)
+    if conn is None or conn.tenant_id != principal.tenant_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "connection not found")
+    cfg = conn.config or {}
+    now = _utcnow_iso()
+    try:
+        async with asyncio.timeout(_TEST_TIMEOUT_S):
+            env = await _connection_env(db, conn)
+            command, args = wrap_with_requirements(cfg.get("command", ""), cfg.get("args", []), cfg)
+            async with McpSession(command, args, env=env) as session:
+                names = [t.name for t in session.tools]
+        conn.connected = True
+        conn.health = {
+            "status": "ok",
+            "checkedAt": now,
+            "toolCount": len(names),
+            "tools": names,
+        }
+    except Exception as exc:  # any bring-up failure is an operator-visible error health, not a 500
+        conn.connected = False
+        conn.health = {"status": "error", "checkedAt": now, "error": str(exc)[:500]}
+    await db.commit()
+    return _to_dto(conn)

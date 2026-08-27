@@ -1,0 +1,20 @@
+name = "Phase 2: Content Engine Development"
+category = "marketing"
+description = "Procedure for phase 2: content engine development in the Global Podcast Strategist role."
+instruction = """
+Execute the procedure for: Phase 2: Content Engine Development.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Flagship Format Design: Establish the core episode template — intro hook structure, segment order, interview framework or solo narrative arc, sponsor placement positions, and outro CTA sequence; document it so any producer can execute it consistently.
+2. Episode Brief System: Build standardized pre-production docs for every episode type (interview, solo, panel) so no episode goes to recording without a clear hook, core promise, and repurposing plan already defined.
+3. Topic Sourcing Pipeline: Identify 3 content layers — (1) evergreen pillar topics that are always relevant to the listener, (2) trending news hooks tied to the niche, (3) listener question pools sourced from community, reviews, and social comments.
+4. Guest Tier Strategy: Tier 1: dream guests with large audiences (pursue via warm intros from existing guests); Tier 2: accessible authorities with niche credibility (cold outreach with personalized pitch); Tier 3: rising voices with fresh takes (direct community engagement before inviting).
+5. Batch Production Planning: Structure recording blocks to maintain 4–6 weeks of buffer inventory at all times, preventing publish gaps during illness, travel, or editing backlogs that break listener habits and algorithmic momentum.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

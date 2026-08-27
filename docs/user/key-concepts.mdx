@@ -1,0 +1,199 @@
+# Key concepts
+
+A short glossary for the oc8 UI and API. Read [What is oc8?](what-is-oc8.md) first
+for the big picture.
+
+## Platform architecture
+
+When you run `./scripts/quickstart.sh` or `docker compose up`, these **containers**
+start on your host. Only **Caddy** is published to your browser; everything else
+talks on the internal Docker network.
+
+**Agent sandboxes** are separate: the **worker** starts one container per run on
+the sealed network `oc8_agents` (`internal: true`). Those agents can reach the
+control plane (`backend` on `/llm` and `/mcp`) and nothing else — not Postgres,
+not Redis, not the public internet.
+
+![oc8 Docker Compose architecture — containers, agent sandboxes, and data flow](/img/oc8-architecture.svg)
+
+**Legend:** solid lines = always running after `docker compose up` · dashed lines =
+optional profile (`ollama`) · agent sandboxes are created **per run** via
+the Docker/Podman socket on the worker.
+
+| Container | Runs as | What it does |
+|-----------|---------|--------------|
+| **caddy** | always | Single entry point — serves UI and proxies `/api/v1` to the backend |
+| **frontend** | always | React operator UI (departments, agents, approvals, capas) |
+| **backend** | always | FastAPI — auth, capa loader, MCP gateway (`/mcp`), LLM proxy (`/llm`) |
+| **worker** | always (×N) | Claims runs from Redis and **provisions agent sandbox containers** |
+| **ingestion-worker** | always | Ingests documents into knowledge bases (RAG) |
+| **scheduler** | always | Fires scheduled and trigger-based runs |
+| **postgres** | always | System of record + pgvector — on the **default** network only |
+| **redis** | always | Run queue, realtime updates, short-lived cache |
+| **migrate** | once per `up` | Applies DB migrations; optional seed; then exits |
+| **ollama** | profile `ollama` | Local LLM without cloud API keys |
+| **agent sandbox** | per run | Isolated agent process on `oc8_agents` — see [Agent architecture](#agent-architecture) |
+
+**Request path in one sentence:** Browser → Caddy → backend → worker → agent sandbox
+→ `/llm` + `/mcp` on backend → (secrets stay on control plane) → external tool.
+
+→ Install details: [Quickstart](quickstart.md) · [Deploy](../DEPLOY)
+
+## Agent architecture
+
+An **agent run** can execute in-process (default for simple setups) or inside a
+**sealed Docker/Podman sandbox** (isolation on, or a containerized runtime capa
+such as nanoclaw). The sandbox is the blast-radius boundary.
+
+### Isolation
+
+| Guarantee | How |
+|-----------|-----|
+| No database access | Sandbox joins `oc8_agents` only — Postgres stays on the default network |
+| No open internet | Compose marks `agents` as `internal: true` |
+| No host secrets | Container env is **only** `spec.env` — never the worker's environment |
+| Hardened process | `cap_drop: ALL`, `no-new-privileges`, memory/CPU/pids limits |
+
+### What the platform puts into the container
+
+| Injected | Purpose |
+|----------|---------|
+| `/workspace` session tree | Per-run writable workspace under `/var/lib/oc8/sessions/{agent}/{run}/` |
+| `CLAUDE.md` (read-only) | Standing context: mission, skill catalog, roster — **not** the live task |
+| Runner + harness skills (ro) | Nanoclaw (or similar) runtime code mounted read-only |
+| `oc8-mcp-bridge.mjs` (ro) | Stdio MCP bridge that forwards tool calls to the platform |
+| Run-scoped token + gateway URLs | Env only: call `/llm` and `/mcp` — token dies with the run |
+
+### What never enters the sandbox
+
+- Provider API keys (Anthropic, OpenAI, …)
+- MCP OAuth tokens / tool credentials
+- Secret-store KEK
+- Direct Postgres or Redis connections
+
+Credentials are resolved **control-plane-side** when the MCP gateway launches a
+real tool server. The agent only ever sees the oc8 gateway as its MCP server.
+
+### How the agent talks to the platform
+
+```text
+Agent sandbox
+  ├─ Model calls  →  HTTP  {backend}/llm   + Bearer run token
+  └─ Tool calls   →  stdio MCP "oc8"
+                        → oc8-mcp-bridge.mjs
+                        → HTTP  {backend}/mcp  + Bearer run token
+                        → policy engine · approvals · real MCP on control plane
+```
+
+![oc8 agent sandbox — mounts, gateways, and isolation](/img/oc8-agent-architecture.svg)
+
+→ Deeper runtime design: [Contributing: architecture](../contributing/architecture.md) ·
+[Developer: architecture overview](../developer/architecture-overview.md)
+
+## Tenant
+
+Your organisation's isolated space. All data (agents, tasks, audit, secrets) is
+**tenant-scoped** with database row-level security. Users belong to one tenant
+per session (local login after the setup wizard, or dev-login on localhost only).
+
+## Department
+
+A team boundary inside a tenant. A department owns:
+
+- A **frame** — which MCP connections and knowledge bases its agents may use, and
+  default tool policies (read / write / send, approval thresholds).
+- One or more **agents**.
+
+Think "Sales", "Support", or "Finance" — not a folder in your filesystem.
+
+## Agent
+
+An AI worker with a name, mission, model, and status (`idle`, `running`,
+`waiting_for_approval`, …). Agents:
+
+- Pull **tasks** from a queue or receive them via chat / triggers
+- Call **tools** only through the governed MCP gateway
+- May load **skills** (reusable procedures) during a run
+- Optionally run inside an isolated **sandbox container** — see
+  [Agent architecture](#agent-architecture)
+
+Agents are **hired** from capa templates (`agent_template` / `department_template`)
+or created manually.
+
+## Task
+
+One unit of work assigned to an agent: a title, state (`in_progress`, `done`,
+`waiting_for_approval`, …), and a link to the **run** that executes it.
+Approvals and the office view hang off the task.
+
+## Run
+
+A single execution attempt: the worker loads the agent, assembles context, calls
+the model in a loop, and stops when the model finishes, approval is required,
+budget is exceeded, or the operator cancels.
+
+## Capa
+
+An installable extension — folder under `capas/` on the server. Types include:
+
+| Type | What it gives you |
+|------|-------------------|
+| `tool_pack` | MCP connection definitions (e.g. Odoo, filesystem demo) |
+| `agent_template` | One hireable agent (persona + mission + skills) |
+| `department_template` | A whole team + frame starter |
+| `skill` | Reusable procedures materialised into the skill catalog |
+| `connector` | Knowledge source (ingest documents into RAG) |
+| `runtime_adapter` | Alternative agent runtime (Docker-isolated CLI agents) |
+| `approval_channel` | Deliver approvals to Telegram / WhatsApp |
+
+Capas are **discovered** on disk, **installed** per tenant, then **enabled**
+with explicit permission consent.
+
+## Skill
+
+A named procedure: instructions + required tools + guardrails. Operators assign
+skills to agents; at runtime the agent invokes a skill to load its playbook for
+one turn.
+
+## MCP connection
+
+A configured bridge to an external tool server (stdio or HTTP). The agent never
+talks to Odoo or Slack directly — only to oc8's gateway, which forwards calls
+and enforces policy.
+
+Connections start **disconnected** until an operator completes setup (URL,
+credentials, OAuth).
+
+## Frame and tool policy
+
+The department **frame** lists which connections exist and default rights per
+tool (`read`, `write`, `send`). **Narrowing** on an agent can further restrict
+tools. Every call is authorized by the policy engine before execution.
+
+## Approval
+
+When a tool call exceeds a € threshold or hits an always-ask rule, the run
+**parks** and an **approval request** appears in the inbox (or on a messenger
+capa). Approve → the call runs; reject → the agent sees an error and continues.
+
+## Knowledge base
+
+Documents ingested via **connectors**, chunked and embedded for retrieval.
+Agents with KB access get relevant chunks in context; restricted content may
+force a local model.
+
+## Memory
+
+Tiered store (company / department / agent) for facts the agent should remember
+across runs. Writes can require approval.
+
+## Copilot (configuration assistant)
+
+In-product helper to draft department frames and agent settings from natural
+language — you always review before saving.
+
+## Related
+
+- [Daily workflow](daily-workflow.md) — how these pieces interact in practice
+- [Developer: capa types](../developer/plugin-types.md) — building extensions
+- [Contributing: architecture](../contributing/architecture.md) — how core is structured

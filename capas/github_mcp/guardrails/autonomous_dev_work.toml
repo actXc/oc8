@@ -1,0 +1,13 @@
+kind = "preset"
+connection = "primary"
+key = "autonomous_dev_work"
+label = "Autonomous development work"
+label_en = "Autonomous development work"
+summary = "Branches, commits, pushes, opens and merges pull requests, reviews and comments -- no approval anywhere. For a dedicated dev-automation repository, not a shared one."
+summary_en = "Branches, commits, pushes, opens and merges pull requests, reviews and comments -- no approval anywhere. For a dedicated dev-automation repository, not a shared one."
+recommended = false
+read = true
+write = false
+send = true
+approval_actions = []
+approval_eur = ""

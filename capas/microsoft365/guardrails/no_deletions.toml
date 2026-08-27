@@ -1,0 +1,22 @@
+kind = "preset"
+connection = "primary"
+key = "no_deletions"
+label = "Mit Freigabe, ohne Löschen"
+label_en = "With approval, never deletes"
+summary = "Wie \"Unterstützen mit Freigabe\", aber Löschen ist gar nicht erst möglich — ebenso wenig das Absagen von Terminen oder das Verschieben von E-Mails."
+summary_en = "Like \"Assist with approval\", except deleting is not possible at all — nor is cancelling a calendar event or moving emails between folders."
+recommended = false
+read = true
+write = false
+send = true
+approval_actions = ["send"]
+approval_eur = ""
+only = [
+    "mail_search", "mail_get", "mail_list_folders", "mail_send", "mail_reply", "mail_create_draft", "mail_mark_read",
+    "calendar_list_events", "calendar_get_event", "calendar_check_free_busy", "calendar_create_event",
+    "calendar_update_event", "calendar_respond_to_invite",
+    "files_list", "files_get_content", "files_search", "sites_list", "files_upload", "files_update_content",
+    "word_get_text", "word_replace_text", "excel_read_range", "excel_write_range", "excel_append_row",
+    "excel_list_worksheets", "teams_list_channels", "teams_list_chats",
+    "contacts_search", "contacts_get", "powerpoint_get_text", "powerpoint_replace_file",
+]

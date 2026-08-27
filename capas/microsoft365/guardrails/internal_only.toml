@@ -1,0 +1,22 @@
+kind = "preset"
+connection = "primary"
+key = "internal_only"
+label = "Nur intern"
+label_en = "Internal only"
+summary = "Arbeitet selbstständig, aber nichts geht hinaus: keine E-Mail, nicht einmal ein Entwurf. Löschen, Termine absagen, E-Mails verschieben oder als gelesen markieren ist ebenfalls nicht möglich. (Teams-Nachrichten kann dieses Paket ohnehin nicht senden — Microsoft Graph erlaubt das ohne angemeldete Person nicht.)"
+summary_en = "Works on its own, but nothing goes out: no email, not even a draft. It also cannot delete anything, cancel a calendar event, or move emails between folders or mark them read. (This pack cannot send Teams messages at all — Microsoft Graph does not allow it without a signed-in person.)"
+recommended = false
+read = true
+write = false
+send = true
+approval_actions = []
+approval_eur = ""
+only = [
+    "mail_search", "mail_get", "mail_list_folders",
+    "calendar_list_events", "calendar_get_event", "calendar_check_free_busy", "calendar_create_event",
+    "calendar_update_event", "calendar_respond_to_invite",
+    "files_list", "files_get_content", "files_search", "sites_list", "files_upload", "files_update_content",
+    "word_get_text", "word_replace_text", "excel_read_range", "excel_write_range", "excel_append_row",
+    "excel_list_worksheets", "teams_list_channels", "teams_list_chats", "contacts_search", "contacts_get",
+    "powerpoint_get_text", "powerpoint_replace_file",
+]

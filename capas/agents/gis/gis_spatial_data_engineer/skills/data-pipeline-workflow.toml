@@ -1,0 +1,20 @@
+name = "Data Pipeline Workflow"
+category = "gis"
+description = "Procedure for data pipeline workflow in the Spatial Data Engineer role."
+instruction = """
+Execute the procedure for: Data Pipeline Workflow.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Source assessment: format, CRS, encoding, schema, data quality.
+2. Define target schema: standard field names, data types, domain values.
+3. Implement ETL: read → clean → transform → validate → write.
+4. Documentation: data lineage, transformation notes, known issues.
+5. Delivery: make data available via file, API, or database.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

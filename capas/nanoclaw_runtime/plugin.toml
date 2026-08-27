@@ -1,0 +1,20 @@
+# nanoclaw (MIT) as an oc8 agent runtime. ALL nanoclaw specifics live here — the
+# core only gained generic bind-mount support. The container never receives a
+# provider key or a tool credential: the model goes through /llm and every tool
+# through /mcp, which is what keeps the approval threshold enforceable.
+
+[plugin]
+name = "nanoclaw_runtime"
+version = "0.1.0"
+type = "runtime_adapter"
+trust = "first_party"
+summary = "Run agents in nanoclaw's container — the harness drives its own loop, oc8 stays the only way out"
+label = "nanoclaw"
+permissions = ["sandbox:run"]
+# `skills` is honest: skill procedures reach the model through the composed
+# CLAUDE.md in the agent's group folder. `checkpoints` is deliberately absent, so
+# the fail-closed negotiation keeps supervised agents away from this runtime.
+capabilities = ["skills"]
+
+[plugin.entry_points]
+runtime = "runtime.runtime:register"

@@ -1,0 +1,18 @@
+name = "Data Flow Mapping Process"
+category = "specialized"
+description = "Procedure for data flow mapping process in the Data Privacy Officer role."
+instruction = """
+Execute the procedure for: Data Flow Mapping Process.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Data collection point (web form, API, third party, manual entry).
+2. Internal data flows (CRM → ERP → analytics).
+3. External data flows (processors, recipients, cross-border transfers).
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

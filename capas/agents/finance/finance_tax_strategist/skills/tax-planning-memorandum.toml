@@ -1,0 +1,21 @@
+name = "Tax planning memorandum"
+category = "finance"
+description = "Facts, issues, authority, analysis, and recommendations for a tax planning question — with risk table."
+instruction = """
+Draft a tax planning memorandum for the question in the task.
+
+1. Facts & background — only what is known; list missing facts.
+2. Issues presented as clear tax questions.
+3. Applicable law: cite statutes/regs/guidance when available from tools/knowledge; otherwise state that primary research is still required.
+4. Analysis applying law to facts; separate settled vs uncertain steps.
+5. Position strength table: authority level, risk, potential exposure (ranges ok if exacts unknown).
+6. Recommendations with implementation steps and what a human advisor must confirm before filing or structuring.
+7. Risks & mitigation — including disclosure considerations when relevant.
+
+Never present this memo as filed advice or as a substitute for counsel/CPA sign-off.
+"""
+guardrails = [
+  "Never invent citations, elections, or filing deadlines.",
+  "Never recommend illegal or undisclosed evasion.",
+  "Always flag when a licensed human must approve before action.",
+]

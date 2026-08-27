@@ -1,0 +1,22 @@
+kind = "preset"
+connection = "primary"
+key = "autonomous_with_limit"
+label = "Selbstständig mit Limit"
+label_en = "Autonomous with a limit"
+summary = "Arbeitet selbstständig, kann aber nichts löschen, keine Termine absagen und E-Mails weder verschieben noch als gelesen markieren."
+summary_en = "Works on its own, but cannot delete anything, cannot cancel a calendar event, and cannot move emails between folders or mark them read."
+recommended = false
+read = true
+write = false
+send = true
+approval_actions = []
+approval_eur = ""
+only = [
+    "mail_search", "mail_get", "mail_list_folders", "mail_send", "mail_reply", "mail_create_draft",
+    "calendar_list_events", "calendar_get_event", "calendar_check_free_busy", "calendar_create_event",
+    "calendar_update_event", "calendar_respond_to_invite",
+    "files_list", "files_get_content", "files_search", "sites_list", "files_upload", "files_update_content",
+    "word_get_text", "word_replace_text", "excel_read_range", "excel_write_range", "excel_append_row",
+    "excel_list_worksheets", "teams_list_channels", "teams_list_chats",
+    "contacts_search", "contacts_get", "powerpoint_get_text", "powerpoint_replace_file",
+]

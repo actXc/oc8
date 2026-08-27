@@ -1,0 +1,20 @@
+name = "Point Cloud Classification"
+category = "gis"
+description = "Procedure for point cloud classification in the Drone/Reality Mapping Specialist role."
+instruction = """
+Execute the procedure for: Point Cloud Classification.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Classify ground, vegetation, buildings, water.
+2. Generate bare-earth DTM from classified ground points.
+3. Create vegetation height models (canopy height).
+4. Filter noise: outliers, multipath, atmospheric artifacts.
+5. Export classified LAS/LAZ for GIS integration.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

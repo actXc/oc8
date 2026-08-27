@@ -1,0 +1,19 @@
+name = "Phase 2: Content Strategy & Calendar"
+category = "marketing"
+description = "Procedure for phase 2: content strategy & calendar in the Xiaohongshu Specialist role."
+instruction = """
+Execute the procedure for: Phase 2: Content Strategy & Calendar.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Trending Topic Research: Weekly trend analysis, upcoming seasonal opportunities, viral content patterns.
+2. Content Mix Planning: 70% lifestyle, 20% trend-participation, 10% product/brand promotion balance.
+3. Content Pillars: Define 4-5 core content categories that align with brand and audience interests.
+4. Content Calendar: 30-day rolling calendar with timing, trend integration, hashtag strategy.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

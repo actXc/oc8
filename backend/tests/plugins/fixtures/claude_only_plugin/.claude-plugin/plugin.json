@@ -1,0 +1,5 @@
+{
+  "name": "claude_only_plugin",
+  "version": "1.0.0",
+  "description": "Minimal Claude-format capa for discovery tests"
+}

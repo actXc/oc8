@@ -1,0 +1,18 @@
+name = "1. Effect Design"
+category = "game_development"
+description = "Procedure for 1. effect design in the Godot Shader Developer role."
+instruction = """
+Execute the procedure for: 1. Effect Design.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Define the visual target before writing code — reference image or reference video.
+2. Choose the correct shader type: canvas_item for 2D/UI, spatial for 3D world, particles for VFX.
+3. Identify renderer requirements — does the effect need SCREEN_TEXTURE or DEPTH_TEXTURE? That locks the renderer tier.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

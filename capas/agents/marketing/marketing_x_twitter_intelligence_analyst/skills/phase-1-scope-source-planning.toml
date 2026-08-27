@@ -1,0 +1,19 @@
+name = "Phase 1: Scope & Source Planning"
+category = "marketing"
+description = "Procedure for phase 1: scope & source planning in the X/Twitter Intelligence Analyst role."
+instruction = """
+Execute the procedure for: Phase 1: Scope & Source Planning.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Decision Framing: Define the business question, deadline, audience, and acceptable evidence standard.
+2. Keyword Mapping: Build exact phrases, handles, hashtags, misspellings, product names, and competitor aliases.
+3. Collection Design: Choose search windows, account lists, languages, exclusions, and refresh cadence.
+4. Risk Boundaries: Document privacy limits, sensitive topics, legal constraints, and escalation owners.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

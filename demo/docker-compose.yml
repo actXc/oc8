@@ -1,0 +1,39 @@
+# Business systems for the demo — NOT part of oc8.
+#
+# oc8's own stack (docker-compose.yml at the repo root) holds the core and
+# nothing else, so it can be lifted onto any host. What an agent WORKS ON is a
+# customer's own software and lives outside it: the demo Odoo runs in its own
+# stack already, and this file adds the second system, so an agent can be shown
+# carrying a case from one to the other.
+#
+#   docker compose -f demo/docker-compose.yml up -d
+#
+# Gitea because it is the smallest realistic second system: one Go binary, an
+# SQLite file, and issues — which is exactly the gap the support agent has today.
+# It invented "I have forwarded this to development" because it had no tool to
+# do so. With this, that sentence becomes an action with a number attached.
+
+services:
+  gitea:
+    image: gitea/gitea:1.22
+    container_name: oc8-demo-gitea
+    restart: unless-stopped
+    environment:
+      USER_UID: "1000"
+      USER_GID: "1000"
+      GITEA__database__DB_TYPE: sqlite3
+      GITEA__server__DOMAIN: localhost
+      GITEA__server__ROOT_URL: http://localhost:3000/
+      GITEA__server__SSH_DOMAIN: localhost
+      # A demo instance with a fixed seeded account: nothing here is a secret,
+      # and an installer wizard on first boot would block the scripted setup.
+      GITEA__security__INSTALL_LOCK: "true"
+      GITEA__service__DISABLE_REGISTRATION: "true"
+    volumes:
+      - gitea-data:/data
+    ports:
+      # 3000 is Gitea's own default and free on this host; oc8 publishes 8090.
+      - "3000:3000"
+
+volumes:
+  gitea-data:

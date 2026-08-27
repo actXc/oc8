@@ -1,0 +1,19 @@
+kind = "library"
+key = "cross_never_deletes"
+label = "Never deletes (cross-department)"
+label_en = "Never deletes (cross-department)"
+summary = "A cross-department safety net rather than a specific scenario: everything except delete_file stays usable autonomously, with no approval. There is no repository-deletion tool in this bridge -- delete_file (removing one file) is the only destructive call it exposes, and this guardrail is the one place that always withholds it, independent of whatever other guardrail also applies."
+summary_en = "A cross-department safety net rather than a specific scenario: everything except delete_file stays usable autonomously, with no approval. There is no repository-deletion tool in this bridge -- delete_file (removing one file) is the only destructive call it exposes, and this guardrail is the one place that always withholds it, independent of whatever other guardrail also applies."
+use_case = "cross-department"
+read = true
+write = false
+send = true
+approval_eur = ""
+approval_actions = []
+only = [
+    "add_issue_comment", "issue_write", "sub_issue_write",
+    "add_comment_to_pending_review", "add_reply_to_pull_request_comment",
+    "create_pull_request", "merge_pull_request", "pull_request_review_write",
+    "update_pull_request", "update_pull_request_branch", "create_branch",
+    "create_or_update_file", "create_repository", "fork_repository", "push_files",
+]

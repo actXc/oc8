@@ -1,0 +1,39 @@
+{
+  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts", "eslint.config.js"],
+  // No test runner is wired into this project (no vitest/jest config, no
+  // `test`/`build:test` script -- see `src/lib/governance-hooks.test.ts`'s own
+  // header). A `*.test.ts(x)` file that imports `vitest`/`@testing-library/react`
+  // therefore cannot resolve under this project's `moduleResolution`, and
+  // without this exclude `tsc --noEmit` -- the one check this repo's house
+  // rules run in place of a test command -- fails on an import no production
+  // code path ever reaches. Excluded rather than deleted: the file is written
+  // to the convention this repo will need the day a runner is added, and stays
+  // out of `tsc`'s project (and Vite's bundle graph, which never reaches an
+  // orphan `.test.ts` either way) until then.
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"],
+  "compilerOptions": {
+    "target": "ES2022",
+    "jsx": "react-jsx",
+    "module": "ESNext",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+
+    /* Bundler mode */
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": false,
+    "noEmit": true,
+
+    /* Linting */
+    "skipLibCheck": true,
+    "strict": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+    "paths": {
+      "@/*": ["./src/*"],
+      "@oc8/edition-entry": ["./src/edition/entry.ts"]
+    }
+  }
+}

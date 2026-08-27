@@ -1,0 +1,8 @@
+name = "demo_cred"
+display_name = "Demo credential"
+
+[[fields]]
+key = "token"
+label = "Token"
+kind = "password"
+required = false

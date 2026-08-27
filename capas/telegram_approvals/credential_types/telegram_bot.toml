@@ -1,0 +1,16 @@
+name = "telegram_bot"
+display_name = "Telegram bot"
+validate_entry_point = "channel.setup:validate"
+
+[[fields]]
+key = "bot_token"
+label = "Bot token"
+kind = "password"
+help = "From @BotFather via /newbot, format 123456:ABC-DEF..."
+# Deliberately no `default` -- a bot token has no sensible one, and a
+# credential-type field with kind="password" is always implicitly
+# required=True (manifest.py's SetupFieldSpec default), so there is no
+# backfill-gap class of bug to guard against here (see Task 12's s3_api.toml
+# for the actual footgun this avoids: a `default` on a field without
+# `required = false` silently backfilling into `create_credential`'s
+# `plain_values`).

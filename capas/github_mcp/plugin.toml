@@ -1,0 +1,36 @@
+# GitHub over the Model Context Protocol, via GitHub's own official
+# `github-mcp-server` binary. Unlike odoo_mcp/gitea_mcp/jira_mcp, this bridge
+# has no maintained pip/npm distribution (deprecated April 2025) -- it is
+# vendored straight into Dockerfile.backend's runtime stage from GitHub's own
+# published image (`ghcr.io/github/github-mcp-server`), pinned by tag, the
+# same pattern already used for the `uv` binary.
+#
+# As with the other tool-pack plugins, every GitHub specific lives HERE. The
+# core learns nothing about repositories, issues or pull requests.
+#
+# This file is the slim core only. The tool pack lives in tool_pack.toml, the
+# guardrail presets and curated library in guardrails/<key>.toml, and the
+# setup form in setup/{fields,mcp}.toml (design §2/§3).
+#
+# `skills/<slug>.toml` below rides along on this SAME plugin folder rather
+# than a separate skill plugin: enabling GitHub should hand an agent both the
+# connection AND the ready-made ways to use it in one install, one consent,
+# one enable -- not a second plugin an operator has to find and turn on
+# afterward.
+
+[plugin]
+name = "github_mcp"
+label = "GitHub"
+version = "1.1.3"
+type = "tool_pack"
+# first_party: the manifest, the seams and the right classification are
+# ours. The bridge itself is GitHub's own official, actively maintained
+# binary.
+trust = "first_party"
+summary = "Connect GitHub — repositories, issues and pull requests over the Model Context Protocol"
+permissions = ["mcp:connect", "secrets:use"]
+capabilities = ["integration:issues", "integration:code"]
+# The well-known GitHub octocat mark, monochrome via currentColor so it
+# inherits the Capas UI's text color. Served by GET /plugins/{id}/icon.
+icon = "icon.svg"
+

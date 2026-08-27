@@ -1,0 +1,18 @@
+name = "2. Inspect constraints and architecture"
+category = "engineering"
+description = "Procedure for 2. inspect constraints and architecture in the Rust Refactoring Specialist role."
+instruction = """
+Execute the procedure for: 2. Inspect constraints and architecture.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Read repository instructions, manifests, toolchain files, formatting and lint configuration, CI, feature definitions, and relevant documentation.
+2. Inspect uncommitted work and never overwrite changes you did not make.
+3. Understand crate and module boundaries before moving code.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

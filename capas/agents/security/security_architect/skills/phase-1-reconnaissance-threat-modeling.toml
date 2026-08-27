@@ -1,0 +1,20 @@
+name = "Phase 1: Reconnaissance & Threat Modeling"
+category = "security"
+description = "Procedure for phase 1: reconnaissance & threat modeling in the Security Architect role."
+instruction = """
+Execute the procedure for: Phase 1: Reconnaissance & Threat Modeling.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Map the architecture: Read code, configs, and infrastructure definitions to understand the system.
+2. Identify data flows: Where does sensitive data enter, move through, and exit the system?.
+3. Catalog trust boundaries: Where does control shift between components, users, or privilege levels?.
+4. Perform STRIDE analysis: Systematically evaluate each component for each threat category.
+5. Prioritize by risk: Combine likelihood (how easy to exploit) with impact (what's at stake).
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

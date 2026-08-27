@@ -1,0 +1,29 @@
+# Odoo via the mcp-server-odoo bridge (stdio) talking to the Odoo "MCP Server"
+# add-on's HTTP/XML-RPC API. ALL Odoo-specifics live here, in this MCP plugin —
+# the oc8 core stays software-neutral. The password/API key is a reference only;
+# its value lives in oc8's encrypted tenant secret store and is resolved only
+# when the bridge starts.
+#
+# This file is the slim core only. The tool pack lives in tool_pack.toml, the
+# five guardrail presets and the 28-entry curated library in
+# guardrails/<key>.toml, and the setup form in setup/*.toml (design §2/§3).
+#
+# `skills/<slug>.toml` below rides along on this SAME plugin folder rather
+# than a separate skill plugin: enabling Odoo should hand an agent both the
+# connection AND the ready-made way to use it in one install, one consent,
+# one enable -- not a second plugin an operator has to find and turn on
+# afterward. One skill, not a pack of several: none of Odoo's 9 tools are
+# scoped to a specific model, so there is one alphabet to learn here, not
+# several workflows to pick between -- the department-specific workflow
+# (which model, which pipeline) stays in each department's own agent mission,
+# e.g. crm_vertrieb_agent's.
+
+[plugin]
+name = "odoo_mcp"
+version = "1.8.4"
+type = "tool_pack"
+trust = "first_party"
+summary = "Connect Odoo — CRM, sales and contacts over the Model Context Protocol"
+permissions = ["mcp:connect", "secrets:use"]
+capabilities = ["integration:odoo"]
+

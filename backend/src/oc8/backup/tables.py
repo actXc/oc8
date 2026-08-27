@@ -1,0 +1,112 @@
+"""Which tables the backup archive carries, and in what order (design doc
+§2.1, §5.2.1)."""
+
+from __future__ import annotations
+
+from collections import defaultdict, deque
+
+from sqlalchemy import Table, text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from oc8.backup.errors import BackupError
+from oc8.db.base import Base
+from oc8.models._mixins import TenantMixin
+
+#: Tenant-scoped tables that are NOT part of a company's portable backup.
+#: See design doc §2.1 for why each is excluded. A denylist, not an
+#: allowlist: a new `TenantMixin` table is included automatically, and
+#: `test_excluded_tables_all_exist` breaks the build if a name here is ever
+#: renamed rather than letting it silently re-enter the export.
+#:
+#: `token_usage_record` is here for a reason the design doc originally missed:
+#: migration 0001 lists it beside `audit_event` in `_IMMUTABLE_TABLES` and does
+#: `REVOKE UPDATE, DELETE ... FROM oc8_app` on both. So a restore *cannot*
+#: replace this table -- the grant forbids it -- and the only two options are
+#: to leave it alone or to merge the archive's rows into whatever is already
+#: there. A merge would make a restored company's metering history the UNION of
+#: two billing ledgers, which is worse than either: a same-tenant rollback
+#: would keep usage recorded after the backup, and a cross-instance restore
+#: would permanently graft another company's usage onto this one, with no
+#: DELETE grant left to undo it. Metering history belongs to the instance that
+#: recorded it, exactly as the audit log does.
+#:
+#: `push_subscription` is excluded for the same reason as `secret`/`tenant_dek`:
+#: its rows are device-scoped credentials bound to THIS instance's one VAPID key
+#: pair. Restored into another instance they would never authenticate against
+#: that instance's key, so every send would fail silently and the rows would
+#: never re-validate -- meaningless data that only looks like a live subscription.
+EXCLUDED_TABLES: frozenset[str] = frozenset(
+    {
+        "audit_event",
+        "audit_chain_checkpoint",
+        "tenant_dek",
+        "secret",
+        "token_usage_record",
+        "push_subscription",
+    }
+)
+
+
+def _tenant_scoped_table_names() -> frozenset[str]:
+    """Every table whose ORM class carries `TenantMixin`, read from the
+    declarative registry rather than hand-listed."""
+    names: set[str] = set()
+    for mapper in Base.registry.mappers:
+        if issubclass(mapper.class_, TenantMixin) and isinstance(mapper.local_table, Table):
+            names.add(mapper.local_table.name)
+    return frozenset(names)
+
+
+def exported_tables() -> frozenset[str]:
+    """The tables a company's backup archive carries (design doc §2.1)."""
+    return _tenant_scoped_table_names() - EXCLUDED_TABLES
+
+
+def table_by_name(name: str) -> Table:
+    return Base.metadata.tables[name]
+
+
+async def dependency_order(db: AsyncSession, tables: frozenset[str]) -> list[str]:
+    """Topological order over `tables`, parents (referenced) before children
+    (referencing), derived from real FK constraints in `pg_constraint` rather
+    than `metadata.sorted_tables` (this schema declares no ORM ForeignKeys --
+    see design doc §5.2.1).
+
+    Insert the archive in this order; delete in `list(reversed(order))`.
+    Raises `BackupError` if the FK graph among `tables` has a cycle.
+    """
+    rows = (
+        await db.execute(
+            text(
+                """
+                SELECT conrelid::regclass::text AS child,
+                       confrelid::regclass::text AS parent
+                FROM pg_constraint
+                WHERE contype = 'f'
+                """
+            )
+        )
+    ).all()
+
+    edges: dict[str, set[str]] = defaultdict(set)  # parent -> children
+    indegree: dict[str, int] = dict.fromkeys(tables, 0)
+    for child, parent in rows:
+        if child not in tables or parent not in tables or child == parent:
+            continue
+        if child not in edges[parent]:
+            edges[parent].add(child)
+            indegree[child] += 1
+
+    queue: deque[str] = deque(sorted(t for t in tables if indegree[t] == 0))
+    order: list[str] = []
+    while queue:
+        node = queue.popleft()
+        order.append(node)
+        for child in sorted(edges[node]):
+            indegree[child] -= 1
+            if indegree[child] == 0:
+                queue.append(child)
+
+    if len(order) != len(tables):
+        raise BackupError("cycle in foreign-key graph among backup tables")
+    return order

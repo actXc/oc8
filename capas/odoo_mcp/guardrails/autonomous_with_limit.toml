@@ -1,0 +1,23 @@
+# Guardrail preset (§4 of the design doc): one of the five answers an operator
+# actually has, so the wizard stops asking a sales question of every agent.
+kind = "preset"
+connection = "primary"
+key = "autonomous_with_limit"
+label = "Selbstständig mit Limit"
+label_en = "Autonomous with a limit"
+summary = "Legt an und bearbeitet selbstständig; ab 1000 € braucht es eine Freigabe. Löschen ist nicht enthalten."
+summary_en = "Creates and edits on its own; anything worth €1,000 or more needs approval. Deleting is not included."
+recommended = false
+read = true
+write = false
+send = true
+approval_actions = []
+approval_eur = 1000
+# Everything except `delete_record`. A deletion carries no amount, so the
+# threshold above can never catch one -- an unreadable value counts as zero and
+# never meets 1000. A preset whose name promises a limit must not have a hole
+# exactly where the limit cannot reach, so the tool is out of reach instead.
+only = [
+  "search_records", "get_record", "list_models", "list_resource_templates",
+  "aggregate_records", "create_record", "update_record", "post_message",
+]

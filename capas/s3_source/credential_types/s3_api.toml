@@ -1,0 +1,26 @@
+name = "s3_api"
+display_name = "S3 / Object storage"
+validate_entry_point = "credential:validate_s3"
+
+[[fields]]
+key = "endpoint"
+label = "Endpoint"
+kind = "url"
+required = false
+help = "Only for S3-compatible stores (MinIO, Ceph). Leave empty for AWS."
+
+[[fields]]
+key = "region"
+label = "Region"
+kind = "text"
+default = "us-east-1"
+
+[[fields]]
+key = "access_key"
+label = "Access key"
+kind = "password"
+
+[[fields]]
+key = "secret_key"
+label = "Secret key"
+kind = "password"

@@ -1,0 +1,24 @@
+name = "Produktfehler melden"
+category = "support"
+description = "Meldet einen nachweisbaren Produktfehler im Entwicklungs-Projekt und gibt dem Kunden die Nummer."
+requires_tools = ["gitea", "odoo"]
+
+instruction = """
+Du hast einen echten Produktfehler vor dir. So gibst du ihn weiter — BEVOR du dem Kunden schreibst, denn die Nummer gehört in deine Antwort, und du hast pro Ticket nur eine.
+
+Zuerst die Abgrenzung, sie ist der wichtigste Teil: ein Produktfehler ist, wenn etwas nachweislich NICHT funktioniert — es stürzt ab, bricht ab, liefert Falsches, reagiert nicht. Eine Frage, ein Wunsch, ein Bedienfehler, eine Liefer- oder Rechnungssache ist KEINER. Im Zweifel ist es keiner: ein überflüssiges Entwicklungsticket kostet einen Kollegen echte Zeit.
+
+1. Sieh ZUERST in dein Gedächtnis (der Abschnitt "Memory" in deinem Kontext, sonst search_memory mit dem Fehler als Suchwort). Steht dort schon ein Entwicklungsticket für genau diesen Fehler, nimm dessen Nummer und lege KEINES an. Zwei Kunden melden denselben Fehler — zwei Tickets dafür sind kein Fleiß, sondern ein Fehler.
+2. Sonst list_issues mit owner "oc8bot", repo "produkt", state "all" — steht er schon drin? Dann nimm die vorhandene Nummer.
+3. Sonst create_issue mit owner "oc8bot", repo "produkt":
+   - title: der Fehler in einem knappen Satz.
+   - body: was der Kunde schildert, dazu "Support-Ticket #<Nummer>" und woran man den Fehler nachstellt.
+4. Halte eine NEUE Nummer sofort mit memory_write fest, tier "department", in einem Satz — z. B. "Produktfehler CSV-Export bricht ab ueber 5000 Zeilen: Entwicklungsticket #7." Das ist der Grund, warum der nächste Kunde mit demselben Fehler dieselbe Nummer bekommt.
+5. Nenne dem Kunden die Nummer in deiner Antwort. Sie ist der Beleg, dass die Meldung angekommen ist, und das Einzige, woran er später anknüpfen kann.
+"""
+
+guardrails = [
+  "Sage nur dann, du habest etwas an die Entwicklung weitergegeben, wenn du wirklich ein Entwicklungsticket hast — und nenne dessen Nummer. Ohne Nummer ist die Aussage erfunden.",
+  "Lege kein zweites Entwicklungsticket für einen Fehler an, der schon gemeldet ist.",
+  "Ein Produktfehler ist keine Entscheidung für einen Menschen. Verwechsle das nicht mit Geld-, Vertrags- oder Rechtsfragen.",
+]

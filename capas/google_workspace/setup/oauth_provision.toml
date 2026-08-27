@@ -1,0 +1,22 @@
+# Submitting setup/fields.toml's form ALSO provisions the service account as an
+# OAuthConnection (core's `google` provider, oauth/provisioning.py) and, when
+# Shared Drive IDs were given, a DataSource for the Drive connector against that
+# same connection. One form, both halves of this plugin.
+#
+# `delegated_scope` here MUST match `oc8/oauth/provisioning.py`'s
+# `_DELEGATED_SCOPE` constant BYTE FOR BYTE -- both are what a Workspace admin
+# authorizes in the Admin Console for this service account's domain-wide
+# delegation, and Google's delegation check is scope-exact: a mismatch here
+# means the standalone service-connection endpoint's consent probe and this
+# plugin's actual per-launch token minting request DIFFERENT scope strings,
+# and a correctly-configured tenant gets a false "delegation not authorized"
+# failure. See docs/GOOGLE_WORKSPACE.md for the one admin-facing place this
+# same string must be documented a third time.
+provider = "google"
+connector_type = "google_workspace_files"
+site_ids_field = "shared_drive_ids"
+source_ids_config_key = "sharedDriveIds"
+delegated_identities_field = "delegated_mailboxes"
+delegated_identities_env = "GOOGLE_DELEGATED_MAILBOXES"
+delegated_token_env_prefix = "GOOGLE_DELEGATED_TOKEN"
+delegated_scope = "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/calendar"

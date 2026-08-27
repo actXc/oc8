@@ -1,0 +1,18 @@
+# Demonstrates the library's one capability a preset structurally cannot
+# have (see manifest.py's GuardrailPreset.approval_actions, restricted to the
+# RIGHTS -- read/write/send -- and nothing more specific): gating ONE named
+# tool for approval while leaving the rest of `send` autonomous.
+
+kind = "library"
+key = "dev_assistant_merge_needs_approval"
+label = "Dev assistant, merging needs approval"
+label_en = "Dev assistant, merging needs approval"
+summary = "Branches, commits, pushes, opens pull requests, reviews and comments on its own; only merge_pull_request needs a human -- the one action that lands code on the default branch. Does not cover delete_file."
+summary_en = "Branches, commits, pushes, opens pull requests, reviews and comments on its own; only merge_pull_request needs a human -- the one action that lands code on the default branch. Does not cover delete_file."
+use_case = "engineering"
+read = true
+write = false
+send = true
+approval_eur = ""
+approval_actions = ["merge_pull_request"]
+only = []

@@ -1,0 +1,29 @@
+# Curated use-case library entry -- documentation by example, mirroring
+# odoo_mcp's quote_approval_threshold: an adjustable €-threshold so an
+# operator can raise or lower it per department without editing TOML.
+
+kind = "library"
+key = "sales_pipeline_autonomous_with_limit"
+label = "Sales pipeline, autonomous with a limit"
+label_en = "Sales pipeline, autonomous with a limit"
+summary = "Creates and updates deals, contacts and companies on its own; at or above the configured amount a human decides. Does not cover schema changes (custom properties) -- a schema change carries no deal amount the threshold could ever catch. `sales_pipeline_autonomous_with_limit` names deals specifically in its story, but the underlying tools are generic across every object type, the same limitation odoo_mcp's own library documents for its ERP models."
+summary_en = "Creates and updates deals, contacts and companies on its own; at or above the configured amount a human decides. Does not cover schema changes (custom properties) -- a schema change carries no deal amount the threshold could ever catch. `sales_pipeline_autonomous_with_limit` names deals specifically in its story, but the underlying tools are generic across every object type, the same limitation odoo_mcp's own library documents for its ERP models."
+use_case = "sales"
+read = true
+write = false
+send = true
+approval_eur = 5000
+approval_actions = []
+only = [
+    "hubspot-batch-create-objects", "hubspot-batch-update-objects",
+    "hubspot-batch-create-associations", "hubspot-create-engagement",
+    "hubspot-update-engagement",
+]
+
+[[adjustable]]
+field = "approval_eur"
+label = "Needs approval from"
+label_en = "Needs approval from"
+unit = "EUR"
+min = 0
+max = 100000

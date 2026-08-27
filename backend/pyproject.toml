@@ -1,0 +1,229 @@
+[project]
+name = "oc8"
+version = "0.1.0"
+description = "oc8 control plane — open-source AI agent management platform"
+license = { text = "LGPL-3.0-or-later" }
+authors = [{ name = "oc8 Contributors", email = "legal-review-required@oc8.invalid" }]
+maintainers = [{ name = "oc8 Core Team", email = "legal-review-required@oc8.invalid" }]
+keywords = ["ai", "agents", "automation", "orchestration", "workflow", "enterprise"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: GNU Lesser General Public License v3 or later (LGPLv3+)",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Internet",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: System :: Monitoring",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "pgvector>=0.3.6",
+    "asyncpg>=0.30",
+    "docker>=7",
+    "psycopg[binary]>=3.2",
+    "alembic>=1.14",
+    "redis>=5.2",
+    "pyjwt>=2.10",
+    "httpx>=0.28",
+    # Upper bound deliberate: mcp 2.0 renamed Tool.inputSchema to input_schema,
+    # and an open bound pulled it in on a routine rebuild, breaking every tool
+    # call at once. The client reads both, so this is a review gate, not a wall.
+    "mcp>=1.2,<3",
+    "python-multipart>=0.0.18",
+    "jsonschema>=4",
+    "packaging>=24",
+    "pypdf>=6.14.2",
+    "croniter>=6.2.4",
+    "cryptography>=43",
+    "opentelemetry-sdk>=1.44.0",
+    "opentelemetry-exporter-otlp>=1.44.0",
+    "opentelemetry-instrumentation-fastapi>=0.65b0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.65b0",
+    "opentelemetry-instrumentation-httpx>=0.65b0",
+    "opentelemetry-instrumentation-logging>=0.65b0",
+    "argon2-cffi>=23.1",
+    "pyotp>=2.9",
+    "pywebpush>=2.4,<3",
+    "python-docx>=1.1",
+    "openpyxl>=3.1",
+    "python-pptx>=1.0",
+    "polib>=1.2",
+]
+
+[project.scripts]
+oc8 = "oc8.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "testcontainers[postgres,redis]>=4.9",
+    "asgi-lifespan>=2.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/oc8"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "RUF"]
+# B008: FastAPI Depends() in defaults is idiomatic.
+# RUF012: Pydantic v2 copies mutable field defaults safely (false positive here).
+ignore = ["B008", "RUF012"]
+
+[tool.ruff.lint.per-file-ignores]
+# RUF001 flags "ambiguous" unicode — meant for code that could hide a homoglyph.
+# The seed module is German PROSE that ships into the database, where an en dash
+# is correct typography and a hyphen would be a downgrade. Scoped to this file so
+# the check keeps working everywhere it is about code.
+"src/oc8/seed/__init__.py" = ["RUF001"]
+# ASYNC240 exists to stop blocking filesystem IO from stalling an event loop.
+# These tests ARE about the filesystem -- asserting that an archive exists and a
+# session tree does not -- and a single stat on a local path in a test is not the
+# hazard the rule is aimed at. Scoped to the tests, so the production sweep still
+# has to justify each stat it takes (it does, individually).
+"tests/evidence/*" = ["ASYNC240"]
+"tests/crypto/test_every_content_column_is_classified.py" = ["E501"]  # a 196-entry reasoned exemption table reads better as one line per entry
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+# Only `cli_harness` remains: it is a shared helper LIBRARY (no plugin.toml,
+# not retrofitted) imported by bare top-level name from inside three runtime
+# plugins' own modules, which `loader.import_entry_point` imports -- no
+# per-test sys.path insertion can reach that. NOTE this entry is a TEST-ONLY
+# crutch: nothing in a deployment (Dockerfile.backend, docker-compose.yml, or
+# any plugin.toml's PYTHONPATH) puts capas/cli_harness on sys.path, so those
+# three runtimes already fail to load in a container today -- a pre-existing
+# gap this plan does not close, only refuses to hide. Do not read this entry as
+# evidence the arrangement is correct.
+# Every actual PLUGIN resolves its own code via an explicit sys.path.insert in
+# its own test modules (see capas/microsoft365/tests/*), because after the
+# package restructure a plugin's package is named for its RESPONSIBILITY, so
+# several plugins share one top-level module name. Counted on disk after the
+# last retrofit: `connector/` x4 (gdrive_source, google_workspace,
+# microsoft365, s3_source), `runtime/` x4 (claude_code_runtime, codex_runtime,
+# nanoclaw_runtime, opencode_runtime), `mcp_bridge/` x2, `channel/` x2,
+# `provider/` x1. A blanket path list would make `import runtime` resolve to
+# whichever root sorts first, silently, for the whole session.
+# Plugin code itself is type-checked by a SCOPED invocation pointed straight at
+# its folders, never through this list -- and NEVER two plugins sharing a
+# package name in one invocation, or mypy reports "Duplicate module named
+# 'runtime'". E.g.
+#   cd backend && uv run mypy ../capas/microsoft365/connector
+#   cd backend && uv run mypy ../capas/claude_code_runtime/runtime \
+#                            ../capas/cli_harness/cli_harness
+mypy_path = "src:../capas/cli_harness"
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["testcontainers.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["jsonschema.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["docker.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["croniter.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["pywebpush.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["polib.*"]
+ignore_missing_imports = true
+
+# Ships no type information. Reached from the SCOPED plugin invocations
+# (`uv run mypy ../capas/microsoft365/connector ...`), which read this same
+# config -- microsoft365's connector and its tests both parse .xlsx with it.
+[[tool.mypy.overrides]]
+module = ["openpyxl.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+# `../capas` added by Task 11: plugin-local tests live at
+# capas/<name>/tests/ from Task 11 on, and without this a bare `pytest` run
+# from `backend/` would silently never collect them (testpaths used to be
+# just ["tests"]). `../capas` is a BARE DIRECTORY GLOB -- pytest only ever
+# collects files matching `python_files` (default `test_*.py`/`*_test.py`),
+# so a plugin's own SOURCE folders are ignored; the one hazard this creates
+# is that any future plugin source module literally named `test_*.py` would
+# be swept in as a test. None exists today (verified: `find capas -name
+# "test_*.py" -o -name "*_test.py"` returns only genuine test files). Do not
+# add one.
+testpaths = ["tests", "../capas"]
+# Only `cli_harness` remains -- see the identical note above [tool.mypy]'s
+# mypy_path for WHY this one entry must not be "tidied up" with the others:
+# it is a shared helper library with no plugin.toml, imported by bare
+# top-level name from inside three runtime plugins' own modules, which
+# `loader.import_entry_point` imports; no per-test sys.path insertion can
+# reach that import. Every actual PLUGIN resolves its own code via an explicit
+# sys.path.insert / autouse `_plugin_path` fixture in its own test modules
+# (see capas/microsoft365/tests/* and tests/plugins/codex_runtime/*).
+pythonpath = ["../capas/cli_harness"]
+# Plugin-local tests live at capas/<name>/tests/ from Task 11 onward. Under
+# pytest's DEFAULT `prepend` import mode that arrangement cannot be collected
+# at all, two independent ways -- both reproduced against this repo:
+#   * the top-level package name `tests` is ALREADY claimed by backend/tests/
+#     (backend/tests/__init__.py exists -- it is what makes
+#     `from tests.conftest import AppSessionFactory` work), so a plugin's own
+#     tests/__init__.py sends the lookup to the wrong directory:
+#     `ModuleNotFoundError: No module named 'tests.test_connector'`;
+#   * and two plugins' identically-named test files (microsoft365 and
+#     google_workspace share FIVE basenames: test_connector, test_manifest,
+#     test_mcp_bridge, test_setup_flow, test_tools_calendar) collide on one
+#     module name: `import file mismatch ... use a unique basename`.
+# Which of the two you hit depends on rootdir and on the __init__.py; both are
+# real and neither is fixable by naming testpaths differently.
+# `importlib` mode imports each test file under a path-derived name instead of
+# a sys.path-derived one, which fixes both; `consider_namespace_packages` keeps
+# backend/tests' own `from tests.… import …` resolving. Verified: the repro
+# passes in both shapes and backend/tests' intra-package imports still work.
+#
+# CAREFUL, this bites: these two settings only apply when THIS file is actually
+# loaded as the config, and `cd backend && uv run pytest ../capas/<name>/tests`
+# does NOT load it. pytest picks rootdir/inifile from the ARGS, and args that
+# live outside backend/ walk up to the repo root, which has no pyproject.toml --
+# so the run silently falls back to `prepend` mode and dies on the very
+# collision described above. Run plugin-local tests as
+#   cd backend && uv run pytest -c pyproject.toml ../capas/<name>/tests
+# (verified both ways; without -c the header prints no `configfile:` line at
+# all, which is the tell), or from a run whose args include backend/tests.
+addopts = "--import-mode=importlib"
+consider_namespace_packages = true
+filterwarnings = [
+    # testcontainers' RedisContainer decorates a method with a deprecated
+    # helper at import time; nothing we can do from the call site.
+    "ignore:The @wait_container_is_ready decorator is deprecated.*:DeprecationWarning:testcontainers.redis",
+]

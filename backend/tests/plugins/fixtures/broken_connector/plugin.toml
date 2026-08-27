@@ -1,0 +1,9 @@
+[plugin]
+name = "broken_connector"
+version = "1.0.0"
+type = "connector"
+trust = "first_party"
+summary = "Test fixture: explodes on import"
+
+[plugin.entry_points]
+connectors = "broken_connector.connector:register"

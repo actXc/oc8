@@ -1,0 +1,121 @@
+"""Connector lookup (§11.2).
+
+Two doors, on purpose:
+
+* ``get_connector`` -- synchronous, **core connectors only**. Every tenant may
+  use these, so it needs no tenant and cannot leak anything.
+* ``resolve_connector`` -- asynchronous, tenant-scoped, and the only way to
+  reach a connector contributed by a plugin.
+
+A plugin's Python module is imported once per process, but a plugin install is
+per tenant. So loading a plugin must never, by itself, make its connector usable:
+``resolve_connector`` first establishes that *this* tenant has the plugin
+installed **and enabled**, and only then looks at what that plugin contributed.
+The reverse shape -- a flat process-global dict of usable connectors -- is the
+one that produced this project's cross-tenant hook-registry Critical.
+
+Unknown type, plugin not installed, plugin installed but not enabled, and plugin
+failed to import all end the same way: ``ConnectorError``. Fail closed.
+"""
+
+from __future__ import annotations
+
+import uuid
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from oc8.capas.contributions import connectors_for
+from oc8.capas.discovery import find_plugin
+from oc8.capas.loader import load_plugin
+from oc8.knowledge.connectors.base import Connector, ConnectorError
+from oc8.knowledge.connectors.upload import _UPLOAD
+from oc8.knowledge.connectors.website import _WEBSITE
+from oc8.models import Capa, CapaInstallation
+
+_CONNECTORS: dict[str, Connector] = {c.type_id: c for c in (_UPLOAD, _WEBSITE)}
+
+
+def get_connector(type_id: str) -> Connector:
+    """A built-in connector. Never returns a plugin contribution -- use
+    ``resolve_connector`` for those, so the tenant check cannot be skipped."""
+    try:
+        return _CONNECTORS[type_id]
+    except KeyError:
+        raise ConnectorError(f"unknown connector type: {type_id!r}") from None
+
+
+def connector_types() -> list[str]:
+    """Built-in connector types only. See ``available_connector_types``."""
+    return list(_CONNECTORS)
+
+
+async def enabled_plugin_names(db: AsyncSession, tenant_id: uuid.UUID) -> list[str]:
+    """Names of the plugins this tenant has installed AND enabled.
+
+    Enabled, not merely installed: ``install_plugin`` records no
+    ``CapaInstallation`` at all, and ``enable_plugin`` is where the operator
+    grants the plugin's declared permissions. Contributing executable code on
+    the strength of an install alone would skip that consent step.
+
+    Public (not underscore-prefixed): ``oc8.credentials.registry`` reuses this
+    exact "which plugins may this tenant's contributions come from" check
+    verbatim, rather than reimplementing it -- see that module's own
+    docstring.
+    """
+    rows = (
+        await db.execute(
+            select(Capa.name)
+            .join(CapaInstallation, CapaInstallation.capa_id == Capa.id)
+            .where(
+                Capa.tenant_id == tenant_id,
+                CapaInstallation.tenant_id == tenant_id,
+                CapaInstallation.status == "enabled",
+            )
+        )
+    ).scalars()
+    return list(rows)
+
+
+async def _plugin_connectors(db: AsyncSession, tenant_id: uuid.UUID) -> dict[str, Connector]:
+    """Connectors contributed by the plugins THIS tenant may use.
+
+    A plugin missing from disk, quarantined, or contributing nothing simply
+    contributes nothing here -- none of those is an error for the caller.
+    """
+    out: dict[str, Connector] = {}
+    for name in await enabled_plugin_names(db, tenant_id):
+        discovered = find_plugin(name)
+        if discovered is None:
+            continue
+        if not load_plugin(discovered):
+            continue
+        out.update(connectors_for(name))
+    return out
+
+
+async def resolve_connector(db: AsyncSession, *, tenant_id: uuid.UUID, type_id: str) -> Connector:
+    """The tenant-scoped lookup. Core connectors first (no DB work); otherwise
+    only what this tenant's enabled plugins contribute."""
+    core = _CONNECTORS.get(type_id)
+    if core is not None:
+        return core
+    contributed = await _plugin_connectors(db, tenant_id)
+    connector = contributed.get(type_id)
+    if connector is None:
+        raise ConnectorError(f"unknown connector type: {type_id!r}")
+    return connector
+
+
+async def available_connector_types(db: AsyncSession, *, tenant_id: uuid.UUID) -> list[str]:
+    """Every connector type this tenant may actually use, built-in plus plugin."""
+    return sorted(set(_CONNECTORS) | set(await _plugin_connectors(db, tenant_id)))
+
+
+async def available_connectors(db: AsyncSession, *, tenant_id: uuid.UUID) -> dict[str, Connector]:
+    """Connector instances usable by this tenant, including enabled plugins.
+
+    This is deliberately tenant-scoped: it is the catalog used by the UI, so it
+    must expose neither merely-installed nor another tenant's connectors.
+    """
+    return {**_CONNECTORS, **(await _plugin_connectors(db, tenant_id))}

@@ -1,0 +1,19 @@
+name = "Phase 1: Learn from History"
+category = "marketing"
+description = "Procedure for phase 1: learn from history in the Carousel Growth Engine role."
+instruction = """
+Execute the procedure for: Phase 1: Learn from History.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Fetch Analytics: Call Upload-Post analytics endpoints for profile metrics and per-post performance via check-analytics.sh.
+2. Extract Insights: Run learn-from-analytics.js to identify best-performing hooks, optimal posting times, and engagement patterns.
+3. Update Learnings: Accumulate insights into learnings.json persistent knowledge base.
+4. Plan Next Carousel: Read learnings.json, pick hook style from top performers, schedule at optimal time, apply recommendations.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

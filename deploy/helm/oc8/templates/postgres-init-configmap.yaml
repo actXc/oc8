@@ -1,0 +1,29 @@
+{{- if .Values.postgres.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "oc8.fullname" . }}-postgres-init
+  labels:
+    {{- include "oc8.labels" . | nindent 4 }}
+data:
+  10-init.sql: |
+    CREATE EXTENSION IF NOT EXISTS vector;
+
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'oc8_migrate') THEN
+        CREATE ROLE oc8_migrate LOGIN PASSWORD 'oc8' NOBYPASSRLS;
+      END IF;
+      IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'oc8_app') THEN
+        CREATE ROLE oc8_app LOGIN PASSWORD 'oc8' NOBYPASSRLS;
+      END IF;
+    END$$;
+
+    ALTER SCHEMA public OWNER TO oc8_migrate;
+    GRANT USAGE ON SCHEMA public TO oc8_app;
+
+    ALTER DEFAULT PRIVILEGES FOR ROLE oc8_migrate IN SCHEMA public
+      GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO oc8_app;
+    ALTER DEFAULT PRIVILEGES FOR ROLE oc8_migrate IN SCHEMA public
+      GRANT USAGE, SELECT ON SEQUENCES TO oc8_app;
+{{- end }}

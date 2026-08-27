@@ -1,0 +1,16 @@
+# Amazon S3 (and any S3-compatible store) as a knowledge source.
+#
+# Credentials are NOT stored in the source config. The config carries the NAMES
+# of two secrets; the values live in the tenant's encrypted secret store and are
+# resolved at sync time through the connector's AuthContext.
+
+[plugin]
+name = "s3_source"
+version = "1.0.0"
+type = "connector"
+trust = "first_party"
+summary = "S3-Bucket als Wissensquelle — Textdateien aus einem Bucket oder Prefix"
+permissions = ["knowledge:write"]
+
+[plugin.entry_points]
+connectors = "connector.connector:register"

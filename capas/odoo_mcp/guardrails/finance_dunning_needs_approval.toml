@@ -1,0 +1,22 @@
+# Curated use-case library entry (design doc §7) -- one of odoo_mcp's 28
+# documented ERP scenarios, written as documentation by example for anyone
+# building an oc8 tool-pack plugin. Every entry is built from the SAME 9
+# generic tools (tool_pack.toml's connection scopes); none of them can restrict
+# a call to one Odoo model, so entries differ in prose and in the specific
+# approval_eur/approval_actions/only chosen, not in a deeper technical
+# restriction. No tool is classified `write`, so every `write` here is false.
+# Each summary says what it grants AND what it deliberately does not cover.
+
+kind = "library"
+key = "finance_dunning_needs_approval"
+label = "Mahnwesen bearbeiten, Versand mit Freigabe"
+label_en = "Work dunning, sending needs approval"
+summary = "Darf offene Posten durchsuchen und Mahnläufe vorbereiten; das Senden einer Nachricht an eine Person (post_message) braucht eine Freigabe. Deckt keine Mahnstufe ab -- jede ausgehende Nachricht braucht dieselbe Freigabe, unabhängig von der Stufe. Deckt auch delete_record nicht ab: anders als `finance_no_deletions`, wo das Löschen aus Nachvollziehbarkeitsgründen ganz entfällt, lässt dieses Guardrail delete_record ungefiltert zu -- wer beides will (Versand-Freigabe UND kein Löschen), muss die beiden Guardrails kombinieren, nicht eines allein anwenden."
+summary_en = "Can search open items and prepare dunning runs; sending a message to a person (post_message) needs approval. Does not cover dunning severity -- every outgoing message needs the same approval regardless of level. Also does not cover delete_record: unlike `finance_no_deletions`, which withholds deletion entirely for the audit trail, this guardrail leaves delete_record fully reachable -- wanting both (approval on sends AND no deletion) means combining the two, not applying either alone."
+use_case = "finance"
+read = true
+write = false
+send = true
+approval_eur = ""
+approval_actions = ["post_message"]
+only = []

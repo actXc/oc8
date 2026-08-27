@@ -1,0 +1,26 @@
+kind = "preset"
+connection = "primary"
+key = "internal_only"
+label = "Nur intern"
+label_en = "Internal only"
+summary = "Arbeitet selbstständig, aber nichts geht nach außen: keine E-Mail, nicht einmal ein Entwurf, keine Einladungsantwort und keine Termine, die auf fremden Kalendern landen. Löschen und Termine absagen ist ebenfalls nicht möglich."
+summary_en = "Works on its own, but nothing goes outward: no email, not even a draft, no invite responses, and no calendar events — an event with attendees lands on their calendars, including outside the company. Deleting and cancelling a calendar event are also not possible."
+recommended = false
+read = true
+write = false
+send = true
+approval_actions = []
+approval_eur = ""
+# No calendar_create_event / calendar_update_event / calendar_create_meet_link
+# here on purpose: all three are in tool_pack.toml's `outward_tools`, because an
+# event with attendees reaches those attendees' calendars. Granting them under a
+# preset an operator picked BECAUSE nothing may reach outsiders is exactly the
+# mismatch this list exists to prevent.
+only = [
+    "gmail_search", "gmail_get", "gmail_list_labels", "gmail_modify_labels",
+    "calendar_list_events", "calendar_get_event", "calendar_check_free_busy",
+    "drive_list", "drive_get_content", "drive_search", "drive_upload", "drive_update_content",
+    "docs_get_text", "docs_replace_text", "docs_create_from_template",
+    "sheets_read_range", "sheets_write_range", "sheets_append_row", "sheets_list_worksheets",
+    "slides_get_text", "slides_replace_placeholder_text", "slides_create_from_template",
+]

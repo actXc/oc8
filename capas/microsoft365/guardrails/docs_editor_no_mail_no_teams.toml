@@ -1,0 +1,17 @@
+kind = "library"
+key = "docs_editor_no_mail_no_teams"
+label = "Dokumenten-Editor ohne Mail/Teams"
+label_en = "Document editor, no Mail/Teams"
+summary = "Word, Excel, PowerPoint und Dateien sind erreichbar — Dateien löschen aber nicht. Mail, Kalender, Teams und Kontakte sind es gar nicht. Passt für einen Agenten, der nur an Dokumenten arbeitet."
+summary_en = "Word, Excel, PowerPoint and Files are reachable — deleting a file is not. Mail, Calendar, Teams and Contacts are not reachable at all. Fits an agent that only works on documents."
+use_case = "files"
+read = true
+write = false
+send = true
+approval_actions = []
+approval_eur = ""
+only = [
+    "files_list", "files_get_content", "files_search", "sites_list", "files_upload", "files_update_content",
+    "word_get_text", "word_replace_text", "excel_read_range", "excel_write_range", "excel_append_row",
+    "excel_list_worksheets", "powerpoint_get_text", "powerpoint_replace_file",
+]

@@ -1,0 +1,20 @@
+name = "Sprint Planning (Day 1)"
+category = "product"
+description = "Procedure for sprint planning (day 1) in the Sprint Prioritizer role."
+instruction = """
+Execute the procedure for: Sprint Planning (Day 1).
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Sprint Goal Definition: Clear, measurable objective with success criteria.
+2. Story Selection: Capacity-based commitment with 15% buffer for uncertainty.
+3. Task Breakdown: Implementation planning with estimates and skill matching.
+4. Definition of Done: Quality criteria and acceptance testing with automated validation.
+5. Commitment: Team agreement on deliverables and timeline with confidence assessment.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

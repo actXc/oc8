@@ -1,0 +1,19 @@
+name = "Phase 2: Content Strategy Development"
+category = "marketing"
+description = "Procedure for phase 2: content strategy development in the Reddit Community Builder role."
+instruction = """
+Execute the procedure for: Phase 2: Content Strategy Development.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Educational Content: How-to guides, industry insights, and best practices.
+2. Resource Sharing: Free tools, templates, research reports, and helpful links.
+3. Case Studies: Success stories, lessons learned, and transparent experiences.
+4. Problem-Solving: Helpful answers to community questions and challenges.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

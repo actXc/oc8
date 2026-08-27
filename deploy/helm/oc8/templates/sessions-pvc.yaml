@@ -1,0 +1,17 @@
+{{- if and .Values.backend.sessions.enabled (not .Values.backend.capas.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "oc8.fullname" . }}-sessions
+  labels:
+    {{- include "oc8.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if .Values.backend.sessions.storageClassName }}
+  storageClassName: {{ .Values.backend.sessions.storageClassName | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.backend.sessions.size }}
+{{- end }}

@@ -1,0 +1,22 @@
+# Curated use-case library entry (design doc §7) -- one of odoo_mcp's 28
+# documented ERP scenarios, written as documentation by example for anyone
+# building an oc8 tool-pack plugin. Every entry is built from the SAME 9
+# generic tools (tool_pack.toml's connection scopes); none of them can restrict
+# a call to one Odoo model, so entries differ in prose and in the specific
+# approval_eur/approval_actions/only chosen, not in a deeper technical
+# restriction. No tool is classified `write`, so every `write` here is false.
+# Each summary says what it grants AND what it deliberately does not cover.
+
+kind = "library"
+key = "sales_draft_only_no_customer_contact"
+label = "Angebote vorbereiten, nie direkt an Kundschaft senden"
+label_en = "Draft quotes, never contact the customer directly"
+summary = "Legt Angebote und Kontakte an und pflegt sie, aber das einzige Werkzeug, das eine Person erreicht (post_message), steht nicht zur Verfügung -- ebenso wenig das Löschen. Deckt nicht ab, ob ein Angebot per E-Mail außerhalb von Odoo verschickt wird; das sieht dieses Werkzeug-Set nicht. Deckt auch keine Bereichsgrenze ab: dieselbe Regel gilt für jedes Odoo-Modell, das die Verbindung erreicht, nicht nur für den Vertrieb."
+summary_en = "Creates and maintains quotes and contacts, but the one tool that reaches a person (post_message) is withheld -- as is deleting. Does not cover a quote being emailed from outside Odoo; this tool set has no visibility into that. Also does not cover a domain boundary: the same rule applies to any Odoo model the connection reaches, not only sales."
+use_case = "sales"
+read = true
+write = false
+send = true
+approval_eur = ""
+approval_actions = []
+only = ["search_records", "get_record", "list_models", "list_resource_templates", "aggregate_records", "create_record", "update_record"]

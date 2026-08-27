@@ -1,0 +1,109 @@
+# The tool-pack half of the jira_mcp plugin. This file's TOP LEVEL *is* the
+# `tool_pack` table (design §2/§3) -- there is no `[plugin.tool_pack]` wrapper.
+# The guardrail presets and the curated use-case library live one file per key
+# in guardrails/.
+
+[[connections]]
+key = "primary"
+name = "jira"
+transport = "stdio"
+server_url = ""
+credential_type = "jira_login"
+
+# Right classification. mcp-atlassian ships far more Jira tools than listed
+# here (Service Desk queues, ProForma forms, development-panel introspection,
+# cross-project dependency analysis, ...) -- ENABLED_TOOLS below restricts the
+# running bridge to exactly this list, so `scopes` stays a complete and
+# accurate picture of what an agent can actually call, not an aspirational
+# one. The omitted tools are the ones a typical company deployment never
+# needs on day one; add to both lists together if that changes.
+[connections.scopes]
+read = [
+    "jira_get_issue", "jira_search", "jira_get_project_issues",
+    "jira_batch_get_changelogs", "jira_search_fields", "jira_get_transitions",
+    "jira_get_project_issue_types", "jira_get_project_versions",
+    "jira_get_project_components", "jira_get_all_projects", "jira_search_projects",
+    "jira_get_agile_boards", "jira_get_board_issues", "jira_get_sprints_from_board",
+    "jira_get_sprint_issues", "jira_get_link_types", "jira_get_worklog",
+    "jira_get_user_profile", "jira_search_assignable_users", "jira_get_issue_watchers",
+]
+send = [
+    "jira_create_issue", "jira_batch_create_issues", "jira_update_issue",
+    "jira_assign_issue", "jira_delete_issue", "jira_move_issue", "jira_add_comment",
+    "jira_edit_comment", "jira_transition_issue", "jira_link_to_epic",
+    "jira_create_issue_link", "jira_remove_issue_link", "jira_add_worklog",
+    "jira_add_watcher", "jira_remove_watcher", "jira_create_sprint",
+    "jira_update_sprint", "jira_add_issues_to_sprint",
+]
+
+[connections.config]
+command = "uv"
+args = ["tool", "run", "mcp-atlassian"]
+
+# NEUTRAL SEAM (outward_tools): a Jira comment notifies the reporter and every
+# watcher immediately -- the one Jira action that reliably puts text in front
+# of a person who isn't logged into oc8. Everything else here changes state
+# inside Jira itself. Editing a comment (jira_edit_comment) re-notifies too,
+# so it counts the same as posting one.
+outward_tools = ["jira_add_comment", "jira_edit_comment"]
+
+[connections.config.env]
+JIRA_URL = "http://host.docker.internal:8080"
+# Restricts the running bridge to exactly the tools classified in
+# `connections.scopes` above -- an unclassified tool is a tool the frame
+# check has no opinion on, which is worse than not exposing it at all.
+ENABLED_TOOLS = "jira_get_issue,jira_search,jira_get_project_issues,jira_batch_get_changelogs,jira_search_fields,jira_get_transitions,jira_get_project_issue_types,jira_get_project_versions,jira_get_project_components,jira_get_all_projects,jira_search_projects,jira_get_agile_boards,jira_get_board_issues,jira_get_sprints_from_board,jira_get_sprint_issues,jira_get_link_types,jira_get_worklog,jira_get_user_profile,jira_search_assignable_users,jira_get_issue_watchers,jira_create_issue,jira_batch_create_issues,jira_update_issue,jira_assign_issue,jira_delete_issue,jira_move_issue,jira_add_comment,jira_edit_comment,jira_transition_issue,jira_link_to_epic,jira_create_issue_link,jira_remove_issue_link,jira_add_worklog,jira_add_watcher,jira_remove_watcher,jira_create_sprint,jira_update_sprint,jira_add_issues_to_sprint"
+
+[connections.config.secret_env]
+JIRA_API_TOKEN = "jira/api_token"
+
+# Vanilla Jira issues carry no monetary value -- there is no `value_spec`
+# here on purpose, the same way a plugin author would simply omit it for any
+# system without one. A guardrail's `approval_eur` silently has no effect
+# without this table (see manifest.py), which is exactly right for Jira: every
+# guardrail below gates on `approval_actions`, never on an amount.
+
+# NEUTRAL SEAM (focus_spec): mirrors gitea_mcp's shape -- the entity is in the
+# TOOL NAME, not in a `model` argument the way Odoo's is.
+[connections.config.focus_spec]
+id_field = "issue_key"
+id_fields = ["issue_key", "key", "id"]
+title_fields = ["summary"]
+name_path = ["summary"]
+default_verb = "Updates"
+search_label = "Searches"
+search_tools = ["jira_search", "jira_get_project_issues", "jira_get_board_issues", "jira_get_sprint_issues"]
+
+[connections.config.focus_spec.tool_entities]
+jira_create_issue = "issue"
+jira_get_issue = "issue"
+jira_update_issue = "issue"
+jira_delete_issue = "issue"
+jira_assign_issue = "issue"
+jira_move_issue = "issue"
+jira_transition_issue = "issue"
+jira_add_comment = "issue"
+jira_edit_comment = "issue"
+jira_add_worklog = "issue"
+jira_link_to_epic = "issue"
+jira_create_issue_link = "issue"
+jira_add_watcher = "issue"
+jira_remove_watcher = "issue"
+jira_create_sprint = "sprint"
+jira_update_sprint = "sprint"
+jira_add_issues_to_sprint = "sprint"
+jira_get_sprint_issues = "sprint"
+
+[connections.config.focus_spec.labels]
+issue = "Issue"
+sprint = "Sprint"
+
+[connections.config.focus_spec.verbs]
+jira_create_issue = "Creates"
+jira_get_issue = "Opens"
+jira_update_issue = "Updates"
+jira_delete_issue = "Deletes"
+jira_add_comment = "Comments on"
+jira_edit_comment = "Edits comment on"
+jira_transition_issue = "Changes status of"
+jira_assign_issue = "Assigns"

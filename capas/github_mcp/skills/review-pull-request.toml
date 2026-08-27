@@ -1,0 +1,18 @@
+name = "GitHub: Review a pull request"
+category = "engineering"
+description = "Review an open pull request's content and leave feedback. Never merges itself."
+requires_tools = ["github"]
+
+instruction = """
+How to review a pull request:
+
+1. Read the description and context with pull_request_read, then the changed files with get_file_contents.
+2. Check: does the PR actually solve the problem named in the title or description? Are tests, documentation, or error handling that the change would call for obviously missing?
+3. Leave concrete notes on specific spots with add_comment_to_pending_review, then submit the review with pull_request_review_write -- as a comment, Approve, or Changes Requested.
+4. Only approve if, after reading the diff, nothing is genuinely unclear to you. When in doubt: Changes Requested with the specific question, not Approve on a hunch.
+"""
+
+guardrails = [
+  "Never call merge_pull_request. A review gives an assessment -- it does not decide whether something gets merged.",
+  "Only approve if you've actually read the diff -- not from the title or description alone.",
+]

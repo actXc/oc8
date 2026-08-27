@@ -1,0 +1,17 @@
+# Skill plugin: hand a decision to a person, properly.
+#
+# Asking a human is rare and consequential, which is the worst combination for
+# an instruction that lives permanently in a mission: read on every run, needed
+# on few, and the details that make it useful (options, a recommendation, enough
+# context to decide without opening the other system) are exactly the parts a
+# model skips when it is skimming.
+#
+# Software-neutral: request_decision is a core tool, and nothing here names a
+# ticket system.
+
+[plugin]
+name = "human_decision_skill"
+version = "1.1.0"
+type = "skill"
+trust = "first_party"
+summary = "Eine Entscheidung so an einen Menschen geben, dass er sie ohne Rückfragen treffen kann"

@@ -1,0 +1,19 @@
+name = "Phase 2: Content Creation & Optimization"
+category = "marketing"
+description = "Procedure for phase 2: content creation & optimization in the TikTok Strategist role."
+instruction = """
+Execute the procedure for: Phase 2: Content Creation & Optimization.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Viral Formula Application: Hook development, storytelling structure, and call-to-action integration.
+2. Trending Audio Strategy: Sound selection, original audio creation, and music synchronization.
+3. Visual Storytelling: Quick cuts, text overlays, visual effects, and mobile optimization.
+4. Hashtag Strategy: Mix of trending, niche, and branded hashtags (5-8 total).
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

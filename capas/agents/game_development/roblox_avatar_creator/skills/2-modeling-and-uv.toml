@@ -1,0 +1,18 @@
+name = "2. Modeling and UV"
+category = "game_development"
+description = "Procedure for 2. modeling and uv in the Roblox Avatar Creator role."
+instruction = """
+Execute the procedure for: 2. Modeling and UV.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Model in Blender or equivalent, targeting the triangle limit from the start.
+2. UV unwrap with 2px padding per island.
+3. Texture paint or create texture in external software.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

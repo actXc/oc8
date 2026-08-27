@@ -1,0 +1,22 @@
+# Curated use-case library entry (design doc §7) -- one of odoo_mcp's 28
+# documented ERP scenarios, written as documentation by example for anyone
+# building an oc8 tool-pack plugin. Every entry is built from the SAME 9
+# generic tools (tool_pack.toml's connection scopes); none of them can restrict
+# a call to one Odoo model, so entries differ in prose and in the specific
+# approval_eur/approval_actions/only chosen, not in a deeper technical
+# restriction. No tool is classified `write`, so every `write` here is false.
+# Each summary says what it grants AND what it deliberately does not cover.
+
+kind = "library"
+key = "finance_no_deletions"
+label = "Finanzbuchhaltung bearbeiten, nie löschen"
+label_en = "Work finance records, never delete"
+summary = "Legt Rechnungen und Buchungsentwürfe an und bearbeitet sie; delete_record steht nicht zur Verfügung -- wichtig für die Nachvollziehbarkeit. Deckt keine Stornobuchung ab, die als neue Buchung statt als Löschung erfasst wird. Deckt auch keine Bereichsgrenze ab: das Ausschließen von delete_record gilt für jedes Odoo-Modell, das die Verbindung erreicht, nicht nur für Finanzbuchungen."
+summary_en = "Creates and updates invoices and draft entries; delete_record is withheld, which matters for the audit trail. Does not cover a reversal entry recorded as a new posting instead of a deletion. Also does not cover a domain boundary: excluding delete_record applies to any Odoo model the connection reaches, not only financial postings."
+use_case = "finance"
+read = true
+write = false
+send = true
+approval_eur = ""
+approval_actions = []
+only = ["search_records", "get_record", "list_models", "list_resource_templates", "aggregate_records", "create_record", "update_record", "post_message"]

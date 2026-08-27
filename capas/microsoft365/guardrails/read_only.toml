@@ -1,0 +1,16 @@
+# Guardrail preset (design doc §5) -- one of the five generic answers, matching
+# odoo_mcp's own shape exactly. `write` stays false in every one: nothing in
+# tool_pack.toml is classified `write`.
+kind = "preset"
+connection = "primary"
+key = "read_only"
+label = "Nur lesen"
+label_en = "Read only"
+summary = "Darf lesen und suchen, aber nichts verändern."
+summary_en = "Can read and search, but change nothing."
+recommended = false
+read = true
+write = false
+send = false
+approval_actions = []
+approval_eur = ""

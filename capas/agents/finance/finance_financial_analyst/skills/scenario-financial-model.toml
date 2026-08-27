@@ -1,0 +1,20 @@
+name = "Scenario financial model"
+category = "finance"
+description = "Build or update a driver-based financial model with base/upside/downside cases and explicit assumptions."
+instruction = """
+Deliver a scenario financial model for the entity or project named in the task.
+
+1. List key assumptions in a table: base / upside / downside / source. Do not invent sources — mark unknowns.
+2. Separate historical inputs from forecast periods clearly.
+3. Build or outline the income statement, cash flow, and (when data allows) balance sheet links for the horizon in the task.
+4. Show free cash flow (or the metric the task names) by scenario with the drivers that differentiate cases.
+5. Call out which assumptions flip the recommendation under sensitivity; if the task gives no threshold, use ~10–15% on the top two drivers.
+6. End with a short decision note: what the model supports, what is still unknown, and what a human should decide next.
+
+Never claim audit-ready accuracy for unverified inputs.
+"""
+guardrails = [
+  "Never invent historical figures or market benchmarks.",
+  "Always label forecasts vs actuals.",
+  "Always include more than one scenario when presenting a forecast.",
+]

@@ -1,0 +1,27 @@
+# google_workspace's curated use-case library (design doc §5), mirroring
+# microsoft365's own library file for field -- every `kind = "library"` file in
+# this folder declares `use_case` plus explicit `read`/`write`/`send`/
+# `approval_actions`/`approval_eur`, and each is parsed and validated by the
+# SAME `parse_guardrail_entry` every other plugin's library goes through
+# (discovery._read_guardrails_folder). A missing required field therefore fails
+# the way it would in production: the whole plugin becomes invalid, not just
+# this one entry. This header is stated once, here, rather than repeated in
+# every library file.
+kind = "library"
+key = "docs_editor_no_mail_no_calendar"
+label = "Nur Dokumente, ohne E-Mail/Kalender"
+label_en = "Docs editor, no mail/calendar"
+summary = "Docs, Sheets, Slides und Drive; E-Mail und Kalender sind ausgeschlossen -- passend für einen Mandanten, der nur die Shared-Drive-Freigabe eingerichtet hat und den Domain-Wide-Delegation-Schritt übersprungen hat."
+summary_en = "Docs, Sheets, Slides and Drive; mail and calendar are excluded -- what a tenant that only completed the Shared Drive step (and skipped domain-wide delegation) can actually use."
+use_case = "files"
+read = true
+write = false
+send = true
+approval_actions = []
+approval_eur = ""
+only = [
+    "drive_list", "drive_get_content", "drive_search", "drive_upload", "drive_update_content",
+    "docs_get_text", "docs_replace_text", "docs_create_from_template",
+    "sheets_read_range", "sheets_write_range", "sheets_append_row", "sheets_list_worksheets",
+    "slides_get_text", "slides_replace_placeholder_text", "slides_create_from_template",
+]

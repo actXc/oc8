@@ -1,0 +1,21 @@
+oc8
+Copyright (c) 2026 oc8 GmbH
+
+This product (the "oc8 Community Edition", comprising the `backend/` and
+`frontend/` directories of this repository) is licensed under the GNU
+Lesser General Public License v3.0 or later (LGPL-3.0-or-later).
+
+    SPDX-License-Identifier: LGPL-3.0-or-later
+
+You should have received a copy of the GNU Lesser General Public License
+along with this program, in the files LICENSE (the LGPLv3 additional
+permissions) and COPYING (the GNU GPLv3 terms it incorporates by
+reference). If not, see <https://www.gnu.org/licenses/>.
+
+This NOTICE covers only oc8 Community. It does not extend to `plugins/*`:
+each plugin carries its own license and provenance; see plugins/README.md
+and the plugin's own manifest.
+
+A full list of third-party dependencies used by oc8 Community, their
+licenses, and a compatibility check against LGPLv3 is recorded in
+THIRD_PARTY_LICENSES.md.

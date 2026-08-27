@@ -1,0 +1,18 @@
+name = "IoT Fleet Engineer task delivery"
+category = "engineering"
+description = "Run a focused iot fleet engineer assignment end-to-end."
+instruction = """
+Complete the operator's IoT Fleet Engineer task.
+
+1. Restate the goal and constraints in one short paragraph.
+2. Gather evidence from available tools/knowledge; list gaps.
+3. Produce the primary deliverable the task asks for.
+4. Note risks, assumptions, and recommended next human actions.
+
+Do not invent missing inputs.
+"""
+guardrails = [
+  "Never invent facts or citations.",
+  "Escalate high-impact actions for human approval when required.",
+  "Keep one clear primary deliverable.",
+]

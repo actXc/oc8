@@ -1,0 +1,112 @@
+"""ORM models. Importing this package registers every table on Base.metadata."""
+
+from oc8.copilot.models import CopilotOperation, CopilotProposal
+from oc8.models.capas import Capa, CapaInstallation, CapaVersion
+from oc8.models.channels import ApprovalChannelBinding
+from oc8.models.collab import ContractBinding, Handoff, HandoffType
+from oc8.models.components import ComponentGrant
+from oc8.models.core import (
+    Agent,
+    Department,
+    ModelConfig,
+    Organization,
+    Permission,
+    Role,
+    RolePermission,
+)
+from oc8.models.credentials import Credential
+from oc8.models.flow import Flow, FlowRun, FlowVersion
+from oc8.models.identity import OrgMember, OrgMemberDepartment, TotpCredential
+from oc8.models.knowledge import (
+    DataSource,
+    IngestionJob,
+    KbChunk,
+    KnowledgeBase,
+    KnowledgeGrant,
+    McpConnection,
+    MemoryRecord,
+    MemoryStore,
+)
+from oc8.models.notifications import PushSubscription
+from oc8.models.oauth import OAuthConnection
+from oc8.models.ops import (
+    ActivityEvent,
+    ApprovalRequest,
+    AuditChainCheckpoint,
+    AuditEvent,
+    Budget,
+    Integration,
+    Task,
+    TokenUsageRecord,
+)
+from oc8.models.pricing import ModelCostReconciliation, ModelPrice
+from oc8.models.run import (
+    AgentRun,
+    Clarification,
+    RecordClaim,
+    RunCancellation,
+    RunMessage,
+    ToolInvocation,
+)
+from oc8.models.secrets import Secret, TenantDek
+from oc8.models.skills import Skill, SkillAssignment, SkillVersion
+from oc8.models.triggers import Trigger
+
+__all__ = [
+    "ActivityEvent",
+    "Agent",
+    "AgentRun",
+    "ApprovalChannelBinding",
+    "ApprovalRequest",
+    "AuditChainCheckpoint",
+    "AuditEvent",
+    "Budget",
+    "Capa",
+    "CapaInstallation",
+    "CapaVersion",
+    "Clarification",
+    "ComponentGrant",
+    "ContractBinding",
+    "CopilotOperation",
+    "CopilotProposal",
+    "Credential",
+    "DataSource",
+    "Department",
+    "Flow",
+    "FlowRun",
+    "FlowVersion",
+    "Handoff",
+    "HandoffType",
+    "IngestionJob",
+    "Integration",
+    "KbChunk",
+    "KnowledgeBase",
+    "KnowledgeGrant",
+    "McpConnection",
+    "MemoryRecord",
+    "MemoryStore",
+    "ModelConfig",
+    "ModelCostReconciliation",
+    "ModelPrice",
+    "OAuthConnection",
+    "OrgMember",
+    "OrgMemberDepartment",
+    "Organization",
+    "Permission",
+    "PushSubscription",
+    "RecordClaim",
+    "Role",
+    "RolePermission",
+    "RunCancellation",
+    "RunMessage",
+    "Secret",
+    "Skill",
+    "SkillAssignment",
+    "SkillVersion",
+    "Task",
+    "TenantDek",
+    "TokenUsageRecord",
+    "ToolInvocation",
+    "TotpCredential",
+    "Trigger",
+]

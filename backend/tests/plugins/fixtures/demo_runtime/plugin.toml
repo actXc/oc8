@@ -1,0 +1,10 @@
+[plugin]
+name = "demo_runtime"
+version = "1.0.0"
+type = "runtime_adapter"
+trust = "first_party"
+summary = "Test fixture: contributes a runtime implementation"
+capabilities = ["checkpoints", "skills"]
+
+[plugin.entry_points]
+runtimes = "demo_runtime.runtime:register"

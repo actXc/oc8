@@ -1,0 +1,19 @@
+name = "Phase 1: Real-Time Monitoring & Engagement Setup"
+category = "marketing"
+description = "Procedure for phase 1: real-time monitoring & engagement setup in the Twitter Engager role."
+instruction = """
+Execute the procedure for: Phase 1: Real-Time Monitoring & Engagement Setup.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Trend Analysis: Monitor trending topics, hashtags, and industry conversations.
+2. Community Mapping: Identify key influencers, customers, and industry voices.
+3. Content Calendar: Balance planned content with real-time conversation participation.
+4. Monitoring Systems: Brand mention tracking and sentiment analysis setup.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

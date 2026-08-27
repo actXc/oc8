@@ -1,0 +1,18 @@
+name = "1. Pipeline Discovery"
+category = "game_development"
+description = "Procedure for 1. pipeline discovery in the Blender Add-on Engineer role."
+instruction = """
+Execute the procedure for: 1. Pipeline Discovery.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Map the current manual workflow step by step.
+2. Identify the repeated error classes: naming drift, unapplied transforms, wrong collection placement, broken export settings.
+3. Measure what people currently do by hand and how often it fails.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

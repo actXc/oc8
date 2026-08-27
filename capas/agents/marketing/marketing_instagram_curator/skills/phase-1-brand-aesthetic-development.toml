@@ -1,0 +1,19 @@
+name = "Phase 1: Brand Aesthetic Development"
+category = "marketing"
+description = "Procedure for phase 1: brand aesthetic development in the Instagram Curator role."
+instruction = """
+Execute the procedure for: Phase 1: Brand Aesthetic Development.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Visual Identity Analysis: Current brand assessment and competitive landscape.
+2. Aesthetic Framework: Color palette, typography, photography style definition.
+3. Grid Planning: 9-post preview optimization for cohesive feed appearance.
+4. Template Creation: Story highlights, post layouts, and graphic elements.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

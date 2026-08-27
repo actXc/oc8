@@ -1,0 +1,19 @@
+name = "Phase 1: Trend Analysis & Strategy Development"
+category = "marketing"
+description = "Procedure for phase 1: trend analysis & strategy development in the TikTok Strategist role."
+instruction = """
+Execute the procedure for: Phase 1: Trend Analysis & Strategy Development.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Algorithm Research: Current ranking factors and optimization opportunities.
+2. Trend Monitoring: Sound trends, visual effects, hashtag challenges, and viral patterns.
+3. Competitor Analysis: Successful brand content and engagement strategies.
+4. Content Pillars: Educational, entertainment, inspirational, and promotional balance.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

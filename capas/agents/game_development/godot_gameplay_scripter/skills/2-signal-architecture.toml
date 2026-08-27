@@ -1,0 +1,18 @@
+name = "2. Signal Architecture"
+category = "game_development"
+description = "Procedure for 2. signal architecture in the Godot Gameplay Scripter role."
+instruction = """
+Execute the procedure for: 2. Signal Architecture.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Define all signals upfront with typed parameters — treat signals like a public API.
+2. Document each signal with ## doc comments in GDScript.
+3. Validate signal names follow the language-specific convention before wiring.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

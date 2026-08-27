@@ -1,0 +1,20 @@
+name = "Phase 2: Technical Architecture"
+category = "specialized"
+description = "Procedure for phase 2: technical architecture in the Agents Orchestrator role."
+instruction = """
+Execute the procedure for: Phase 2: Technical Architecture.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. ``bash.
+2. Verify task list exists from Phase 1.
+3. cat project-tasks/-tasklist.md | head -20.
+4. Spawn ArchitectUX to create foundation.
+5. "Please spawn an ArchitectUX agent to create technical architecture and UX foundation from project-specs/[project]-setup.md and task list. Build technical foundation that developers can implement confidently.".
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

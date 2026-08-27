@@ -1,0 +1,19 @@
+name = "Phase 1: Discovery & Pain Mapping"
+category = "gis"
+description = "Procedure for phase 1: discovery & pain mapping in the Technical Consultant role."
+instruction = """
+Execute the procedure for: Phase 1: Discovery & Pain Mapping.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Understand the organization's operational workflow.
+2. Identify where location data is already used (or should be).
+3. Document current state: tools, data formats, skills, budget.
+4. Map pain points to geospatial capabilities.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

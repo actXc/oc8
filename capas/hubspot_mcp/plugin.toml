@@ -1,0 +1,34 @@
+# HubSpot over the Model Context Protocol, via HubSpot's own official
+# `@hubspot/mcp-server` npm package, launched locally with a private-app
+# access token -- distinct from HubSpot's separate OAuth-hosted remote MCP
+# server, which exposes a different (and larger) tool surface. This plugin
+# deliberately uses the local/self-hosted variant: a private app's scopes are
+# set once by an operator and never renegotiated mid-conversation the way an
+# OAuth consent screen can be.
+#
+# As with the other tool-pack plugins, every HubSpot specific lives HERE. The
+# core learns nothing about deals, contacts or CRM objects.
+#
+# This file is the slim core only. The tool pack lives in tool_pack.toml, the
+# guardrail presets and curated library in guardrails/<key>.toml, and the
+# setup form in setup/{fields,mcp}.toml (design §2/§3).
+#
+# `skills/<slug>.toml` below rides along on this SAME plugin folder rather
+# than a separate skill plugin: enabling HubSpot should hand an agent both the
+# connection AND the ready-made ways to use it in one install, one consent,
+# one enable -- not a second plugin an operator has to find and turn on
+# afterward.
+
+[plugin]
+name = "hubspot_mcp"
+label = "HubSpot"
+version = "1.1.3"
+type = "tool_pack"
+# first_party: the manifest, the seams and the right classification are
+# ours. The bridge itself is HubSpot's own official, actively maintained npm
+# package.
+trust = "first_party"
+summary = "Connect HubSpot — CRM objects, properties and engagements over the Model Context Protocol"
+permissions = ["mcp:connect", "secrets:use"]
+capabilities = ["integration:crm"]
+

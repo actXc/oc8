@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "oc8.fullname" . }}-scheduler
+  labels:
+    {{- include "oc8.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scheduler
+spec:
+  replicas: {{ .Values.scheduler.replicas }}
+  selector:
+    matchLabels:
+      {{- include "oc8.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: scheduler
+  template:
+    metadata:
+      labels:
+        {{- include "oc8.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: scheduler
+    spec:
+      serviceAccountName: {{ include "oc8.serviceAccountName" . }}
+      initContainers:
+        {{- include "oc8.waitForPostgresInit" . | nindent 8 }}
+        - name: wait-for-backend
+          image: {{ include "oc8.backendImage" . }}
+          imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              until python -c "import urllib.request; urllib.request.urlopen('{{ include "oc8.internalBaseUrl" . }}/health')"; do
+                sleep 3
+              done
+      containers:
+        - name: scheduler
+          image: {{ include "oc8.backendImage" . }}
+          imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
+          command: ["oc8", "scheduler"]
+          env:
+            {{- include "oc8.backendEnv" . | nindent 12 }}
+          {{- with .Values.scheduler.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}

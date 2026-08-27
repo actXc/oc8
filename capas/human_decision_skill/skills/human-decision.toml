@@ -1,0 +1,26 @@
+name = "Menschliche Entscheidung"
+category = "support"
+description = "Stellt eine Entscheidungsanfrage mit Optionen und Empfehlung, damit ein Kollege sie ohne Nachfragen treffen kann."
+
+instruction = """
+Etwas muss ein Mensch entscheiden — Geld, Vertrag, Recht, oder eine Beschwerde über eine Person. So gibst du es weiter.
+
+Der Weg ist request_decision, NICHT eine interne Notiz. Eine Notiz im Ticketsystem findet niemand; eine Entscheidungsanfrage landet im Postfach des Kollegen, der sie trifft.
+
+- question: die Entscheidung in EINEM Satz, als Frage. Nicht die Vorgeschichte, sondern das, was zu entscheiden ist.
+- context: alles, was der Mensch dafür braucht — Ticketnummer und Titel, Kunde, was der Kunde schreibt, was du bereits geprüft hast, worum es finanziell geht. Prüfe zum Schluss: könnte er entscheiden, ohne das andere System zu öffnen? Wenn nein, fehlt etwas.
+- options: die konkreten Alternativen, jeweils mit key, label und einem kurzen detail — z. B. voll erstatten / anteilig / ablehnen. Gibt es wirklich nur ja und nein, dann eben die beiden.
+- recommendation: der key der Option, die DU wählen würdest. Ein Kollege, der deine Einschätzung sieht, entscheidet schneller — und wenn du danebenliegst, sieht er auch das.
+
+Du wartest NICHT auf die Antwort. Arbeite weiter; die Entscheidung kommt später als eigene Aufgabe zu dir zurück.
+
+Dem Kunden sagst du in diesem Fall nur, dass eine Kollegin oder ein Kollege das prüft. Sage nichts zu — weder Betrag noch Frist noch Ergebnis.
+
+Und höchstens EINE Anfrage pro Durchlauf: zwei Anfragen zu einem Ticket bedeuten, dass jemand dieselbe Sache zweimal liest und zweimal entscheidet.
+"""
+
+guardrails = [
+  "Sage dem Kunden nichts zu, was ein Mensch erst entscheiden muss — auch nicht als Aussicht.",
+  "Stelle höchstens eine Entscheidungsanfrage pro Durchlauf.",
+  "Eine interne Notiz ersetzt keine Entscheidungsanfrage.",
+]

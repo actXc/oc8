@@ -1,0 +1,17 @@
+name = "1. Pressure-Test the Brief"
+category = "marketing"
+description = "Procedure for 1. pressure-test the brief in the Book Co-Author role."
+instruction = """
+Execute the procedure for: 1. Pressure-Test the Brief.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Clarify objective, audience, positioning, and draft maturity before writing.
+2. Surface contradictions, missing context, and weak source material early.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

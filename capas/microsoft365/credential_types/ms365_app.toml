@@ -1,0 +1,17 @@
+name = "ms365_app"
+display_name = "Microsoft 365 app registration"
+
+[[fields]]
+key = "azure_tenant_id"
+label = "Azure AD tenant ID"
+kind = "text"
+
+[[fields]]
+key = "client_id"
+label = "Application (client) ID"
+kind = "text"
+
+[[fields]]
+key = "client_secret"
+label = "Client secret"
+kind = "password"

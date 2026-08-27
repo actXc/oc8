@@ -1,0 +1,26 @@
+# Operator setup form, interpreted generically by the core. The connection
+# profile (URL, token) lives entirely in the shared credentials store -- one
+# credential = one Gitea/Forgejo/Codeberg instance, reusable across
+# departments/connections.
+title = "Set up Gitea"
+description = "Connect a Gitea, Forgejo or Codeberg instance so agents can file and read issues."
+submit_label = "Save & test"
+
+[[fields]]
+key = "department"
+label = "Department"
+kind = "department"
+required = false
+help = "Agents in this department will use this connection automatically."
+
+# Required: nothing on this form is prefilled from an existing connection,
+# and this one field carries URL and token together -- leaving it blank on a
+# resubmit would silently wipe both from an already-working connection
+# instead of leaving it unchanged (env_fields/secret_env_fields only replace
+# what THIS submission actually provides).
+[[fields]]
+key = "system"
+label = "Gitea system"
+kind = "credential"
+credential_type = "gitea_login"
+help = "URL and personal access token, resolved from the shared credentials store only while the bridge starts."

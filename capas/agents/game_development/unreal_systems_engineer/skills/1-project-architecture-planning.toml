@@ -1,0 +1,19 @@
+name = "1. Project Architecture Planning"
+category = "game_development"
+description = "Procedure for 1. project architecture planning in the Unreal Systems Engineer role."
+instruction = """
+Execute the procedure for: 1. Project Architecture Planning.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Define the C++/Blueprint split: what designers own vs. what engineers implement.
+2. Identify GAS scope: which attributes, abilities, and tags are needed.
+3. Plan Nanite mesh budget per scene type (urban, foliage, interior).
+4. Establish module structure in .Build.cs before writing any gameplay code.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

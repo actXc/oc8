@@ -1,0 +1,120 @@
+"""The only legal way to load or list an approval for a HUMAN (§0.B, §4).
+
+Not a convenience layer. `api/v1/feed.py` has listed approvals filtered on status
+alone since the day it was written, and that is not because anybody decided the
+whole company should see them -- it is because nothing forced a new list to say
+whose they are. So the term lives here, `decide_approval` asks it again, and
+`tests/approvals/test_reads_go_through_the_scoped_repository.py` fails the build
+for a `select(m.ApprovalRequest)` written anywhere else.
+
+The one shape this module exists to make unwritable:
+
+    if scope.viewable:
+        stmt = stmt.where(ApprovalRequest.department_id.in_(scope.viewable))
+
+`WHERE department_id IN ()` is not valid SQL, so skipping the filter when the set
+is empty is the natural way to write it -- and it fails OPEN, handing a seatless
+employee every approval in the tenant. An empty scope returns an empty list here,
+before any statement is built.
+"""
+
+from __future__ import annotations
+
+import uuid
+from typing import TYPE_CHECKING
+
+from sqlalchemy import select
+
+from oc8.models.ops import ApprovalRequest
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from oc8.authz.scope import DecisionActor
+
+#: A list endpoint with no ceiling is a denial of service with a friendly name;
+#: §5 fixes the default at 100 and the ceiling at 500.
+DEFAULT_LIMIT = 100
+MAX_LIMIT = 500
+
+
+async def visible_approvals(
+    db: AsyncSession,
+    *,
+    actor: DecisionActor,
+    status: str,
+    department_id: uuid.UUID | None = None,
+    limit: int = DEFAULT_LIMIT,
+) -> list[ApprovalRequest]:
+    """The approvals this actor may see, newest first.
+
+    `actor` is keyword-only with no default for the same reason it is on
+    `decide_approval`: a caller that could omit it is a caller that lists the
+    whole tenant, and nothing would fail.
+
+    `department_id` INTERSECTS the scope and never widens it. It is a filter over
+    what you may already see -- the department picker an admin gets on the screen
+    -- so asking for somebody else's department returns nothing rather than 403,
+    because a 403 there would answer "does that department exist".
+    """
+    scope = actor.scope
+    stmt = select(ApprovalRequest).where(ApprovalRequest.status == status)
+
+    if scope.is_unrestricted:
+        # No department predicate at all. This is the ONLY way `department_id IS
+        # NULL` -- the tenant-scope budget incident -- is ever visible to anybody,
+        # and `viewable` is empty for an unrestricted caller by design, so a
+        # filter built from it would show a CEO nothing.
+        pass
+    elif scope.viewable:
+        stmt = stmt.where(ApprovalRequest.department_id.in_(scope.viewable))
+    else:
+        return []
+
+    if department_id is not None:
+        if not scope.may_view(department_id):
+            return []
+        stmt = stmt.where(ApprovalRequest.department_id == department_id)
+
+    # `id` breaks the tie. `created_at` defaults to `now()`, which in Postgres is
+    # TRANSACTION start time, so several approvals raised inside one request --
+    # a held tool call and the budget incident that fired on the same step --
+    # share it to the microsecond, and their relative order is then whatever the
+    # plan happens to emit. Ids are uuid7 and time-ordered, so this is the same
+    # "newest" measured by a finer clock, and it is stable between two requests.
+    stmt = stmt.order_by(ApprovalRequest.created_at.desc(), ApprovalRequest.id.desc()).limit(
+        max(1, min(limit, MAX_LIMIT))
+    )
+    return list((await db.execute(stmt)).scalars().all())
+
+
+async def load_for_actor(
+    db: AsyncSession, approval_id: uuid.UUID, *, actor: DecisionActor
+) -> ApprovalRequest | None:
+    """One approval, or `None` for BOTH "no such row" and "not yours".
+
+    The caller 404s on either without telling them apart. That is the oracle
+    guard: `AlreadyDecided`'s 409 carries the status and the time it was decided,
+    and the realtime socket still announces `approval.created` tenant-wide
+    (§10 item 5), so a caller holding ids off it could otherwise ask this
+    endpoint which of them exist and when they were answered. The scope is
+    therefore resolved BEFORE the row's state is examined.
+
+    An explicit `select()` and never `db.get`: `Session.get` returns an
+    already-loaded instance out of the identity map without issuing SQL, and this
+    load is a security boundary -- one whose answer must come from the database
+    and from this transaction's RLS binding, not from whatever the session
+    happens to have seen earlier in the request.
+    """
+    row = (
+        await db.execute(
+            select(ApprovalRequest)
+            .where(ApprovalRequest.id == approval_id)
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        return None
+    if not actor.scope.may_view(row.department_id):
+        return None
+    return row

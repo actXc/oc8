@@ -1,0 +1,16 @@
+name = "Paper Process"
+category = "sales"
+description = "Procedure for paper process in the Deal Strategist role."
+instruction = """
+Execute the procedure for: Paper Process.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Legal review, procurement, security questionnaire, vendor risk assessment, data processing agreements — the operational gauntlet where "verbally won" deals go to die. Identify these requirements early. Ask: "Has your legal team reviewed agreements like ours before? What does security review typically look like?" A 6-week procurement cycle discovered in week 11 kills the quarter..
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

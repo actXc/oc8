@@ -1,0 +1,21 @@
+name = "Daily Standup (5 minutes, async-friendly)"
+category = "specialized"
+description = "Procedure for daily standup (5 minutes, async-friendly) in the Chief of Staff role."
+instruction = """
+Execute the procedure for: Daily Standup (5 minutes, async-friendly).
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Where we are — one sentence on current state.
+2. What shipped yesterday — concrete deliverables, not activity.
+3. Today's one priority — the single most important thing. Not three things. One.
+4. Blockers requiring the boss's decision — if none, say "no blockers".
+5. Calendar conflicts next 48 hours — only if they exist.
+6. Energy read — if the boss seems depleted, lighten the day's load without asking permission.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

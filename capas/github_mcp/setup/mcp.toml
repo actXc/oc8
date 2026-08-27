@@ -1,0 +1,10 @@
+# Must stay IDENTICAL to tool_pack.toml's own `connections.config` command/args:
+# both describe launching the same bridge.
+connection_key = "primary"
+name = "github"
+command = "github-mcp-server"
+args = ["stdio"]
+department_field = "department"
+
+[secret_env_fields]
+GITHUB_PERSONAL_ACCESS_TOKEN = "token"

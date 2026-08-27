@@ -1,0 +1,15 @@
+[plugin]
+name = "claude_code_runtime"
+version = "0.1.0"
+type = "runtime_adapter"
+trust = "first_party"
+label = "Claude Code"
+summary = "Run agents with the Claude Code CLI in its own container -- native file/bash tools inside the sandbox, oc8's gateway for anything governed"
+permissions = ["sandbox:run"]
+# `checkpoints` deliberately absent -- same reasoning as nanoclaw_runtime's own
+# manifest: this runtime's container is opaque to the in-process checkpoint
+# mechanism, so the fail-closed negotiation keeps supervised agents off it.
+capabilities = ["skills"]
+
+[plugin.entry_points]
+runtime = "runtime.runtime:register"

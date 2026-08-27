@@ -1,0 +1,8 @@
+name = "hubspot_login"
+display_name = "HubSpot private app"
+
+[[fields]]
+key = "private_app_access_token"
+label = "Private app access token"
+kind = "password"
+help = "Created under HubSpot's Private Apps settings. Grant only the CRM scopes agents actually need."

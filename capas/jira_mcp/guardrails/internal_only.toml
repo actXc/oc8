@@ -1,0 +1,27 @@
+kind = "preset"
+connection = "primary"
+key = "internal_only"
+label = "Internal only"
+label_en = "Internal only"
+summary = "Maintains tickets on its own, but never comments -- nobody gets notified by the agent."
+summary_en = "Maintains tickets on its own, but never comments -- nobody gets notified by the agent."
+recommended = false
+read = true
+write = false
+send = true
+approval_actions = []
+approval_eur = ""
+# `jira_add_comment`/`jira_edit_comment` are this connection's outward tools
+# (see `outward_tools` in tool_pack.toml) -- the only ones that reliably put
+# text in front of the reporter and watchers. Withholding them is the whole
+# preset: an agent may triage, assign, link and move tickets all day and
+# still be unable to say anything to a person. Rights cannot express that,
+# because commenting shares the `send` right with every other write.
+only = [
+    "jira_create_issue", "jira_batch_create_issues", "jira_update_issue",
+    "jira_assign_issue", "jira_delete_issue", "jira_move_issue",
+    "jira_transition_issue", "jira_link_to_epic", "jira_create_issue_link",
+    "jira_remove_issue_link", "jira_add_worklog", "jira_add_watcher",
+    "jira_remove_watcher", "jira_create_sprint", "jira_update_sprint",
+    "jira_add_issues_to_sprint",
+]

@@ -1,0 +1,29 @@
+name = "Ticket-Erstantwort"
+category = "support"
+description = "Formuliert die erste Antwort an einen Kunden im Ticket-Chatter."
+requires_tools = ["odoo"]
+
+instruction = """
+So schreibst du eine Erstantwort an einen Kunden:
+
+1. Sprich den Kunden mit Namen an und nenne den Betreff des Tickets, damit klar ist, worum es geht.
+2. Sage in EINEM Satz zurück, was du verstanden hast. Der Kunde muss erkennen, dass ein Mensch (oder ein sorgfältiger Assistent) sein Problem gelesen hat.
+3. Nenne dann konkret, was du bereits getan hast oder als Nächstes tust. "Wir kümmern uns darum" ist keine Antwort.
+4. Wenn du das Problem aus der Beschreibung lösen kannst, gib die Lösung direkt als nummerierte Schritte an. Der Kunde soll nichts nachfragen müssen.
+5. Wenn dir etwas fehlt, stelle GENAU EINE präzise Rückfrage — die eine Angabe, ohne die es nicht weitergeht. Keine Liste von fünf Fragen.
+6. Schließe mit einem Satz, was als Nächstes passiert (z. B. Rückmeldung erwartet, Prüfung läuft).
+
+Ton: Sie-Form, freundlich, knapp. Keine Textbausteine, keine Entschuldigungsschleifen, keine internen Begriffe (Stage, Ticket-ID, Modellnamen). 4 bis 8 Sätze.
+"""
+
+# Prose guardrails: these are appended to the agent's instructions at runtime.
+# They are deliberately not numeric thresholds -- nothing here has a € value,
+# and the approval gate is the department frame's job, not the skill's.
+guardrails = [
+  "Sage niemals eine Erstattung, Gutschrift, Vertragsänderung oder einen Liefertermin zu. Kündige stattdessen die Prüfung durch einen Menschen an.",
+  "Erfinde keine Fakten: keine Bestellnummern, Beträge, Namen oder Fristen, die nicht im Ticket oder in Odoo stehen.",
+  "Behaupte NIE, ein Problem sei bereits behoben, eine Ursache gefunden oder ein System repariert, wenn du das nicht selbst geprüft hast. Schreibe stattdessen, was der Kunde jetzt versuchen kann und was du veranlasst hast.",
+  "Nenne keine internen Details — keine Stage-Namen, keine Datensatz-IDs, keine Werkzeug- oder Systemnamen.",
+  "Bei rechtlichen Themen, Beschwerden über Mitarbeitende oder Datenschutzanfragen antwortest du nicht inhaltlich, sondern übergibst an einen Menschen.",
+  "Schreibe in der Sprache des Kunden. Ist die Anfrage deutsch, antworte deutsch.",
+]

@@ -1,0 +1,18 @@
+# LLM provider plugin: OPaaS AI (Mistral models via a LiteLLM OpenAI-compatible
+# proxy). Adding a provider is a PLUGIN concern, not a core edit — the core model
+# router resolves plugin-contributed providers exactly like built-in ones, and
+# a tenant may only use one it enabled. The API key/base_url are never in this
+# manifest; they are a BYOK tenant `Credential` of this plugin's own
+# `opaas_ai_api_key` type (credential_types/opaas_ai_api_key.toml) -- the same
+# unified credentials framework a core provider's `{canonical}_api_key` type
+# goes through.
+
+[plugin]
+name = "opaas_ai_provider"
+version = "1.0.0"
+type = "model_adapter"
+trust = "first_party"
+summary = "OPaaS AI — Mistral models over an OpenAI-compatible endpoint"
+
+[plugin.entry_points]
+providers = "provider.provider:register"

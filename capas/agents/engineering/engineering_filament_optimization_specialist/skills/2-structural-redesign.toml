@@ -1,0 +1,18 @@
+name = "2. Structural Redesign"
+category = "engineering"
+description = "Procedure for 2. structural redesign in the Filament Optimization Specialist role."
+instruction = """
+Execute the procedure for: 2. Structural Redesign.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Propose an information hierarchy: primary (always visible above the fold), secondary (in a tab or collapsible section), tertiary (in a RelationManager or collapsed section).
+2. Draw the new layout as a comment block before writing code, e.g.:.
+3. Implement the full restructured form, not just one section.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

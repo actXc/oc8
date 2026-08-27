@@ -1,0 +1,95 @@
+{{- if .Values.caddy.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "oc8.fullname" . }}-caddy
+  labels:
+    {{- include "oc8.labels" . | nindent 4 }}
+data:
+  Caddyfile: |
+    :80 {
+      handle /api/* {
+        reverse_proxy {{ include "oc8.backendHost" . }}:8099
+      }
+      handle /health {
+        reverse_proxy {{ include "oc8.backendHost" . }}:8099
+      }
+      handle /llm/* {
+        reverse_proxy {{ include "oc8.backendHost" . }}:8099
+      }
+      handle /mcp* {
+        reverse_proxy {{ include "oc8.backendHost" . }}:8099
+      }
+      handle {
+        reverse_proxy {{ include "oc8.frontendHost" . }}:3000
+      }
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "oc8.fullname" . }}-caddy
+  labels:
+    {{- include "oc8.labels" . | nindent 4 }}
+    app.kubernetes.io/component: caddy
+spec:
+  type: {{ .Values.caddy.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.caddy.service.port }}
+      targetPort: http
+      {{- if and (eq .Values.caddy.service.type "NodePort") .Values.caddy.service.nodePort }}
+      nodePort: {{ .Values.caddy.service.nodePort }}
+      {{- end }}
+  selector:
+    {{- include "oc8.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: caddy
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "oc8.fullname" . }}-caddy
+  labels:
+    {{- include "oc8.labels" . | nindent 4 }}
+    app.kubernetes.io/component: caddy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "oc8.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: caddy
+  template:
+    metadata:
+      labels:
+        {{- include "oc8.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: caddy
+    spec:
+      serviceAccountName: {{ include "oc8.serviceAccountName" . }}
+      containers:
+        - name: caddy
+          image: {{ .Values.images.caddy.repository }}:{{ .Values.images.caddy.tag }}
+          imagePullPolicy: {{ .Values.images.caddy.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 80
+          volumeMounts:
+            - name: caddyfile
+              mountPath: /etc/caddy/Caddyfile
+              subPath: Caddyfile
+            - name: data
+              mountPath: /data
+            - name: config
+              mountPath: /config
+          {{- with .Values.caddy.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: caddyfile
+          configMap:
+            name: {{ include "oc8.fullname" . }}-caddy
+        - name: data
+          emptyDir: {}
+        - name: config
+          emptyDir: {}
+{{- end }}

@@ -1,0 +1,22 @@
+# Curated use-case library entry (design doc §7) -- one of odoo_mcp's 28
+# documented ERP scenarios, written as documentation by example for anyone
+# building an oc8 tool-pack plugin. Every entry is built from the SAME 9
+# generic tools (tool_pack.toml's connection scopes); none of them can restrict
+# a call to one Odoo model, so entries differ in prose and in the specific
+# approval_eur/approval_actions/only chosen, not in a deeper technical
+# restriction. No tool is classified `write`, so every `write` here is false.
+# Each summary says what it grants AND what it deliberately does not cover.
+
+kind = "library"
+key = "helpdesk_full_autonomy_with_approval_gate"
+label = "Volle Autonomie, außer Löschen und Kundenkontakt"
+label_en = "Full autonomy, except deleting and customer contact"
+summary = "Darf Tickets frei anlegen, bearbeiten, suchen und zuweisen; nur delete_record und post_message brauchen eine Freigabe. Deckt nicht ab, wie oft eine Freigabe angefordert wird -- bei sehr aktiven Tickets kann das die Freigabe-Warteschlange füllen."
+summary_en = "Can freely create, update, search and assign tickets; only delete_record and post_message need approval. Does not cover how often approval gets requested -- on very active tickets this can fill the approval queue."
+use_case = "helpdesk"
+read = true
+write = false
+send = true
+approval_eur = ""
+approval_actions = ["post_message", "delete_record"]
+only = []

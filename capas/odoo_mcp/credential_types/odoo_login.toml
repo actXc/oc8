@@ -1,0 +1,26 @@
+name = "odoo_login"
+display_name = "Odoo system"
+validate_entry_point = "credential:validate_odoo_login"
+
+[[fields]]
+key = "url"
+label = "Odoo URL, as reachable from the oc8 backend container"
+kind = "url"
+placeholder = "http://host.docker.internal:1000"
+
+[[fields]]
+key = "database"
+label = "Odoo database"
+kind = "text"
+default = "oc8"
+
+[[fields]]
+key = "username"
+label = "Odoo user (login)"
+kind = "text"
+default = "admin"
+
+[[fields]]
+key = "password"
+label = "Odoo password or API key"
+kind = "password"

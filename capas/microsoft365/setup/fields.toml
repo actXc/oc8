@@ -1,0 +1,42 @@
+title = "Connect Microsoft 365"
+description = "Requires an Azure AD app registration with admin-consented Graph permissions — including Organization.Read.All, which is what the connection test itself reads. See docs/MICROSOFT365.md for the step-by-step walkthrough (app registration, the full permission list, granting admin consent, and where to find a SharePoint site ID) before submitting."
+submit_label = "Save & test"
+
+# Required: nothing on this form is prefilled from an existing connection,
+# and this one field carries the Azure AD tenant ID, client ID, and client
+# secret together -- leaving it blank on a resubmit would silently wipe all
+# three from an already-working connection instead of leaving it unchanged.
+[[fields]]
+key = "app"
+label = "Microsoft 365 app registration"
+kind = "credential"
+credential_type = "ms365_app"
+help = "Azure AD tenant ID, application (client) ID, and client secret, resolved from the shared credentials store only while the bridge starts."
+
+# Which department's agents get these tools. Without it the connection is
+# created with department_id = NULL, and runtime/executor.py's connection
+# lookup (`McpConnection.department_id == agent.department_id`) never matches
+# a NULL -- setup would succeed and every agent would still have no tools.
+[[fields]]
+key = "department"
+label = "Department"
+kind = "department"
+required = false
+help = "Agents in this department will use this connection automatically."
+
+# App-only auth has no signed-in user, so Mail/Calendar/Contacts calls must
+# name a mailbox. A tool call may pass `userId` per call; this is what they
+# fall back to when it does not.
+[[fields]]
+key = "default_user"
+label = "Default mailbox (UPN or object ID, optional)"
+kind = "text"
+required = false
+help = "The mailbox the Mail, Calendar and Contacts tools work in when a tool call does not name one itself — e.g. info@contoso.com. Leave empty to require every tool call to pass a userId."
+
+[[fields]]
+key = "site_ids"
+label = "SharePoint site IDs to index (comma-separated)"
+kind = "text"
+required = false
+help = "Leave empty to skip the knowledge base for now — the Mail/Calendar/Teams/Office tools still work; add site IDs later to enable SharePoint/OneDrive sync."

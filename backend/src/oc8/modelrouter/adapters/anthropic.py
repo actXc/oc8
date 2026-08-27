@@ -1,0 +1,232 @@
+"""Anthropic adapter — Claude messages API with tool use."""
+
+from __future__ import annotations
+
+import json
+import logging
+from collections.abc import AsyncIterator
+from typing import Any
+
+import httpx
+
+from oc8.modelrouter.http_errors import araise_for_status_with_body, raise_for_status_with_body
+from oc8.modelrouter.types import (
+    CompletionChunk,
+    CompletionRequest,
+    CompletionResult,
+    NeutralMessage,
+    ToolCall,
+    ToolCallDelta,
+    Usage,
+)
+
+logger = logging.getLogger(__name__)
+
+_API_URL = "https://api.anthropic.com/v1/messages"
+_VERSION = "2023-06-01"
+
+
+def _to_anthropic_messages(messages: list[NeutralMessage]) -> tuple[str, list[dict[str, Any]]]:
+    system_parts: list[str] = []
+    out: list[dict[str, Any]] = []
+    for msg in messages:
+        if msg.role == "system":
+            system_parts.append(msg.content)
+        elif msg.role == "user":
+            out.append({"role": "user", "content": msg.content})
+        elif msg.role == "assistant":
+            blocks: list[dict[str, Any]] = []
+            if msg.content:
+                blocks.append({"type": "text", "text": msg.content})
+            for tc in msg.tool_calls:
+                blocks.append(
+                    {"type": "tool_use", "id": tc.id, "name": tc.name, "input": tc.arguments}
+                )
+            out.append({"role": "assistant", "content": blocks})
+        elif msg.role == "tool":
+            out.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": msg.tool_call_id or "",
+                            "content": msg.content,
+                        }
+                    ],
+                }
+            )
+    return "\n".join(system_parts), out
+
+
+def _build_payload(req: CompletionRequest) -> dict[str, Any]:
+    system, messages = _to_anthropic_messages(req.messages)
+    payload: dict[str, Any] = {
+        "model": req.model,
+        "max_tokens": req.params.max_tokens,
+        "temperature": req.params.temperature,
+        "messages": messages,
+    }
+    if system:
+        payload["system"] = system
+    if req.tools:
+        payload["tools"] = [
+            {"name": t.name, "description": t.description, "input_schema": t.parameters}
+            for t in req.tools
+        ]
+    return payload
+
+
+class AnthropicAdapter:
+    provider = "anthropic"
+
+    def __init__(self, api_key: str) -> None:
+        self._api_key = api_key
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "x-api-key": self._api_key,
+            "anthropic-version": _VERSION,
+            "content-type": "application/json",
+        }
+
+    async def complete(self, req: CompletionRequest) -> CompletionResult:
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            resp = await client.post(_API_URL, json=_build_payload(req), headers=self._headers())
+            raise_for_status_with_body(resp)
+            data = resp.json()
+
+        text_parts: list[str] = []
+        tool_calls: list[ToolCall] = []
+        for block in data.get("content", []):
+            if block.get("type") == "text":
+                text_parts.append(block.get("text", ""))
+            elif block.get("type") == "tool_use":
+                tool_calls.append(
+                    ToolCall(
+                        id=block.get("id", ""),
+                        name=block.get("name", ""),
+                        arguments=block.get("input", {}) or {},
+                    )
+                )
+        usage_raw = data.get("usage", {})
+        usage = Usage(
+            tokens_in=int(usage_raw.get("input_tokens", 0)),
+            tokens_out=int(usage_raw.get("output_tokens", 0)),
+        )
+        return CompletionResult(
+            text="".join(text_parts),
+            tool_calls=tool_calls,
+            usage=usage,
+            stop_reason=data.get("stop_reason", "stop"),
+            provider=self.provider,
+            model=req.model,
+        )
+
+    async def stream(self, req: CompletionRequest) -> AsyncIterator[CompletionChunk]:
+        """Stream via Anthropic's own SSE event types (message_start,
+        content_block_delta, message_delta, ...) -- unlike the OpenAI-shaped
+        providers, each payload's meaning depends on its `event:` line, not
+        just its `data:` body, and a tool call's id/name arrive once on
+        content_block_start while its arguments stream afterward as
+        text-fragment `input_json_delta`s on content_block_delta, keyed by
+        the block's `index` -- the same index a tool_use block was assigned
+        when it started, since Anthropic interleaves text and tool_use
+        blocks by position rather than a separate tool-call channel.
+        """
+        payload = {**_build_payload(req), "stream": True}
+        # message_start carries input_tokens; message_delta carries only
+        # output_tokens (Anthropic never repeats the input count once it's
+        # sent). The accumulator treats each chunk's usage as the new
+        # cumulative total, not something to add across chunks, so
+        # message_delta's own usage chunk must still carry the input count
+        # forward or it reads as "0 input tokens" once message_delta's
+        # smaller usage object overwrites message_start's.
+        tokens_in = 0
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            async with client.stream(
+                "POST", _API_URL, json=payload, headers=self._headers()
+            ) as resp:
+                await araise_for_status_with_body(resp)
+                event_type = ""
+                async for line in resp.aiter_lines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if line.startswith("event:"):
+                        event_type = line[len("event:") :].strip()
+                        continue
+                    if not line.startswith("data:"):
+                        continue
+                    try:
+                        data = json.loads(line[len("data:") :].strip())
+                    except (ValueError, TypeError):
+                        logger.debug("skipping unparseable anthropic stream line: %r", line[:120])
+                        continue
+                    chunk = _chunk_from_event(event_type, data)
+                    if chunk is None:
+                        continue
+                    if chunk.usage is not None:
+                        if chunk.usage.tokens_in:
+                            tokens_in = chunk.usage.tokens_in
+                        elif event_type == "message_delta":
+                            chunk.usage.tokens_in = tokens_in
+                    yield chunk
+
+
+def _chunk_from_event(event_type: str, data: dict[str, Any]) -> CompletionChunk | None:
+    """One (event, data) pair -> a chunk, or None if it carries nothing to forward."""
+    if event_type == "message_start":
+        usage_raw = (data.get("message") or {}).get("usage") or {}
+        if not usage_raw:
+            return None
+        return CompletionChunk(usage=Usage(tokens_in=int(usage_raw.get("input_tokens", 0) or 0)))
+
+    if event_type == "content_block_start":
+        block = data.get("content_block") or {}
+        if block.get("type") != "tool_use":
+            return None
+        return CompletionChunk(
+            tool_calls=[
+                ToolCallDelta(
+                    index=int(data.get("index", 0) or 0),
+                    id=block.get("id"),
+                    name=block.get("name"),
+                )
+            ]
+        )
+
+    if event_type == "content_block_delta":
+        delta = data.get("delta") or {}
+        if delta.get("type") == "text_delta":
+            return CompletionChunk(text=str(delta.get("text", "")))
+        if delta.get("type") == "input_json_delta":
+            return CompletionChunk(
+                tool_calls=[
+                    ToolCallDelta(
+                        index=int(data.get("index", 0) or 0),
+                        arguments_fragment=str(delta.get("partial_json", "")),
+                    )
+                ]
+            )
+        return None
+
+    if event_type == "message_delta":
+        delta = data.get("delta") or {}
+        usage_raw = data.get("usage") or {}
+        chunk = CompletionChunk()
+        carries = False
+        if delta.get("stop_reason"):
+            chunk.stop_reason = str(delta["stop_reason"])
+            carries = True
+        if usage_raw:
+            # This event's usage is output-tokens-only and cumulative -- the
+            # input-token count already arrived on message_start and is not
+            # repeated here, so merge rather than overwrite by leaving
+            # tokens_in unset (0) and letting the accumulator's own "most
+            # recent wins" rule work chunk to chunk instead.
+            chunk.usage = Usage(tokens_out=int(usage_raw.get("output_tokens", 0) or 0))
+            carries = True
+        return chunk if carries else None
+
+    return None

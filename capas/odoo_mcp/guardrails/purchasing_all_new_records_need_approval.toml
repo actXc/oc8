@@ -1,0 +1,22 @@
+# Curated use-case library entry (design doc §7) -- one of odoo_mcp's 28
+# documented ERP scenarios, written as documentation by example for anyone
+# building an oc8 tool-pack plugin. Every entry is built from the SAME 9
+# generic tools (tool_pack.toml's connection scopes); none of them can restrict
+# a call to one Odoo model, so entries differ in prose and in the specific
+# approval_eur/approval_actions/only chosen, not in a deeper technical
+# restriction. No tool is classified `write`, so every `write` here is false.
+# Each summary says what it grants AND what it deliberately does not cover.
+
+kind = "library"
+key = "purchasing_all_new_records_need_approval"
+label = "Jede Neuanlage braucht eine Freigabe (neue Lieferanten inklusive)"
+label_en = "Every new record needs approval (including new suppliers)"
+summary = "Jeder create_record-Aufruf braucht eine Freigabe -- auch das Anlegen eines Angebots oder Kontakts, nicht nur eines neuen Lieferanten. Es gibt kein Werkzeug, das eine Lieferanten-Neuanlage von jeder anderen Neuanlage unterscheidet; diese Regel ist bewusst breiter als 'nur neue Lieferanten', um ehrlich zu bleiben. Deckt trotz des Namens 'Jede Neuanlage' weder update_record noch delete_record ab -- ein bereits angelegter Lieferant lässt sich ungefragt ändern oder löschen, nur das erstmalige Anlegen wird geprüft."
+summary_en = "Every create_record call needs approval -- including creating a quote or contact, not only a new supplier. No tool distinguishes a new supplier from any other new record, so this rule is deliberately broader than 'new suppliers only', to stay honest about what it can enforce. Despite the 'every new record' framing, this covers neither update_record nor delete_record -- an already-created supplier can still be changed or deleted without review; only the initial create is checked."
+use_case = "purchasing"
+read = true
+write = false
+send = true
+approval_eur = ""
+approval_actions = ["create_record"]
+only = []

@@ -1,0 +1,114 @@
+"""Provider-neutral request/response types."""
+
+from __future__ import annotations
+
+import uuid
+from dataclasses import dataclass, field
+from typing import Any, Literal, Protocol
+
+Role = Literal["system", "user", "assistant", "tool"]
+
+
+@dataclass
+class ToolCall:
+    id: str
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass
+class NeutralMessage:
+    role: Role
+    content: str = ""
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    tool_call_id: str | None = None  # set on role="tool" results
+    name: str | None = None  # tool name on role="tool"
+
+
+@dataclass
+class NeutralTool:
+    name: str
+    description: str
+    parameters: dict[str, Any]  # JSON Schema (draft 2020-12)
+
+
+@dataclass
+class Usage:
+    tokens_in: int = 0
+    tokens_out: int = 0
+
+
+@dataclass
+class CompletionResult:
+    text: str
+    tool_calls: list[ToolCall]
+    usage: Usage
+    stop_reason: str
+    provider: str
+    model: str
+
+
+@dataclass
+class ToolCallDelta:
+    """A fragment of a streamed tool call.
+
+    Arguments arrive split across chunks, so a fragment is NOT valid JSON on its
+    own. ``index`` identifies which call it belongs to -- a model may stream
+    several in parallel, and merging them by arrival order would corrupt both.
+    ``id`` and ``name`` usually appear once, on the first fragment.
+    """
+
+    index: int
+    id: str | None = None
+    name: str | None = None
+    arguments_fragment: str = ""
+
+
+@dataclass
+class CompletionChunk:
+    """One incremental piece of a streamed completion.
+
+    ``usage`` and ``stop_reason`` appear only on the final chunk(s). ``usage`` may
+    stay None for the whole stream if the provider never reports it -- the caller
+    must treat that as "unknown", never as zero, or a streamed run bills nothing.
+    """
+
+    text: str = ""
+    tool_calls: list[ToolCallDelta] = field(default_factory=list)
+    usage: Usage | None = None
+    stop_reason: str | None = None
+    #: Stamped by ModelRouter.stream() with whatever resolve() actually
+    #: decided (not every adapter sets these itself) so a caller
+    #: reconstructing a CompletionResult from a stream -- oc8.modelrouter.
+    #: accumulate -- knows which provider/model actually answered even
+    #: after a BYOK downgrade or a mid-chain fallback, without threading
+    #: that state through separately.
+    provider: str | None = None
+    model: str | None = None
+
+
+@dataclass
+class ModelParams:
+    temperature: float = 0.2
+    max_tokens: int = 1024
+
+
+@dataclass
+class CompletionRequest:
+    provider: str
+    model: str
+    messages: list[NeutralMessage]
+    tools: list[NeutralTool] = field(default_factory=list)
+    params: ModelParams = field(default_factory=ModelParams)
+    tenant_id: uuid.UUID | None = None
+    agent_id: uuid.UUID | None = None
+    request_id: uuid.UUID | None = None
+    contains_restricted: bool = False
+    base_url: str | None = None
+    api_key: str | None = None
+
+
+class ModelAdapter(Protocol):
+    provider: str
+
+    async def complete(self, req: CompletionRequest) -> CompletionResult: ...

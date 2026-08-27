@@ -1,0 +1,14 @@
+[plugin]
+name = "demo_hook"
+version = "1.0.0"
+type = "core_extension"
+trust = "first_party"
+summary = "Test fixture: contributes an in-process hook handler"
+permissions = ["hooks:task.before_create"]
+
+[[plugin.handles]]
+point = "task.before_create"
+priority = 10
+
+[plugin.entry_points]
+hooks = "demo_hook.hooks:register"

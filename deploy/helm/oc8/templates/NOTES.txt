@@ -1,0 +1,36 @@
+Thank you for installing {{ .Chart.Name }}!
+
+Release: {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+
+{{- if .Values.caddy.enabled }}
+
+Get the application URL:
+{{- if contains "LoadBalancer" .Values.caddy.service.type }}
+  NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+        kubectl get svc --namespace {{ .Release.Namespace }} {{ include "oc8.fullname" . }}-caddy -w
+{{- else if contains "NodePort" .Values.caddy.service.type }}
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "oc8.fullname" . }}-caddy)
+  export NODE_IP=$(kubectl get nodes -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo http://$NODE_IP:$NODE_PORT/
+{{- else }}
+  kubectl port-forward --namespace {{ .Release.Namespace }} svc/{{ include "oc8.fullname" . }}-caddy 8080:80
+  echo http://127.0.0.1:8080/
+{{- end }}
+
+{{- else if .Values.ingress.enabled }}
+
+Ingress is enabled. Open the host configured in values.yaml (ingress.hosts).
+
+{{- end }}
+
+Next steps:
+  1. Open the UI and complete the welcome wizard (model, agent, tools).
+  2. Mount capas if not already: set backend.capas.hostPath or backend.capas.existingClaim.
+  3. For production: set oc8.env=prod and restrict network access to dev-login.
+
+Health check:
+  kubectl exec --namespace {{ .Release.Namespace }} deploy/{{ include "oc8.fullname" . }}-backend -- python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8099/health').read())"
+
+Documentation:
+  https://docs.oc8.io/user/quickstart

@@ -1,0 +1,22 @@
+# Curated use-case library entry (design doc §7) -- one of odoo_mcp's 28
+# documented ERP scenarios, written as documentation by example for anyone
+# building an oc8 tool-pack plugin. Every entry is built from the SAME 9
+# generic tools (tool_pack.toml's connection scopes); none of them can restrict
+# a call to one Odoo model, so entries differ in prose and in the specific
+# approval_eur/approval_actions/only chosen, not in a deeper technical
+# restriction. No tool is classified `write`, so every `write` here is false.
+# Each summary says what it grants AND what it deliberately does not cover.
+
+kind = "library"
+key = "helpdesk_reply_needs_approval"
+label = "Tickets bearbeiten, Kundenantwort mit Freigabe"
+label_en = "Work tickets, customer replies need approval"
+summary = "Darf Tickets durchsuchen, bearbeiten und zuweisen; das Senden einer Nachricht an eine Person (post_message) braucht dagegen eine Freigabe. Deckt keine anderen Änderungen ab -- Stufe, Zuweisung oder Status ändern sich weiterhin ohne Freigabe. Deckt auch delete_record nicht ab: `only` bleibt hier leer, ein Ticket kann also ungefragt gelöscht werden, während nur das Senden gefiltert wird -- wer das ausschließen will, kombiniert dies mit einem no-deletions-Guardrail."
+summary_en = "Can search, update and assign tickets; sending a message to a person (post_message) needs approval instead. Does not cover any other change -- stage, assignment or status still change without approval. Also does not cover delete_record: `only` stays empty here, so a ticket can be deleted without review while only sending is filtered -- combine this with a no-deletions guardrail if that matters."
+use_case = "helpdesk"
+read = true
+write = false
+send = true
+approval_eur = ""
+approval_actions = ["post_message"]
+only = []

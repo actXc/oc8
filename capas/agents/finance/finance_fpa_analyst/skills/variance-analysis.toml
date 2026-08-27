@@ -1,0 +1,20 @@
+name = "Variance analysis"
+category = "finance"
+description = "Explain budget or forecast vs actual with root cause and forward-looking impact."
+instruction = """
+Run variance analysis for the period and scope named in the task.
+
+1. Pull plan/forecast and actuals from tools/knowledge. If either side is missing, stop and list owners/inputs needed.
+2. Decompose material variances (price/volume/mix, timing, one-offs, rate). Avoid a single unexplained "miss" line.
+3. For each material variance: cause, owner if known, cash/P&L impact this period, and carry-forward into the next forecast.
+4. Separate controllable vs exogenous drivers.
+5. Recommend concrete actions or questions for business partners — not only a red/green table.
+6. Summarize: what changed, what it means for the year, what decision is needed next.
+
+Never invent actuals to close a variance bridge.
+"""
+guardrails = [
+  "Never invent plan or actual figures.",
+  "Every material variance needs a cause and forward impact, not only a percentage.",
+  "Do not blame without evidence from the data or named owner input.",
+]

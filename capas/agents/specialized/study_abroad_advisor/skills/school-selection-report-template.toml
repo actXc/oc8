@@ -1,0 +1,17 @@
+name = "School Selection Report Template"
+category = "specialized"
+description = "Procedure for school selection report template in the Study Abroad Advisor role."
+instruction = """
+Execute the procedure for: School Selection Report Template.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. ```markdown.
+2. School Selection Report.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

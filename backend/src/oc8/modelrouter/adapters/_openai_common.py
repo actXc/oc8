@@ -1,0 +1,138 @@
+# backend/src/oc8/modelrouter/adapters/_openai_common.py
+"""Shared OpenAI Chat Completions request/response translation, used by
+both the dedicated OpenAI adapter and the generic OpenAI-compatible adapter
+(same wire format, different endpoint/auth)."""
+
+from __future__ import annotations
+
+import json
+import logging
+from typing import Any
+
+import httpx
+
+from oc8.modelrouter.http_errors import raise_for_status_with_body
+from oc8.modelrouter.types import (
+    CompletionRequest,
+    CompletionResult,
+    NeutralMessage,
+    ToolCall,
+    Usage,
+)
+
+# Stands in for the answer the model never got to give: a tool result followed
+# directly by a fresh user turn. Only an interrupted transcript has that shape --
+# ours comes from a run that parked for approval mid-call and resumed later -- and
+# a strict chat template rejects it outright (opaas_ai:odoo-gpt via vLLM: 400
+# "Unexpected role 'user' after role 'tool'"), which is how an approved action
+# silently never happened. Non-empty by necessity: the same endpoint rejects an
+# empty assistant turn as "Invalid assistant message".
+TOOL_BRIDGE_CONTENT = "(tool result received)"
+
+
+logger = logging.getLogger(__name__)
+
+
+def to_openai_messages(messages: list[NeutralMessage]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    # A call with no name cannot be dispatched by anyone, and providers reject the
+    # whole request over it ("Function name was  but must be a-z…"). One such call
+    # from the model poisons the transcript for good: it is replayed on every
+    # later turn, so the run fails identically forever and no retry helps.
+    # Dropped here rather than only at the point it is produced, so a transcript
+    # that is ALREADY carrying one can still be continued.
+    dropped_call_ids: set[str] = set()
+    for msg in messages:
+        if msg.role in ("system", "user"):
+            if msg.role == "user" and out and out[-1]["role"] == "tool":
+                out.append({"role": "assistant", "content": TOOL_BRIDGE_CONTENT})
+            out.append({"role": msg.role, "content": msg.content})
+        elif msg.role == "assistant":
+            usable = [tc for tc in msg.tool_calls if tc.name.strip()]
+            for tc in msg.tool_calls:
+                if not tc.name.strip():
+                    logger.warning("dropping a tool call with no name (id=%r)", tc.id)
+                    dropped_call_ids.add(tc.id)
+            if not usable and not (msg.content or "").strip():
+                # Nothing left to say: an assistant turn with neither text nor
+                # calls is itself rejected ("Invalid assistant message").
+                continue
+            entry: dict[str, Any] = {"role": "assistant", "content": msg.content or None}
+            if usable:
+                entry["tool_calls"] = [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)},
+                    }
+                    for tc in usable
+                ]
+            out.append(entry)
+        elif msg.role == "tool":
+            # A result whose call was dropped now refers to nothing, which is
+            # invalid in its own right -- the pair goes together.
+            if (msg.tool_call_id or "") in dropped_call_ids:
+                continue
+            out.append(
+                {"role": "tool", "tool_call_id": msg.tool_call_id or "", "content": msg.content}
+            )
+    return out
+
+
+def build_payload(req: CompletionRequest) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "model": req.model,
+        "messages": to_openai_messages(req.messages),
+        "temperature": req.params.temperature,
+        "max_tokens": req.params.max_tokens,
+    }
+    if req.tools:
+        payload["tools"] = [
+            {
+                "type": "function",
+                "function": {
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": t.parameters,
+                },
+            }
+            for t in req.tools
+        ]
+    return payload
+
+
+def parse_response(data: dict[str, Any], *, provider: str, model: str) -> CompletionResult:
+    choice = (data.get("choices") or [{}])[0]
+    message = choice.get("message", {})
+    raw_calls = message.get("tool_calls") or []
+    tool_calls: list[ToolCall] = []
+    for c in raw_calls:
+        fn = c.get("function", {})
+        try:
+            args = json.loads(fn.get("arguments") or "{}")
+        except (ValueError, TypeError):
+            args = {}
+        tool_calls.append(ToolCall(id=c.get("id", ""), name=fn.get("name", ""), arguments=args))
+    usage_raw = data.get("usage", {})
+    usage = Usage(
+        tokens_in=int(usage_raw.get("prompt_tokens", 0)),
+        tokens_out=int(usage_raw.get("completion_tokens", 0)),
+    )
+    return CompletionResult(
+        text=message.get("content") or "",
+        tool_calls=tool_calls,
+        usage=usage,
+        stop_reason="tool_use" if tool_calls else "stop",
+        provider=provider,
+        model=model,
+    )
+
+
+async def post_completion(
+    url: str, payload: dict[str, Any], headers: dict[str, str]
+) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=180.0) as client:
+        resp = await client.post(url, json=payload, headers=headers)
+        raise_for_status_with_body(resp)
+        result: dict[str, Any] = resp.json()
+        return result

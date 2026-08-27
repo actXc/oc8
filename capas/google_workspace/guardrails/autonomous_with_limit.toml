@@ -1,0 +1,22 @@
+kind = "preset"
+connection = "primary"
+key = "autonomous_with_limit"
+label = "Selbstständig mit Limit"
+label_en = "Autonomous with a limit"
+summary = "Arbeitet selbstständig, kann aber nichts aus einem Shared Drive löschen und keine Termine absagen."
+summary_en = "Works on its own, but cannot delete anything from a Shared Drive and cannot cancel a calendar event."
+recommended = false
+read = true
+write = false
+send = true
+approval_actions = []
+approval_eur = ""
+only = [
+    "gmail_search", "gmail_get", "gmail_list_labels", "gmail_send", "gmail_reply", "gmail_create_draft", "gmail_modify_labels",
+    "calendar_list_events", "calendar_get_event", "calendar_check_free_busy", "calendar_create_event",
+    "calendar_update_event", "calendar_respond_to_invite", "calendar_create_meet_link",
+    "drive_list", "drive_get_content", "drive_search", "drive_upload", "drive_update_content",
+    "docs_get_text", "docs_replace_text", "docs_create_from_template",
+    "sheets_read_range", "sheets_write_range", "sheets_append_row", "sheets_list_worksheets",
+    "slides_get_text", "slides_replace_placeholder_text", "slides_create_from_template",
+]

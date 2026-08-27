@@ -1,0 +1,147 @@
+# Default values for the oc8 Helm chart.
+# Mirrors docker-compose.yml — see deploy/helm/oc8/README.md for install steps.
+
+nameOverride: ""
+fullnameOverride: ""
+
+global:
+  # Image pull secret for private registries (optional).
+  imagePullSecrets: []
+
+images:
+  backend:
+    repository: oc8-backend
+    tag: latest
+    pullPolicy: IfNotPresent
+  frontend:
+    repository: oc8-frontend
+    tag: latest
+    pullPolicy: IfNotPresent
+  postgres:
+    repository: pgvector/pgvector
+    tag: pg15
+    pullPolicy: IfNotPresent
+  redis:
+    repository: redis
+    tag: 7-alpine
+    pullPolicy: IfNotPresent
+  caddy:
+    repository: caddy
+    tag: "2"
+    pullPolicy: IfNotPresent
+  ollama:
+    repository: ollama/ollama
+    tag: latest
+    pullPolicy: IfNotPresent
+
+# --- Required secrets (generate before install) ---
+#   openssl rand -hex 32
+secrets:
+  jwtSecret: ""
+  secretKek: ""
+  postgresPassword: ""
+
+oc8:
+  # `dev` enables unauthenticated dev-login — never expose on the public internet.
+  env: dev
+  seedOnStart: true
+  capasPath: /app/capas
+  pythonPath: /app/capas/cli_harness
+
+  # Model provider keys (optional — can also configure in the UI).
+  anthropicApiKey: ""
+  openaiApiKey: ""
+  mistralApiKey: ""
+
+  agentIsolation: false
+  sandboxUser: ""
+  internalBaseUrl: "" # defaults to in-cluster backend service URL
+
+  evidence:
+    sweepEnabled: false
+    archiveAfterMinutes: 60
+    retentionDays: 0
+
+  ollamaBaseUrl: "" # set automatically when ollama.enabled=true
+
+  otelSdkDisabled: true
+
+postgres:
+  enabled: true
+  storage: 20Gi
+  storageClassName: ""
+  resources: {}
+
+redis:
+  enabled: true
+  maxMemory: 256mb
+  resources: {}
+
+backend:
+  replicas: 1
+  resources: {}
+  # Agent sandboxes need the container runtime socket — off by default in K8s.
+  containerSocket:
+    enabled: false
+    hostPath: /var/run/docker.sock
+  capas:
+    # Mount the capas/ tree into backend and worker (required for tool packs).
+    # hostPath: /path/on/node/to/oc8/capas   # kind/minikube with repo on node
+    hostPath: ""
+    existingClaim: ""
+  sessions:
+    enabled: true
+    size: 10Gi
+    storageClassName: ""
+    mountPath: /var/lib/oc8/sessions
+
+worker:
+  replicas: 2
+  resources: {}
+
+ingestionWorker:
+  replicas: 1
+  resources: {}
+
+scheduler:
+  replicas: 1
+  resources: {}
+
+frontend:
+  replicas: 1
+  resources: {}
+
+caddy:
+  enabled: true
+  service:
+    type: LoadBalancer
+    port: 80
+    nodePort: null
+  resources: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: oc8.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+ollama:
+  enabled: false
+  storage: 20Gi
+  storageClassName: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

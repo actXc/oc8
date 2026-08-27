@@ -1,0 +1,13 @@
+kind = "library"
+key = "full_assistant_with_send_approval"
+label = "Voller Assistent mit Freigabe"
+label_en = "Full assistant with send approval"
+summary = "Zugriff auf alles; jedes Versenden (E-Mail, Kalendereinladungsantwort) braucht eine Freigabe. Deckt keine finanzielle Betragsgrenze ab — es gibt kein Werkzeug in diesem Paket, das einen Betrag trägt."
+summary_en = "Access to everything; every send (email, calendar invite response) requires an approval. Does not cover a monetary threshold — no tool in this pack carries an amount."
+use_case = "general"
+read = true
+write = false
+send = true
+approval_actions = ["send"]
+approval_eur = ""
+only = []

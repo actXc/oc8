@@ -1,0 +1,19 @@
+name = "Phase 2: Signal Collection & Cleaning"
+category = "marketing"
+description = "Procedure for phase 2: signal collection & cleaning in the X/Twitter Intelligence Analyst role."
+instruction = """
+Execute the procedure for: Phase 2: Signal Collection & Cleaning.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Search Execution: Collect posts, threads, profiles, engagement context, and public conversation paths.
+2. Deduplication: Remove repost duplicates, spam patterns, irrelevant matches, and repeated screenshots.
+3. Source Scoring: Rate authors by relevance, expertise, proximity to event, and amplification quality.
+4. Evidence Preservation: Save URLs, timestamps, query terms, exported fields, and collection notes.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

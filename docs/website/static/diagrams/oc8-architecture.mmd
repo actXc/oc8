@@ -1,0 +1,66 @@
+flowchart TB
+  User(["Operator browser"])
+
+  subgraph compose ["Docker Compose stack"]
+    direction TB
+
+    Caddy["caddy · edge proxy · :80"]
+
+    subgraph app ["Application tier"]
+      FE["frontend · React UI"]
+      BE["backend · FastAPI · MCP gateway"]
+      W["worker × N · starts agent runs"]
+      IW["ingestion-worker"]
+      SCH["scheduler"]
+    end
+
+    subgraph data ["Data tier · default network only"]
+      PG[("postgres + pgvector")]
+      RD[("redis")]
+    end
+
+    MIG["migrate · one-shot"]
+    CAPAS[("capas/ · read-only on backend/worker")]
+
+    subgraph optional ["Optional profiles"]
+      OL["ollama"]
+    end
+  end
+
+  subgraph agents_net ["Network oc8_agents · internal = true"]
+    direction LR
+    A1["Agent sandbox A\nper-run container"]
+    A2["Agent sandbox B\nper-run container"]
+    A3["Agent sandbox …"]
+  end
+
+  Ext["External systems\nOdoo · M365 · Slack · …\nlaunched control-plane side"]
+
+  User -->|HTTP| Caddy
+  Caddy --> FE
+  Caddy --> BE
+  FE -.->|/api/v1| BE
+
+  BE --> PG
+  BE --> RD
+  W --> PG
+  W --> RD
+  IW --> PG
+  SCH --> RD
+  MIG --> PG
+  BE --> CAPAS
+  W --> CAPAS
+
+  W -->|"Docker/Podman socket\nprovision sandbox"| A1
+  W -->|"Docker/Podman socket"| A2
+  W -->|"Docker/Podman socket"| A3
+
+  BE ---|"also on agents network\n/llm + /mcp only"| agents_net
+
+  A1 -->|"run token · /llm /mcp"| BE
+  A2 -->|"run token · /llm /mcp"| BE
+  A3 -->|"run token · /llm /mcp"| BE
+
+  BE -->|"governed tools\nsecrets stay on CP"| Ext
+
+  BE -.-> OL

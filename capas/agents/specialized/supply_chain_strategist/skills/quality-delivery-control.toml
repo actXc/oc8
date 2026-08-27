@@ -1,0 +1,19 @@
+name = "Quality & Delivery Control"
+category = "specialized"
+description = "Procedure for quality & delivery control in the Supply Chain Strategist role."
+instruction = """
+Execute the procedure for: Quality & Delivery Control.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Build end-to-end quality control systems: Incoming Quality Control (IQC), In-Process Quality Control (IPQC), Outgoing/Final Quality Control (OQC/FQC).
+2. Define AQL sampling inspection standards (GB/T 2828.1 / ISO 2859-1) with specified inspection levels and acceptable quality limits.
+3. Interface with third-party inspection agencies (SGS, TUV, Bureau Veritas, Intertek) to manage factory audits and product certifications.
+4. Establish closed-loop quality issue resolution mechanisms: 8D reports, CAPA (Corrective and Preventive Action) plans, supplier quality improvement programs.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

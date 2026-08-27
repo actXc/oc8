@@ -1,0 +1,19 @@
+name = "Phase 2: Question Identification & Answer Strategy"
+category = "marketing"
+description = "Procedure for phase 2: question identification & answer strategy in the Zhihu Strategist role."
+instruction = """
+Execute the procedure for: Phase 2: Question Identification & Answer Strategy.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Question Source Identification: Identify high-value questions through search, trending topics, followers.
+2. Impact Criteria Definition: Determine which questions align with business goals (lead gen, authority, engagement).
+3. Answer Structure Development: Create templates for comprehensive, persuasive answers.
+4. CTA Strategy: Design subtle, valuable CTAs that drive website visits or lead capture (never hard sell).
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

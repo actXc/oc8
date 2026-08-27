@@ -1,0 +1,90 @@
+# The tool-pack half of the hubspot_mcp plugin. This file's TOP LEVEL *is*
+# the `tool_pack` table (design §2/§3) -- there is no `[plugin.tool_pack]`
+# wrapper. The guardrail presets and the curated use-case library live one
+# file per key in guardrails/.
+
+[[connections]]
+key = "primary"
+name = "hubspot"
+transport = "stdio"
+server_url = ""
+credential_type = "hubspot_login"
+
+# Right classification. Every one of these tools is generic across HubSpot
+# object types (deals, contacts, companies, tickets, ...) rather than
+# per-type -- an `objectType` argument picks the type at call time. That is
+# why no guardrail below can restrict a call to "tickets" versus "deals":
+# nothing in this tool surface distinguishes them, same shape as odoo_mcp's
+# 9 generic tools not being scoped to one Odoo model.
+[connections.scopes]
+read = [
+    "hubspot-get-user-details", "hubspot-list-objects", "hubspot-search-objects",
+    "hubspot-batch-read-objects", "hubspot-get-schemas", "hubspot-list-properties",
+    "hubspot-get-property", "hubspot-list-associations",
+    "hubspot-get-association-definitions", "hubspot-get-engagement",
+    "hubspot-list-workflows", "hubspot-get-workflow",
+    "hubspot-generate-feedback-link", "hubspot-get-link",
+]
+send = [
+    "hubspot-batch-create-objects", "hubspot-batch-update-objects",
+    "hubspot-create-property", "hubspot-update-property",
+    "hubspot-batch-create-associations", "hubspot-create-engagement",
+    "hubspot-update-engagement",
+]
+
+[connections.config]
+command = "npx"
+args = ["-y", "@hubspot/mcp-server"]
+
+# NEUTRAL SEAM (outward_tools): an "engagement" is a note, call, email or
+# meeting logged against a CRM record -- depending on its type it can be the
+# thing that actually sends an email to a contact, or appear in a timeline a
+# contact-facing colleague reads verbatim. Both the creating and the editing
+# call count, the same reasoning as jira_mcp treating an edited comment as
+# outward too.
+outward_tools = ["hubspot-create-engagement", "hubspot-update-engagement"]
+
+[connections.config.env]
+HUBSPOT_ENABLED_TOOLS = "hubspot-get-user-details,hubspot-list-objects,hubspot-search-objects,hubspot-batch-read-objects,hubspot-get-schemas,hubspot-list-properties,hubspot-get-property,hubspot-list-associations,hubspot-get-association-definitions,hubspot-get-engagement,hubspot-list-workflows,hubspot-get-workflow,hubspot-generate-feedback-link,hubspot-get-link,hubspot-batch-create-objects,hubspot-batch-update-objects,hubspot-create-property,hubspot-update-property,hubspot-batch-create-associations,hubspot-create-engagement,hubspot-update-engagement"
+
+[connections.config.secret_env]
+PRIVATE_APP_ACCESS_TOKEN = "hubspot/private_app_access_token"
+
+# NEUTRAL SEAM (value_spec): where a record's monetary value lives, so the
+# core's approval threshold can act on a HubSpot deal without the core
+# knowing anything about HubSpot. A deal's value sits in its own `amount`
+# property; `direct_fields` is scanned recursively (tool_semantics.py), so it
+# is found however deep the create/update payload nests its `properties`.
+# Every other object type (contacts, companies, tickets) simply never has an
+# `amount` field, so a threshold guardrail has no effect on them -- exactly
+# right, since none of them carry a price.
+[connections.config.value_spec]
+direct_fields = ["amount"]
+
+# NEUTRAL SEAM (focus_spec): unlike gitea_mcp/jira_mcp/github_mcp, the entity
+# is NOT in the tool name here -- every tool is generic across object types,
+# so the type has to come from the call's own `objectType` argument, the
+# same shape as odoo_mcp's `model` field.
+[connections.config.focus_spec]
+entity_field = "objectType"
+id_fields = ["id", "objectId", "recordId"]
+id_field = "id"
+title_fields = ["dealname", "name", "subject", "email"]
+name_path = ["properties", "dealname"]
+default_verb = "Updates"
+search_tools = ["hubspot-list-objects", "hubspot-search-objects", "hubspot-batch-read-objects"]
+search_label = "Searches"
+
+# An object type not listed here produces no live-log line -- same tradeoff
+# odoo_mcp makes for an Odoo model it doesn't name.
+[connections.config.focus_spec.labels]
+deals = "Deal"
+contacts = "Contact"
+companies = "Company"
+tickets = "Ticket"
+
+[connections.config.focus_spec.verbs]
+hubspot-batch-create-objects = "Creates"
+hubspot-batch-update-objects = "Updates"
+hubspot-create-engagement = "Logs a note on"
+hubspot-update-engagement = "Updates note on"

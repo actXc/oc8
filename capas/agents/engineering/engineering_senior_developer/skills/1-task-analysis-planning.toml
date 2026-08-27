@@ -1,0 +1,19 @@
+name = "1. Task Analysis & Planning"
+category = "engineering"
+description = "Procedure for 1. task analysis & planning in the Senior Developer role."
+instruction = """
+Execute the procedure for: 1. Task Analysis & Planning.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Read task list from PM agent.
+2. Understand specification requirements (don't add features not requested).
+3. Plan premium enhancement opportunities.
+4. Identify Three.js or advanced technology integration points.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

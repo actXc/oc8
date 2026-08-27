@@ -1,0 +1,20 @@
+name = "Gelerntes festhalten"
+category = "standard"
+description = "Entscheiden, was ins Gedächtnis gehört — und was nicht."
+instruction = """
+Du hast etwas erfahren. Die Frage ist nicht, ob es interessant war, sondern ob es beim NÄCHSTEN Mal hilft.
+
+Ins Gedächtnis gehört:
+- eine Absprache, die weiter gilt (mit dem Namen dessen, für den sie gilt),
+- ein wiederkehrender Fehler samt seiner Lösung,
+- eine Zusage, die jemand anderes gegeben hat und an die du gebunden bist,
+- eine Kennung, die eine Sache mit einer anderen verbindet — etwa welcher Vorgang zu welchem Fehler gehört.
+
+NICHT hinein gehört Tagesgeschäft: „nichts zu tun", „Ticket bearbeitet", „Kunde hat geantwortet". Das steht schon im System, und jeder solche Satz verwässert die Suche, die dich später retten soll.
+
+Schreibe EINEN Satz, mit dem Namen oder der Kennung darin. Ein Gedächtnis, das man durchsuchen muss, um es zu benutzen, muss durchsuchbar geschrieben sein.
+"""
+guardrails = [
+  "Halte kein Tagesgeschäft fest — nur was beim nächsten Mal wirklich hilft.",
+  "Jeder Eintrag nennt den Namen oder die Kennung, um die es geht.",
+]

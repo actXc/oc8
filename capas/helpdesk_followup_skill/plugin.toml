@@ -1,0 +1,17 @@
+# Skill plugin: continue a conversation the customer has answered.
+#
+# This was six lines in the agent's mission, and it applied on perhaps one run
+# in five -- the rest of the time it was instruction the model had to read past
+# to find what it actually needed. That is what a skill is for: the procedure
+# arrives when the situation does.
+#
+# It carries PROCESS here, not craft, which the first-response skill deliberately
+# avoids. The difference is that this process only exists in a run that has found
+# no new ticket, so nothing is lost by not stating it up front.
+
+[plugin]
+name = "helpdesk_followup_skill"
+version = "1.1.0"
+type = "skill"
+trust = "first_party"
+summary = "Ein Gespräch fortsetzen, auf das ein Kunde geantwortet hat"

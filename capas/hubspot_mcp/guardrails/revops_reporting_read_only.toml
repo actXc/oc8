@@ -1,0 +1,13 @@
+kind = "library"
+key = "revops_reporting_read_only"
+label = "RevOps reporting, read only"
+label_en = "RevOps reporting, read only"
+summary = "Can search, read and inspect records, properties, associations, engagements and workflows -- and nothing else. Restates the read_only preset with a specific persona attached: an agent that only ever answers questions about the CRM's current state, for a team that wants that guarantee documented as its own named entry rather than relying on a generic preset."
+summary_en = "Can search, read and inspect records, properties, associations, engagements and workflows -- and nothing else. Restates the read_only preset with a specific persona attached: an agent that only ever answers questions about the CRM's current state, for a team that wants that guarantee documented as its own named entry rather than relying on a generic preset."
+use_case = "reporting / RevOps"
+read = true
+write = false
+send = false
+approval_eur = ""
+approval_actions = []
+only = []

@@ -1,0 +1,333 @@
+# Full-stack oc8 for a test server. See docs/DEPLOY.md.
+# Core: postgres, redis, migrate (one-shot), backend, worker, ingestion-worker,
+# scheduler, frontend, caddy. Optional: ollama (profile: ollama).
+#
+# Every long-running service carries `restart: unless-stopped`; only `migrate`
+# does not, because a one-shot job that has already run must not run again.
+# `unless-stopped` rather than `always` so that an operator who deliberately
+# stops a service can keep it stopped.
+#
+# It is here because of what happened without it: both workers exited on a
+# transient Redis timeout and stayed dead for 35 hours. Nothing else showed it --
+# the backend was healthy, the UI was up, Redis itself was fine again minutes
+# later -- and the only symptom was that no run executed. The worker is the sole
+# process that performs work, so it is the one that must come back by itself.
+name: oc8
+
+x-backend-image: &backend-image
+  build:
+    context: ./backend
+    dockerfile: ../Dockerfile.backend
+  image: oc8-backend:latest
+
+x-backend-env: &backend-env
+  # SECURITY: `dev` enables POST /api/v1/auth/dev-login, an UNAUTHENTICATED
+  # endpoint that mints an org_admin token for the seed tenant to ANYONE who
+  # calls it. On a host reachable from the internet that is a full auth bypass,
+  # not just a "test login". It is the default only because this stack exists to
+  # be brought up and tested quickly — so restrict the host at the network
+  # layer (firewall / VPN / bind Caddy to a private interface), OR set
+  # OC8_ENV=prod to require real password auth (POST /auth/setup /
+  # /auth/login). See docs/DEPLOY.md.
+  OC8_ENV: ${OC8_ENV:-dev}
+  OC8_DATABASE_URL: postgresql+asyncpg://oc8_app:oc8@postgres:5432/oc8
+  OC8_MIGRATION_URL: postgresql+psycopg://oc8_migrate:oc8@postgres:5432/oc8
+  OC8_REDIS_URL: redis://redis:6379/0
+  OC8_JWT_SECRET: ${OC8_JWT_SECRET:?set OC8_JWT_SECRET in .env}
+  OC8_SECRET_KEK: ${OC8_SECRET_KEK:?set OC8_SECRET_KEK in .env}
+  OC8_ANTHROPIC_API_KEY: ${OC8_ANTHROPIC_API_KEY:-}
+  OC8_OPENAI_API_KEY: ${OC8_OPENAI_API_KEY:-}
+  OC8_MISTRAL_API_KEY: ${OC8_MISTRAL_API_KEY:-}
+  OC8_OLLAMA_BASE_URL: ${OC8_OLLAMA_BASE_URL:-http://ollama:11434}
+  OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED:-true}
+  # Plugin folders (§13). WORKDIR is /app, so this matches the ./capas
+  # bind mount on the backend and worker services below.
+  OC8_CAPAS_PATH: ${OC8_CAPAS_PATH:-/app/capas}
+  # cli_harness is a shared helper LIBRARY the coding-CLI runtime plugins
+  # (claude_code_runtime, codex_runtime, opencode_runtime) import at module
+  # level -- it has no plugin.toml of its own and is never pip-installed,
+  # only ever put on sys.path (see backend/pyproject.toml's identical
+  # mypy_path/pythonpath entries for the same reason at dev-tooling time).
+  # Without this, `from cli_harness.dirs import ...` raises ModuleNotFoundError
+  # the moment the backend or worker process tries to load any of those three
+  # runtime plugins, and they report as installed-but-unavailable ("plugin
+  # code is not loadable") with no indication why.
+  PYTHONPATH: /app/capas/cli_harness
+  # §8.5 agent isolation: route runs through a per-agent Docker container.
+  OC8_AGENT_ISOLATION: ${OC8_AGENT_ISOLATION:-false}
+  OC8_INTERNAL_BASE_URL: ${OC8_INTERNAL_BASE_URL:-http://backend:8099}
+  OC8_AGENT_RUNTIME_NETWORK: ${OC8_AGENT_RUNTIME_NETWORK:-oc8_agents}
+  # uid:gid the sandbox/agent containers run as (see oc8.config.Settings.sandbox_user).
+  # Empty by default -- the right value is a property of the deployment (the
+  # uid that owns OC8_RUNTIME_SESSION_ROOT on the host), not of this compose file.
+  OC8_SANDBOX_USER: ${OC8_SANDBOX_USER:-}
+  # Runtime-provisioner privilege separation: backend/worker never touch
+  # docker.sock directly (see the `runtime-provisioner` service below, the
+  # SOLE owner of that mount) -- every sandbox operation crosses the network
+  # to it instead, authenticated by a shared bearer token. `migrate` and the
+  # other one-shot/non-sandboxing processes inherit these too (harmless: they
+  # never call get_sandbox_driver()), simplest to configure in one place.
+  OC8_SANDBOX_DRIVER: provisioner
+  OC8_SANDBOX_PROVISIONER_URL: http://runtime-provisioner:8090
+  OC8_SANDBOX_PROVISIONER_TOKEN: ${OC8_SANDBOX_PROVISIONER_TOKEN:?set OC8_SANDBOX_PROVISIONER_TOKEN in .env}
+  # Container-runtime adapter: session root must resolve to the SAME absolute
+  # path on the host and inside the backend (see the backend volume mount
+  # below) because the backend hands these paths to a sibling container's
+  # bind mounts, which the docker daemon resolves on the host. The two image
+  # vars below are nanoclaw-specific and read directly by the plugin (not by
+  # core oc8.config, which stays software-neutral) -- they are still declared
+  # here so operators configure every image in one place.
+  OC8_RUNTIME_SESSION_ROOT: ${OC8_RUNTIME_SESSION_ROOT:-/var/lib/oc8/sessions}
+  # Evidence retention (§12.5.1). The sweep archives a finished run's session
+  # folder into one hash-chained tar.xz and deletes the loose tree; off by
+  # default because it deletes files. ARCHIVE_ROOT empty means
+  # <session root>/archive -- which the same volume mount below already covers,
+  # so turning the sweep on needs no new mount. RETENTION_DAYS=0 never reduces:
+  # archiving alone is lossless, and only a window makes it lossy.
+  OC8_EVIDENCE_SWEEP_ENABLED: ${OC8_EVIDENCE_SWEEP_ENABLED:-false}
+  OC8_EVIDENCE_ARCHIVE_ROOT: ${OC8_EVIDENCE_ARCHIVE_ROOT:-}
+  OC8_EVIDENCE_ARCHIVE_AFTER_MINUTES: ${OC8_EVIDENCE_ARCHIVE_AFTER_MINUTES:-60}
+  OC8_EVIDENCE_RETENTION_DAYS: ${OC8_EVIDENCE_RETENTION_DAYS:-0}
+  OC8_NANOCLAW_AGENT_IMAGE: ${OC8_NANOCLAW_AGENT_IMAGE:-nanoclaw-agent:latest}
+  OC8_CLAUDE_CODE_AGENT_IMAGE: ${OC8_CLAUDE_CODE_AGENT_IMAGE:-oc8-agent-claude-code:latest}
+  OC8_CODEX_AGENT_IMAGE: ${OC8_CODEX_AGENT_IMAGE:-oc8-agent-codex:latest}
+  OC8_OPENCODE_AGENT_IMAGE: ${OC8_OPENCODE_AGENT_IMAGE:-oc8-agent-opencode:latest}
+  OC8_NANOCLAW_PROVISIONER_IMAGE: ${OC8_NANOCLAW_PROVISIONER_IMAGE:-nanoclaw-provisioner:latest}
+  # Read-only HOST paths the agent container mounts: nanoclaw's runner source and
+  # skills tree (it mounts these rather than baking them in) plus oc8's MCP
+  # bridge. Host paths, so the plugin's own __file__ cannot supply them -- inside
+  # the backend container it reads /app/capas/..., which the daemon cannot mount.
+  OC8_NANOCLAW_RUNNER_SRC: ${OC8_NANOCLAW_RUNNER_SRC:-/opt/nanoclaw/agent-runner/src}
+  OC8_NANOCLAW_SKILLS_SRC: ${OC8_NANOCLAW_SKILLS_SRC:-/opt/nanoclaw/skills}
+  OC8_NANOCLAW_BRIDGE_SRC: ${OC8_NANOCLAW_BRIDGE_SRC:-/opt/oc8/oc8-mcp-bridge.mjs}
+
+services:
+  postgres:
+    restart: unless-stopped
+    image: pgvector/pgvector:pg15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: oc8
+    volumes:
+      - oc8-pgdata:/var/lib/postgresql/data
+      - ./backend/docker/init-db.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d oc8"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    restart: unless-stopped
+    image: redis:7-alpine
+    # Redis defaults to maxmemory 0 / noeviction, which means that once the
+    # keyspace fills EVERY write fails -- including run intake and the
+    # realtime bus, which share this instance and are not designed to fail
+    # open. Department prompt caching adds a 24h-TTL keyspace that grows with
+    # traffic, so a cap plus volatile-ttl (evict only keys that HAVE a TTL,
+    # nearest expiry first -- in practice the department cache dominates the
+    # sampled set even though OAuth state's shorter 10-minute TTL is preferred
+    # when both are candidates) leaves the TTL-less run-intake stream
+    # untouched, trading an occasional dropped login state (the user retries)
+    # for never blocking a run.
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "volatile-ttl"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  # One-shot: migrate the schema, then optionally seed. App services wait for
+  # this to complete, so migration runs exactly once (not in four processes).
+  migrate:
+    <<: *backend-image
+    environment:
+      <<: *backend-env
+      OC8_SEED_ON_START: ${OC8_SEED_ON_START:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        alembic upgrade head
+        if [ "$${OC8_SEED_ON_START}" = "true" ]; then
+          echo "seeding…"; oc8 seed || echo "seed skipped/failed (non-fatal)"
+        fi
+    restart: "no"
+
+  # The sole owner of docker.sock in the whole Community stack. backend/worker
+  # provision sandboxes over HTTP against this process instead of touching
+  # Docker directly (OC8_SANDBOX_DRIVER=provisioner, above) -- so a compromise
+  # of either (both run agent-authored code) never reaches raw Docker: the
+  # attacker gets, at most, the provisioner's own narrow, policy-checked API
+  # (oc8.runtime_provisioner.app / policy.py). See
+  # docs/superpowers/specs/2026-08-08-podman-runtime-support-design.md for why
+  # the historical OC8_CONTAINER_SOCKET override is intentionally NOT offered
+  # here: this is the one privileged mount in the stack, and its host path
+  # must be an unambiguous constant, not something a `.env` value could
+  # redirect elsewhere.
+  runtime-provisioner:
+    restart: unless-stopped
+    <<: *backend-image
+    environment:
+      <<: *backend-env
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Read-only: the provisioner only needs to validate that a caller-supplied
+      # mount falls inside this root (see ProvisionerPolicy._validate_mount);
+      # it never itself writes here.
+      - ${OC8_RUNTIME_SESSION_ROOT:-/var/lib/oc8/sessions}:${OC8_RUNTIME_SESSION_ROOT:-/var/lib/oc8/sessions}:ro
+    command:
+      - uvicorn
+      - oc8.runtime_provisioner.app:create_provisioner_app
+      - --factory
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8090"
+
+  backend:
+    restart: unless-stopped
+    <<: *backend-image
+    environment: *backend-env
+    networks: [default, agents]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      runtime-provisioner:
+        condition: service_started
+    volumes:
+      # Plugin folders, read-only: oc8 discovers and reads them, never writes.
+      - ./capas:/app/capas:ro
+      # runtime session root: identical absolute path on both sides is the
+      # point, not a typo -- see OC8_RUNTIME_SESSION_ROOT above.
+      - ${OC8_RUNTIME_SESSION_ROOT:-/var/lib/oc8/sessions}:${OC8_RUNTIME_SESSION_ROOT:-/var/lib/oc8/sessions}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8099/health').status==200 else 1)\""]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  worker:
+    restart: unless-stopped
+    <<: *backend-image
+    environment: *backend-env
+    networks: [default, agents]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      runtime-provisioner:
+        condition: service_started
+    volumes:
+      - ./capas:/app/capas:ro
+      # runtime session root: the worker is what actually starts agent
+      # sandboxes, so it (not the backend) is what needs to see this path at
+      # the SAME absolute location the sibling container mounts it.
+      - ${OC8_RUNTIME_SESSION_ROOT:-/var/lib/oc8/sessions}:${OC8_RUNTIME_SESSION_ROOT:-/var/lib/oc8/sessions}
+    command: ["oc8", "worker"]
+    # More than one, because a worker executes runs STRICTLY SERIALLY: it
+    # dequeues one message and awaits it before taking the next. Four agents on
+    # a three-minute schedule produce ~80 runs an hour; one worker manages ~15,
+    # and the queue grows without bound. Scale this with the number of agents,
+    # not with the machine.
+    #
+    # Safe to raise only because the things two workers could race on are
+    # settled in the database rather than in a process: a run is claimed through
+    # a Redis consumer group (one message, one consumer), an agent is serialised
+    # by a row lock before its run starts, a record is claimed by a unique
+    # constraint, and liveness is a heartbeat on the run rather than a look at
+    # the local Docker daemon -- which would have declared another host's live
+    # runs dead.
+    deploy:
+      replicas: ${OC8_WORKERS:-2}
+
+  ingestion-worker:
+    restart: unless-stopped
+    <<: *backend-image
+    environment: *backend-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    # Same as backend/worker above: without this, every plugin-contributed
+    # knowledge connector (S3, etc.) is invisible here and sync fails with
+    # "unknown connector type" even though the plugin is installed and
+    # enabled for the tenant -- resolve_connector fails closed on an import
+    # it can never make.
+    volumes:
+      - ./capas:/app/capas:ro
+    command: ["oc8", "ingestion-worker"]
+
+  scheduler:
+    restart: unless-stopped
+    <<: *backend-image
+    environment: *backend-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    command: ["oc8", "scheduler"]
+
+  frontend:
+    restart: unless-stopped
+    build:
+      # Community frontend builds from its own allowlisted context. In
+      # particular, private enterprise/ and saas/ source must not enter its
+      # image layers or source maps.
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: /api/v1
+    image: oc8-frontend:latest
+    environment:
+      PORT: "3000"
+    depends_on:
+      - backend
+
+  caddy:
+    restart: unless-stopped
+    image: caddy:2
+    depends_on:
+      - frontend
+      - backend
+    ports:
+      - "${OC8_HTTP_PORT:-80}:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - oc8-caddy-data:/data
+      - oc8-caddy-config:/config
+
+  ollama:
+    restart: unless-stopped
+    profiles: ["ollama"]
+    image: ollama/ollama:latest
+    volumes:
+      - oc8-ollama:/root/.ollama
+    # CPU-only by default. For GPU, add a deploy.resources.reservations.devices
+    # block per the ollama docs.
+
+networks:
+  default:
+  # Where agent containers live. `internal` means no route off the host: they can
+  # reach the control plane (which sits on both networks) and NOTHING else --
+  # not the database, not the internet. The container is meant to think and act
+  # only through oc8's two gateways, and this is what makes that structural
+  # rather than a matter of the harness behaving.
+  agents:
+    internal: true
+
+volumes:
+  oc8-pgdata:
+  oc8-caddy-data:
+  oc8-caddy-config:
+  oc8-ollama:

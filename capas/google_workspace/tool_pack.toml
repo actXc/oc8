@@ -1,0 +1,100 @@
+# The tool-pack half of the google_workspace plugin. This file's TOP LEVEL *is*
+# the `tool_pack` table (design §2/§3) -- there is no `[plugin.tool_pack]`
+# wrapper.
+
+[[connections]]
+key = "primary"
+name = "google_workspace"
+transport = "stdio"
+server_url = ""
+
+[connections.scopes]
+read = [
+    "gmail_search", "gmail_get", "gmail_list_labels",
+    "calendar_list_events", "calendar_get_event", "calendar_check_free_busy",
+    "drive_list", "drive_get_content", "drive_search",
+    "docs_get_text", "sheets_read_range", "sheets_list_worksheets",
+    "slides_get_text",
+]
+send = [
+    "gmail_send", "gmail_reply", "gmail_create_draft", "gmail_modify_labels",
+    "calendar_create_event", "calendar_update_event", "calendar_cancel_event",
+    "calendar_respond_to_invite", "calendar_create_meet_link",
+    "drive_upload", "drive_update_content", "drive_delete",
+    "docs_replace_text", "docs_create_from_template",
+    "sheets_write_range", "sheets_append_row",
+    "slides_replace_placeholder_text", "slides_create_from_template",
+]
+
+# How the bridge is launched. `-m mcp_bridge` needs the plugin's own directory
+# on PYTHONPATH (see `[connections.config.env]` below). The package is
+# `mcp_bridge` and NOT `mcp`, deliberately: with the plugin root on PYTHONPATH
+# a local `mcp/` would shadow the installed MCP SDK the bridge itself imports.
+[connections.config]
+command = "python"
+args = ["-m", "mcp_bridge"]
+
+# Which tools actually reach a PERSON outside this system. Email is obvious.
+# The calendar entries are here for the same reason `calendar_respond_to_invite`
+# always was: adding an attendee to a Google Calendar event puts that event on
+# the attendee's own calendar, including attendees at other companies, and it
+# does so regardless of `sendUpdates`. Creating, updating or Meet-linking an
+# event with attendees is therefore not meaningfully less outward-reaching than
+# accepting an invite on someone's behalf, and the `internal_only` preset
+# (guardrails/internal_only.toml) cannot honestly say "nothing goes outward"
+# while granting them.
+#
+# This list lives inside `config`, not `scopes`, because that is where the
+# core's outward-tools reader (materialise.py, engine.py, internal_agent.py,
+# mcp_gateway.py, outward.py) actually looks for it.
+outward_tools = [
+    "gmail_send",
+    "gmail_reply",
+    "calendar_respond_to_invite",
+    "calendar_create_event",
+    "calendar_update_event",
+    "calendar_create_meet_link",
+]
+
+# NEUTRAL SEAM (focus_spec): WHICH record a call touches. Here it exists for one
+# job -- to scope the outward-once cap above to the EVENT a call reaches instead
+# of to the tool name.
+#
+# Without it, `outward_target` (agent/outward.py) has nothing to key on and falls
+# back to the tool itself, so `calendar_create_event` can succeed exactly ONCE
+# per task. Calendar's events.insert creates one event per request and has no
+# batch form, so "book three interview slots" or "create the kickoff and the
+# follow-up" would hit a refusal on call 2 with no way to express what it wanted.
+# Scoped this way, each distinct event is its own recipient -- and a SECOND call
+# about the SAME event is still refused, which is the whole point.
+#
+# `tool_entities`, not `entity_field`: Calendar has one endpoint per kind of
+# thing, so the entity is named by the tool and never appears as an argument.
+# All three share `calendar_event` deliberately -- creating a plain event and a
+# Meet-linked one at the same moment puts two invitations on the same people's
+# calendars, which is exactly the duplicate this guard exists to stop.
+#
+# `start` as the create-time reference (an event has no id until it exists):
+# what distinguishes two bookings is WHEN they are, not what they are called --
+# three interview slots are usually three identical titles at three different
+# times. `eventId` comes first, so an UPDATE keys on the real event and stays
+# capped however the summary is reworded.
+[connections.config.focus_spec]
+id_fields = ["eventId", "start"]
+
+[connections.config.focus_spec.tool_entities]
+calendar_create_event = "calendar_event"
+calendar_update_event = "calendar_event"
+calendar_create_meet_link = "calendar_event"
+
+[connections.config.env]
+PYTHONPATH = "/app/capas/google_workspace"
+
+# Self-identity token (Shared Drive access, Docs/Sheets/Slides, the setup-time
+# consent probe) -- minted fresh per bridge launch via the existing "oauth:"
+# convention (agent/mcp_env.py). Delegated per-mailbox Gmail/Calendar tokens
+# are wired separately, at setup-submission time (Task 12), via the
+# "oauth-delegated:" convention (Task 3) -- there is no static count of them
+# to declare here, since the tenant chooses how many mailboxes at setup time.
+[connections.config.secret_env]
+GOOGLE_TOKEN = "oauth:google_token"

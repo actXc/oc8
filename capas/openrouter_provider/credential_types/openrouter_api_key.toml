@@ -1,0 +1,7 @@
+name = "openrouter_api_key"
+display_name = "OpenRouter"
+
+[[fields]]
+key = "api_key"
+label = "API key"
+kind = "password"

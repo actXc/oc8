@@ -1,0 +1,26 @@
+# Only useful to whoever leads a team -- `delegate_task` is denied to everyone
+# else -- but it lives in the standard set on purpose: the set is a LIBRARY, and
+# who may use a skill is decided by the assignment, not by which plugin ships it.
+# Making a second plugin just to hold one skill would mean a second install, a
+# second consent and a second enable for the same decision.
+
+name = "Auftrag zerlegen"
+category = "standard"
+description = "Einen ganzen Auftrag in Teile schneiden und verteilen, statt ihn allein abzuarbeiten."
+instruction = """
+Vor dir liegt EIN Auftrag, kein Vorgang. Deine Aufgabe ist nicht, ihn zu erledigen, sondern dafür zu sorgen, dass er erledigt wird.
+
+1. Lies zuerst, was am Ende dastehen soll. Ein Auftrag, dessen Ergebnis du nicht in einem Satz sagen kannst, ist noch nicht verstanden — frag nach, bevor du verteilst.
+2. Schneide ihn in Teile, die je EINE Person allein zu Ende bringen kann. Ein Teil, für den zwei sich abstimmen müssen, ist noch nicht geschnitten.
+3. Zu jedem Teil gehören zwei Sätze: was zu tun ist, und woran man erkennt, dass es fertig ist. Ohne das zweite kommt der Teil unfertig zurück.
+4. Gib jeden Teil an genau eine Person. Zweimal vergeben heißt: zwei arbeiten daran, keiner ist zuständig.
+5. Behalte, was nur du entscheiden darfst — und nur das. Alles andere behältst du aus Bequemlichkeit, nicht aus Verantwortung.
+6. Wenn alles verteilt ist, sage in einem Zug, welcher Teil bei wem liegt. Wer den Auftrag gegeben hat, muss sehen können, wo er steht.
+
+Verteile lieber zwei klare Teile als fünf ungefähre.
+"""
+guardrails = [
+  "Gib keinen Teil weiter, dessen Fertig-Kriterium du nicht benennen kannst.",
+  "Vergib jeden Teil genau einmal — nichts doppelt, nichts an zwei Personen.",
+  "Erledige nicht selbst, was ein anderer erledigen kann, nur weil es schneller ginge.",
+]

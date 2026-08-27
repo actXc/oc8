@@ -1,0 +1,25 @@
+# Operator setup form, interpreted generically by the core. The token lives
+# in the shared credentials store as a named, reusable credential -- so a
+# tenant can hold several different GitHub PATs (e.g. one per org) and pick
+# which one each department's connection uses.
+title = "Set up GitHub"
+description = "Connect a GitHub account or organization so agents can work repositories, issues and pull requests."
+submit_label = "Save & test"
+
+[[fields]]
+key = "department"
+label = "Department"
+kind = "department"
+required = false
+help = "Agents in this department will use this connection automatically."
+
+# Required: nothing on this form is prefilled from an existing connection,
+# so leaving it blank on a resubmit would silently wipe the token from an
+# already-working connection instead of leaving it unchanged
+# (secret_env_fields only replaces what THIS submission actually provides).
+[[fields]]
+key = "token"
+label = "Personal access token"
+kind = "credential"
+credential_type = "github_pat"
+help = "Resolved from the shared credentials store only while the bridge starts."

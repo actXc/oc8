@@ -1,0 +1,47 @@
+title = "Connect Google Workspace"
+description = "Requires a Google Cloud service account. Share your Shared Drives with its email address for the knowledge base and Drive/Docs/Sheets/Slides tools; domain-wide delegation (a separate, optional admin step) is needed only for Gmail/Calendar. See docs/GOOGLE_WORKSPACE.md before submitting."
+submit_label = "Save & test"
+
+# Required: nothing on this form is prefilled from an existing connection,
+# so leaving it blank on a resubmit would silently wipe the key from an
+# already-working connection instead of leaving it unchanged. Reusable: a
+# tenant with several Google Workspace domains can hold one credential per
+# domain and pick which one each connection uses.
+[[fields]]
+key = "service_account_key"
+label = "Service account key (JSON)"
+kind = "credential"
+credential_type = "google_service_account"
+help = "Resolved from the shared credentials store only while the bridge starts."
+
+[[fields]]
+key = "shared_drive_ids"
+label = "Shared Drive IDs to index (comma-separated, optional)"
+kind = "text"
+required = false
+help = "Share each Shared Drive with the service account's email address first. Leave empty to skip the knowledge base and Drive/Docs/Sheets/Slides tools for now."
+
+# Which department's agents get these tools. Without this, the connection is
+# created with department_id = NULL and is never selected by any agent --
+# learned from the Microsoft 365 plugin's whole-branch review (finding C4),
+# applied here from this task's first draft rather than discovered later.
+[[fields]]
+key = "department"
+label = "Department"
+kind = "department"
+required = false
+help = "Agents in this department will use this connection automatically."
+
+[[fields]]
+key = "delegated_mailboxes"
+label = "Mailboxes to act as for Gmail/Calendar (comma-separated, optional)"
+kind = "text"
+required = false
+help = "Leave empty to skip Gmail/Calendar entirely and use this connection for Drive/Docs/Sheets/Slides only. Each address here needs domain-wide delegation authorized in the Workspace Admin Console first (see docs) -- a separate step from sharing a Shared Drive."
+
+[[fields]]
+key = "default_mailbox"
+label = "Default mailbox for Gmail/Calendar tools (optional)"
+kind = "text"
+required = false
+help = "The mailbox Gmail/Calendar tools use when a tool call does not name one itself. Must be one of the mailboxes listed above."

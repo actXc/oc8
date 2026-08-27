@@ -1,0 +1,19 @@
+# Curated use-case library entry -- documentation by example, mirroring
+# odoo_mcp's helpdesk_reply_needs_approval and gitea_mcp's own motivating
+# story: a support agent should be able to say "escalated to engineering"
+# only once there is a real ticket behind that sentence, and a human should
+# see the words that go back to the customer before they're sent.
+
+kind = "library"
+key = "support_ticket_triage_reply_needs_approval"
+label = "Work support tickets, replies need approval"
+label_en = "Work support tickets, replies need approval"
+summary = "Can search, create, assign, move and transition tickets; a comment (which notifies the reporter and watchers) needs approval instead. Does not cover any other change -- assignment or status transitions stay ungated. Also does not cover jira_delete_issue: combine this with the no_deletions preset if that matters too."
+summary_en = "Can search, create, assign, move and transition tickets; a comment (which notifies the reporter and watchers) needs approval instead. Does not cover any other change -- assignment or status transitions stay ungated. Also does not cover jira_delete_issue: combine this with the no_deletions preset if that matters too."
+use_case = "support"
+read = true
+write = false
+send = true
+approval_eur = ""
+approval_actions = ["jira_add_comment", "jira_edit_comment"]
+only = []

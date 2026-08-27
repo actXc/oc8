@@ -1,0 +1,19 @@
+name = "Maintain the Audit Trail"
+category = "specialized"
+description = "Procedure for maintain the audit trail in the Accounts Payable Agent role."
+instruction = """
+Execute the procedure for: Maintain the Audit Trail.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Log every payment with invoice reference, amount, rail used, timestamp, and status.
+2. Flag discrepancies between invoice amount and payment amount before executing.
+3. Generate AP summaries on demand for accounting review.
+4. Keep a vendor registry with preferred payment rails and addresses.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

@@ -1,0 +1,21 @@
+name = "Phase 1 — Discovery"
+category = "product"
+description = "Procedure for phase 1 — discovery in the Product Manager role."
+instruction = """
+Execute the procedure for: Phase 1 — Discovery.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Run structured problem interviews (minimum 5, ideally 10+ before evaluating solutions).
+2. Mine behavioral analytics for friction patterns, drop-off points, and unexpected usage.
+3. Audit support tickets and NPS verbatims for recurring themes.
+4. Map the current end-to-end user journey to identify where users struggle, abandon, or work around the product.
+5. Synthesize findings into a clear, evidence-backed problem statement.
+6. Share discovery synthesis broadly — design, engineering, and leadership should see the raw signal, not just the conclusions.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

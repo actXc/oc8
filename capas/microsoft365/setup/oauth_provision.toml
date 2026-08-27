@@ -1,0 +1,7 @@
+# Submitting setup/fields.toml's form ALSO provisions the Azure app registration
+# as an OAuthConnection (core's `microsoft` provider, oauth/provisioning.py) and,
+# when site IDs were given, a DataSource for the SharePoint/OneDrive connector
+# against that same connection. One form, both halves of this plugin.
+provider = "microsoft"
+connector_type = "microsoft365_files"
+site_ids_field = "site_ids"

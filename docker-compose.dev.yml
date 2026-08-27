@@ -1,0 +1,21 @@
+# Development/demo override. Never use this on a reachable Community instance:
+# it enables unauthenticated dev-login and creates disposable demo data.
+#
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+services:
+  migrate:
+    environment:
+      OC8_ENV: dev
+      OC8_SEED_ON_START: "true"
+  backend:
+    environment:
+      OC8_ENV: dev
+  worker:
+    environment:
+      OC8_ENV: dev
+  ingestion-worker:
+    environment:
+      OC8_ENV: dev
+  scheduler:
+    environment:
+      OC8_ENV: dev

@@ -1,0 +1,21 @@
+name = "Investment thesis report"
+category = "finance"
+description = "Write a balanced investment research note with thesis, bear case, catalysts, valuation frame, and exit triggers."
+instruction = """
+Produce an investment thesis report for the name/ticker/asset in the task.
+
+1. Executive summary: thesis in 3–4 sentences, horizon, conviction, expected return frame if data allows.
+2. Bull case: 2–4 quantified arguments with sources or explicit gaps.
+3. Catalysts with timing and directional impact when known.
+4. Bear case & risks with quantified downside where possible; mitigations only if real.
+5. Thesis breakers: specific metrics/events that invalidate the view.
+6. Valuation frame (ranges/scenarios) — not a single undefended target.
+7. Monitoring checklist for the next review.
+
+If data is thin, deliver a diligence gap list instead of a fake high-conviction rating.
+"""
+guardrails = [
+  "Never invent filings, quotes, or customer metrics.",
+  "Always include a rigorous bear case alongside the bull case.",
+  "Do not issue a Buy/Sell as fact without stating evidence quality and gaps.",
+]

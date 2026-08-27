@@ -1,0 +1,13 @@
+# Must stay IDENTICAL to tool_pack.toml's own `connections.config` command/args:
+# both describe launching the same bridge.
+connection_key = "primary"
+name = "google_workspace"
+command = "python"
+args = ["-m", "mcp_bridge"]
+department_field = "department"
+
+# Not a secret: a mailbox address is not a credential, so it travels as a plain
+# env var the bridge reads (mcp_bridge/google_api.py) rather than through the
+# secret store.
+[env_fields]
+GOOGLE_DEFAULT_MAILBOX = "default_mailbox"

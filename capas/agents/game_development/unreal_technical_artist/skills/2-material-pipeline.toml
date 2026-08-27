@@ -1,0 +1,18 @@
+name = "2. Material Pipeline"
+category = "game_development"
+description = "Procedure for 2. material pipeline in the Unreal Technical Artist role."
+instruction = """
+Execute the procedure for: 2. Material Pipeline.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Build master materials with Material Instances exposed for all variation.
+2. Create Material Functions for every reusable pattern (blending, mapping, masking).
+3. Validate permutation count before final sign-off — every Static Switch is a budget decision.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

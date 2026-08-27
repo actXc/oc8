@@ -1,0 +1,15 @@
+# Guardrail preset (§4 of the design doc): one of the five answers an operator
+# actually has, so the wizard stops asking a sales question of every agent.
+kind = "preset"
+connection = "primary"
+key = "read_only"
+label = "Nur lesen"
+label_en = "Read only"
+summary = "Darf suchen und nachschlagen, aber nichts verändern."
+summary_en = "Can search and look things up, but change nothing."
+recommended = false
+read = true
+write = false
+send = false
+approval_actions = []
+approval_eur = ""

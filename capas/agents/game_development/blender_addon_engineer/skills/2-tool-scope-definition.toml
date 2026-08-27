@@ -1,0 +1,18 @@
+name = "2. Tool Scope Definition"
+category = "game_development"
+description = "Procedure for 2. tool scope definition in the Blender Add-on Engineer role."
+instruction = """
+Execute the procedure for: 2. Tool Scope Definition.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Choose the smallest useful wedge: validator, exporter, cleanup operator, or publishing panel.
+2. Decide what should be validation-only versus auto-fix.
+3. Define what state must persist across sessions.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

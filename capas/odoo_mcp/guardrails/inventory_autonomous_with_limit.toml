@@ -1,0 +1,30 @@
+# Curated use-case library entry (design doc §7) -- one of odoo_mcp's 28
+# documented ERP scenarios, written as documentation by example for anyone
+# building an oc8 tool-pack plugin. Every entry is built from the SAME 9
+# generic tools (tool_pack.toml's connection scopes); none of them can restrict
+# a call to one Odoo model, so entries differ in prose and in the specific
+# approval_eur/approval_actions/only chosen, not in a deeper technical
+# restriction. No tool is classified `write`, so every `write` here is false.
+# Each summary says what it grants AND what it deliberately does not cover.
+
+kind = "library"
+key = "inventory_autonomous_with_limit"
+label = "Lager selbstständig mit Wertlimit, kein Löschen"
+label_en = "Autonomous inventory with a value limit, no deleting"
+summary = "Legt Lagerdatensätze selbstständig an und bearbeitet sie; ab dem eingestellten Betrag entscheidet ein Mensch, und Löschen ist ausgeschlossen. Deckt die meisten Lagerbuchungen praktisch nicht ab, weil sie in Odoo selten eines der erkannten Wertfelder tragen -- dann verhält sich dieses Guardrail wie ein reines 'nie löschen', ohne echte Betragsprüfung."
+summary_en = "Creates and updates inventory records on its own; at or above the configured amount a human decides, and deleting is excluded. Does not, in practice, cover most stock movements, because they rarely carry one of the recognised value fields in Odoo -- for those, this guardrail behaves like a plain 'never delete', without a real amount check."
+use_case = "inventory"
+read = true
+write = false
+send = true
+approval_eur = 500
+approval_actions = []
+only = ["search_records", "get_record", "list_models", "list_resource_templates", "aggregate_records", "create_record", "update_record", "post_message"]
+
+[[adjustable]]
+field = "approval_eur"
+label = "Freigabe ab"
+label_en = "Approval from"
+unit = "EUR"
+min = 0
+max = 20000

@@ -1,0 +1,19 @@
+name = "Phase 2: Thought Leadership Development"
+category = "marketing"
+description = "Procedure for phase 2: thought leadership development in the Twitter Engager role."
+instruction = """
+Execute the procedure for: Phase 2: Thought Leadership Development.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Thread Strategy: Educational content planning with viral potential.
+2. Industry Commentary: News reactions, trend analysis, and expert insights.
+3. Personal Storytelling: Behind-the-scenes content and journey sharing.
+4. Value Creation: Actionable insights, resources, and helpful information.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

@@ -1,0 +1,18 @@
+name = "Integrate with the Agency Workflow"
+category = "specialized"
+description = "Procedure for integrate with the agency workflow in the Accounts Payable Agent role."
+instruction = """
+Execute the procedure for: Integrate with the Agency Workflow.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Accept payment requests from other agents (Contracts Agent, Project Manager, HR) via tool calls.
+2. Notify the requesting agent when payment confirms.
+3. Handle payment failures gracefully — retry, escalate, or flag for human review.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

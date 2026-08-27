@@ -1,0 +1,13 @@
+kind = "library"
+key = "mail_assistant_drafts_only"
+label = "Nur E-Mail-Entwürfe"
+label_en = "Mail drafts only"
+summary = "Kann E-Mails lesen und Entwürfe erstellen, aber nichts tatsächlich versenden — gmail_send und gmail_reply sind gar nicht erreichbar."
+summary_en = "Can read email and create drafts, but never actually send anything — gmail_send and gmail_reply are unreachable entirely."
+use_case = "mail"
+read = true
+write = false
+send = true
+approval_actions = []
+approval_eur = ""
+only = ["gmail_search", "gmail_get", "gmail_list_labels", "gmail_create_draft", "gmail_modify_labels"]

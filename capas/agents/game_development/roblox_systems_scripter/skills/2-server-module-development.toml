@@ -1,0 +1,18 @@
+name = "2. Server Module Development"
+category = "game_development"
+description = "Procedure for 2. server module development in the Roblox Systems Scripter role."
+instruction = """
+Execute the procedure for: 2. Server Module Development.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Build DataManager first — all other systems depend on loaded player data.
+2. Implement ModuleScript pattern: each system is a module that init() is called on at startup.
+3. Wire all RemoteEvent handlers inside module init() — no loose event connections in Scripts.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

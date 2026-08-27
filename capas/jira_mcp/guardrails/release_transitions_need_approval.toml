@@ -1,0 +1,18 @@
+# Demonstrates the library's one capability a preset structurally cannot
+# have (see manifest.py's GuardrailPreset.approval_actions, restricted to the
+# RIGHTS -- read/write/send -- and nothing more specific): gating ONE named
+# tool for approval while leaving the rest of `send` autonomous.
+
+kind = "library"
+key = "release_transitions_need_approval"
+label = "Status transitions (e.g. to \"Released\") need approval"
+label_en = "Status transitions (e.g. to \"Released\") need approval"
+summary = "Creates, updates, comments and plans on its own; only the one call that moves a ticket into another status (jira_transition_issue) needs approval -- because a status change often triggers a customer notice or a release. Does not cover deletion."
+summary_en = "Creates, updates, comments and plans on its own; only the one call that moves a ticket into another status (jira_transition_issue) needs approval -- because a status change often triggers a customer notice or a release. Does not cover deletion."
+use_case = "release management"
+read = true
+write = false
+send = true
+approval_eur = ""
+approval_actions = ["jira_transition_issue"]
+only = []

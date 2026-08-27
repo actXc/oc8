@@ -1,0 +1,14 @@
+# Must stay IDENTICAL to tool_pack.toml's own `connections.config` command/args:
+# both describe launching the same bridge.
+connection_key = "primary"
+name = "jira"
+command = "uv"
+args = ["tool", "run", "mcp-atlassian"]
+department_field = "department"
+
+[env_fields]
+JIRA_URL = "url"
+JIRA_USERNAME = "username"
+
+[secret_env_fields]
+JIRA_API_TOKEN = "system"

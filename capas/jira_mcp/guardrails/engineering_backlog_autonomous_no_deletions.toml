@@ -1,0 +1,20 @@
+kind = "library"
+key = "engineering_backlog_autonomous_no_deletions"
+label = "Maintain the engineering backlog autonomously"
+label_en = "Maintain the engineering backlog autonomously"
+summary = "Creates issues, updates them, links to epics, plans sprints and comments -- all without approval. Deletion is excluded, so a wrongly filed ticket never simply disappears, only gets closed or moved. For a team that hands ongoing backlog upkeep entirely to the agent but still treats deletion as a two-person decision."
+summary_en = "Creates issues, updates them, links to epics, plans sprints and comments -- all without approval. Deletion is excluded, so a wrongly filed ticket never simply disappears, only gets closed or moved. For a team that hands ongoing backlog upkeep entirely to the agent but still treats deletion as a two-person decision."
+use_case = "engineering"
+read = true
+write = false
+send = true
+approval_eur = ""
+approval_actions = []
+only = [
+    "jira_create_issue", "jira_batch_create_issues", "jira_update_issue",
+    "jira_assign_issue", "jira_move_issue", "jira_add_comment", "jira_edit_comment",
+    "jira_transition_issue", "jira_link_to_epic", "jira_create_issue_link",
+    "jira_remove_issue_link", "jira_add_worklog", "jira_add_watcher",
+    "jira_remove_watcher", "jira_create_sprint", "jira_update_sprint",
+    "jira_add_issues_to_sprint",
+]

@@ -1,0 +1,17 @@
+name = "2. Paper Prototype"
+category = "game_development"
+description = "Procedure for 2. paper prototype in the Game Designer role."
+instruction = """
+Execute the procedure for: 2. Paper Prototype.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Sketch the core loop on paper or in a spreadsheet before writing a line of code.
+2. Identify the "fun hypothesis" — the single thing that must feel good for the game to work.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

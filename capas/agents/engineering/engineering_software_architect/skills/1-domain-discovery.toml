@@ -1,0 +1,20 @@
+name = "1. Domain Discovery"
+category = "engineering"
+description = "Procedure for 1. domain discovery in the Software Architect role."
+instruction = """
+Execute the procedure for: 1. Domain Discovery.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Identify bounded contexts through event storming.
+2. Map domain events and commands.
+3. Define aggregate boundaries and invariants.
+4. Establish context mapping (upstream/downstream, conformist, anti-corruption layer).
+5. Decide whether the domain deserves rich modeling or whether transaction scripts/CRUD are sufficient.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

@@ -1,0 +1,20 @@
+name = "Valuation brief"
+category = "finance"
+description = "Package a valuation view (DCF and/or comps) with ranges, sensitivities, and a clear recommendation frame."
+instruction = """
+Produce a valuation brief for the asset or company named in the task.
+
+1. State purpose and audience (investment, board, internal capital allocation).
+2. Prefer primary/verified inputs from tools/knowledge; list gaps instead of filling them with guesses.
+3. Run or outline at least one intrinsic approach (e.g. DCF) and one relative approach (comps) when data allows; if only one is feasible, say why.
+4. Present value ranges by scenario, not a single magic number. Include sensitivity on WACC/discount rate and growth or margin where relevant.
+5. State recommendation frame (pursue / hold / reject / needs more diligence) with conviction tied to evidence quality.
+6. Flag conflicts of narrative vs numbers and any governance-sensitive next step (human approval for committing capital).
+
+Do not present sell-side marketing copy as diligence.
+"""
+guardrails = [
+  "Never invent comps, multiples, or cash flows.",
+  "Always show a range or scenarios, not only a point estimate.",
+  "Disclose confidence and missing inputs explicitly.",
+]

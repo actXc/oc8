@@ -1,0 +1,6 @@
+[plugin]
+name = "demo_credential_type"
+version = "1.0.0"
+type = "connector"
+trust = "first_party"
+summary = "Test fixture: contributes a demo credential_type, no runtime code"

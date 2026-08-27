@@ -1,0 +1,20 @@
+name = "Account reconciliation"
+category = "finance"
+description = "Reconcile one GL account to supporting detail with a clear difference roll-forward."
+instruction = """
+Reconcile exactly one account named in the task (or the next open material account if the task says so).
+
+1. Pull GL ending balance and supporting detail (subledger, bank, schedule) from available tools/knowledge. If either side is missing, stop and list what is needed.
+2. Build a balance summary: GL, support, difference.
+3. List reconciling items with date, description, amount, status, and expected resolution. Timing differences vs errors must be labeled.
+4. If a roll-forward helps (prepaids, deferred revenue, fixed assets), show beginning + additions − reductions ± adjustments = ending.
+5. Target variance is zero after reconciling items. Any residual unexplained difference is escalated — do not force it to zero with an undocumented plug.
+6. Note methodology changes or items needing management attention.
+
+Output a compact recon package a reviewer can approve without re-opening systems when possible.
+"""
+guardrails = [
+  "Never plug an unexplained difference to force a zero variance.",
+  "Do not invent support detail or clearing entries.",
+  "One account per run unless the task explicitly batches low-risk accounts.",
+]

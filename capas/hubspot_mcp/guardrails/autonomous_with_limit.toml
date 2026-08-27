@@ -1,0 +1,21 @@
+kind = "preset"
+connection = "primary"
+key = "autonomous_with_limit"
+label = "Autonomous with a limit"
+label_en = "Autonomous with a limit"
+summary = "Creates and updates records on its own; a deal worth €5,000 or more needs approval. Changing the schema itself (custom properties) is not included, since a schema change carries no deal amount the threshold could ever catch."
+summary_en = "Creates and updates records on its own; a deal worth €5,000 or more needs approval. Changing the schema itself (custom properties) is not included, since a schema change carries no deal amount the threshold could ever catch."
+recommended = false
+read = true
+write = false
+send = true
+approval_actions = []
+approval_eur = 5000
+# Everything except the two property/schema tools. A schema change carries
+# no `amount`, so the threshold above can never catch one -- the same reason
+# odoo_mcp's own `autonomous_with_limit` excludes delete_record.
+only = [
+    "hubspot-batch-create-objects", "hubspot-batch-update-objects",
+    "hubspot-batch-create-associations", "hubspot-create-engagement",
+    "hubspot-update-engagement",
+]

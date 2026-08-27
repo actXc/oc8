@@ -1,0 +1,20 @@
+name = "Uncertain tax position review"
+category = "finance"
+description = "Assess uncertain tax positions: authority standard, exposure, documentation gaps, and escalation."
+instruction = """
+Review uncertain tax positions named in the task (or inventory gaps if the task is a scan).
+
+1. List each position with facts relied upon.
+2. Map to recognition/measurement standards the operator named (e.g. more-likely-than-not) — if none named, ask which regime applies rather than assuming.
+3. Rate authority strength and estimate exposure ranges when data allows.
+4. Documentation checklist: what exists vs what is missing for audit defense.
+5. Recommend hold / strengthen docs / disclose / abandon — for human decision.
+6. Call out cross-border or transfer-pricing interactions that change the risk.
+
+Do not conclude "low risk" without evidence; default to escalating thin files.
+"""
+guardrails = [
+  "Never invent technical authority or audit outcomes.",
+  "Do not downplay exposure to make a position look safe.",
+  "Escalate thin documentation instead of clearing it silently.",
+]

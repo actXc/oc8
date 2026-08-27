@@ -1,0 +1,19 @@
+name = "whatsapp_api"
+display_name = "WhatsApp Business Cloud API"
+validate_entry_point = "channel.setup:validate"
+
+[[fields]]
+key = "access_token"
+label = "Cloud API access token"
+kind = "password"
+help = "From the Meta Business account, App > WhatsApp > API Setup."
+# Deliberately no `default` -- see telegram_bot.toml's own comment on why a
+# credential-type password field needs none (kind="password" is always
+# implicitly required=True).
+
+[[fields]]
+key = "phone_number_id"
+label = "Phone number ID"
+kind = "text"
+required = true
+help = "Meta's own id for the sending number, not a secret."

@@ -1,0 +1,150 @@
+"""The pinned `SkillVersion.definition` schema (tech-spec §6.5).
+
+Parsing is tolerant on the way in -- the seeded rows predate this schema -- and
+strict about what it exposes. A single malformed guardrail is dropped rather
+than raised: a bad guardrail must not cost a run that is otherwise fine. Only a
+definition with no usable instruction is rejected outright, because a skill
+without one has nothing to contribute.
+
+The `requires.tools` form pinned here is the FLAT one, `[{tool, rights}]` (a
+bare string means `rights=["read"]`), because `authz.pdp.missing_skill_requirements`
+already implements and tests it. The nested form in the technical specification
+is the outlier and is corrected there, not here.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_RIGHTS: tuple[str, ...] = ("read",)
+
+
+class SkillDefinitionError(ValueError):
+    """The definition cannot be used as a skill."""
+
+
+@dataclass(frozen=True)
+class SkillRequirement:
+    tool: str
+    rights: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class Guardrail:
+    type: str
+    action: str
+    metric: str
+    gt: float
+    then: str
+
+
+@dataclass(frozen=True)
+class SkillDefinition:
+    schema_version: int
+    slug: str
+    version: str
+    instruction: str
+    requires_tools: tuple[SkillRequirement, ...]
+    requires_kbs: tuple[str, ...]
+    guardrails: tuple[Guardrail, ...]
+    prose_guardrails: tuple[str, ...]
+
+
+def _requirement(raw: Any) -> SkillRequirement | None:
+    if isinstance(raw, str):
+        return SkillRequirement(tool=raw, rights=DEFAULT_RIGHTS) if raw else None
+    if isinstance(raw, Mapping):
+        tool = raw.get("tool")
+        if not isinstance(tool, str) or not tool:
+            return None
+        rights = (
+            tuple(r for r in raw["rights"] if isinstance(r, str))
+            if "rights" in raw
+            and isinstance(raw["rights"], Sequence)
+            and not isinstance(raw["rights"], str)
+            else DEFAULT_RIGHTS
+        )
+        return SkillRequirement(tool=tool, rights=rights)
+    return None
+
+
+def _schema_version(raw: Any) -> int:
+    try:
+        return int(raw or 1)
+    except (TypeError, ValueError):
+        logger.warning("dropping malformed oc8_skill schema_version: %r", raw)
+        return 1
+
+
+def _guardrail(raw: Mapping[str, Any]) -> Guardrail | None:
+    try:
+        return Guardrail(
+            type=str(raw["type"]),
+            action=str(raw.get("action", "")),
+            metric=str(raw.get("metric", "")),
+            gt=float(raw["gt"]),
+            then=str(raw["then"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        logger.warning("dropping malformed skill guardrail: %r", raw)
+        return None
+
+
+def parse_definition(data: Mapping[str, Any]) -> SkillDefinition:
+    if not isinstance(data, Mapping):
+        raise SkillDefinitionError("definition must be a mapping")
+    instruction = data.get("instruction")
+    if not isinstance(instruction, str) or not instruction.strip():
+        raise SkillDefinitionError("definition has no usable 'instruction'")
+
+    requires = data.get("requires")
+    requires = requires if isinstance(requires, Mapping) else {}
+
+    tools_raw = requires.get("tools")
+    tools = (
+        tuple(r for r in (_requirement(t) for t in tools_raw) if r is not None)
+        if isinstance(tools_raw, Sequence) and not isinstance(tools_raw, str)
+        else ()
+    )
+
+    kbs_raw = requires.get("kbs")
+    kbs: tuple[str, ...] = ()
+    if isinstance(kbs_raw, Sequence) and not isinstance(kbs_raw, str):
+        collected: list[str] = []
+        for k in kbs_raw:
+            if isinstance(k, str) and k:
+                collected.append(k)
+            elif isinstance(k, Mapping) and isinstance(k.get("kb_ref"), str):
+                collected.append(str(k["kb_ref"]))
+        kbs = tuple(collected)
+
+    structured: list[Guardrail] = []
+    prose: list[str] = []
+    guardrails_raw = data.get("guardrails")
+    if isinstance(guardrails_raw, Sequence) and not isinstance(guardrails_raw, str):
+        for g in guardrails_raw:
+            if isinstance(g, str):
+                if g.strip():
+                    prose.append(g)
+            elif isinstance(g, Mapping):
+                parsed = _guardrail(g)
+                if parsed is not None:
+                    structured.append(parsed)
+            else:
+                logger.warning("dropping malformed skill guardrail: %r", g)
+
+    return SkillDefinition(
+        schema_version=_schema_version(data.get("oc8_skill", 1)),
+        slug=str(data.get("id", "")),
+        version=str(data.get("version", "")),
+        instruction=instruction.strip(),
+        requires_tools=tools,
+        requires_kbs=kbs,
+        guardrails=tuple(structured),
+        prose_guardrails=tuple(prose),
+    )

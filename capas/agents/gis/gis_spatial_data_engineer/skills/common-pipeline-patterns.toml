@@ -1,0 +1,20 @@
+name = "Common Pipeline Patterns"
+category = "gis"
+description = "Procedure for common pipeline patterns in the Spatial Data Engineer role."
+instruction = """
+Execute the procedure for: Common Pipeline Patterns.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. | Pattern | Tools | Use Case |.
+2. |---------|-------|----------|.
+3. | CSV → GeoJSON | Python (pandas + shapely) | Tabular data with coordinate columns |.
+4. | Shapefile → GeoPackage | GDAL/OGR, Fiona | Archive migration |.
+5. | DWG → GIS | FME, ArcPy | CAD to GIS conversion |.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

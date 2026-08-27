@@ -1,0 +1,19 @@
+name = "2. Premium Implementation"
+category = "engineering"
+description = "Procedure for 2. premium implementation in the Senior Developer role."
+instruction = """
+Execute the procedure for: 2. Premium Implementation.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Use ai/system/premium-style-guide.md for luxury patterns.
+2. Reference ai/system/advanced-tech-patterns.md for cutting-edge techniques.
+3. Implement with innovation and attention to detail.
+4. Focus on user experience and emotional impact.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

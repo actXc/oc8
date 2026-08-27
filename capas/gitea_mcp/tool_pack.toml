@@ -1,0 +1,76 @@
+# The tool-pack half of the gitea_mcp plugin. This file's TOP LEVEL *is* the
+# `tool_pack` table (design §2/§3) -- there is no `[plugin.tool_pack]` wrapper.
+# There is deliberately NO sibling guardrails/ folder: this plugin declares no
+# guardrail presets and ships no curated library, so its connections fall back
+# to the core's own generic handling and `guardrail_library` stays null (not an
+# empty list, which would mean something different on the wire).
+
+[[connections]]
+key = "primary"
+name = "gitea"
+transport = "stdio"
+server_url = ""
+credential_type = "gitea_login"
+
+# Right classification. Reading a repository is harmless; opening an issue and
+# commenting on one change something a colleague will act on, so they are writes
+# and a department can withhold them on their own.
+[connections.scopes]
+read = [
+    "list_issues", "get_issue", "list_repos", "list_labels", "list_milestones",
+    "list_branches", "list_pull_requests", "get_pull_request", "list_releases",
+    "read_file", "get_server_info", "get_server_version",
+]
+send = [
+    "create_issue", "update_issue", "add_comment", "add_comment_on_pr",
+    "create_pr", "merge_pr", "commit_changes", "create_branch", "create_release",
+]
+
+[connections.config]
+command = "uv"
+args = ["tool", "run", "gitea-mcp"]
+
+# NO outward_tools on purpose. The one-message-per-record guard exists so a
+# CUSTOMER is not sent two answers to one question. An issue tracker is internal
+# — opening an issue and then commenting on it in the same run is ordinary work,
+# and refusing the second call would break it for no gain.
+
+# NEUTRAL SEAM (focus_spec), in its second shape: Gitea has one endpoint per
+# kind, so the entity is in the TOOL NAME rather than in an argument the way
+# Odoo's `model` is. Without `tool_entities` every Gitea call would produce no
+# live-log line at all, and half the agent's work would be invisible.
+[connections.config.focus_spec]
+id_field = "number"
+id_fields = ["index", "number", "issue_number"]
+title_fields = ["title"]
+name_path = ["title"]
+default_verb = "Bearbeitet"
+search_label = "Durchsucht"
+search_tools = ["list_issues", "list_repos", "list_pull_requests", "list_releases"]
+
+[connections.config.focus_spec.tool_entities]
+create_issue = "issue"
+get_issue = "issue"
+update_issue = "issue"
+list_issues = "issue"
+add_comment = "issue"
+list_repos = "repo"
+list_pull_requests = "pull"
+get_pull_request = "pull"
+
+[connections.config.focus_spec.labels]
+issue = "Entwicklungsticket"
+repo = "Projekt"
+pull = "Änderungsvorschlag"
+
+[connections.config.focus_spec.verbs]
+create_issue = "Meldet"
+get_issue = "Öffnet"
+update_issue = "Bearbeitet"
+add_comment = "Notiert an"
+
+[connections.config.env]
+GITEA_URL = "http://host.docker.internal:3000"
+
+[connections.config.secret_env]
+GITEA_TOKEN = "gitea/token"

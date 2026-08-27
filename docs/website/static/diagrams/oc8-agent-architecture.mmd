@@ -1,0 +1,44 @@
+flowchart TB
+  subgraph cp ["Control plane"]
+    Worker["worker · provisions sandbox"]
+    Engine["agent engine"]
+    GW["/llm + /mcp gateways"]
+    Secrets["encrypted secret store"]
+    PG[("postgres")]
+    RealMCP["real MCP tools\nOdoo · M365 · …"]
+  end
+
+  subgraph box ["Agent sandbox container · network oc8_agents internal"]
+    direction TB
+    LLM["model loop"]
+    Bridge["oc8-mcp-bridge.mjs"]
+
+    subgraph injected ["Injected by platform"]
+      WS["/workspace session · rw"]
+      MD["CLAUDE.md · mission + skill catalog · ro"]
+      Skills["/app/skills harness · ro"]
+      Token["env: run-scoped OC8_TOKEN only"]
+    end
+  end
+
+  subgraph blocked ["Blocked from sandbox"]
+    NoDB["no postgres / redis"]
+    NoNet["no internet"]
+    NoSec["no provider keys · no MCP secrets · no KEK"]
+  end
+
+  Worker -->|"Docker socket"| box
+  Engine --> Worker
+  Engine --> PG
+
+  LLM -->|"Bearer token → /llm"| GW
+  LLM --> Bridge
+  Bridge -->|"Bearer token → /mcp"| GW
+  GW --> Secrets
+  GW --> RealMCP
+  Secrets --> RealMCP
+
+  WS -.-> LLM
+  MD -.-> LLM
+  Skills -.-> LLM
+  Token -.-> Bridge

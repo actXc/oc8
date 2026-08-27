@@ -1,0 +1,161 @@
+from __future__ import annotations
+
+import sys
+import uuid
+from pathlib import Path
+
+import pytest
+from asgi_lifespan import LifespanManager
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from oc8 import models as m
+from oc8.auth import get_identity_provider
+from oc8.main import create_app
+from tests.conftest import AppSessionFactory
+
+pytestmark = pytest.mark.asyncio
+
+_DEMO_FS = str(
+    Path(__file__).resolve().parents[2] / "mcp_servers" / "demo_fs.py"
+)  # backend/mcp_servers/demo_fs.py — adjust parents[N] if the path differs; assert it exists
+
+
+def _h(tenant: uuid.UUID, role: str = "org_admin") -> dict[str, str]:
+    token = get_identity_provider().mint(tenant_id=tenant, subject="op", role=role)
+    return {"Authorization": f"Bearer {token}"}
+
+
+async def _make_conn(
+    db: AsyncSession, tenant: uuid.UUID, command: str, args: list[str]
+) -> uuid.UUID:
+    conn = m.McpConnection(
+        tenant_id=tenant,
+        name="c",
+        server_url="",
+        transport="stdio",
+        scopes=[],
+        config={"command": command, "args": args},
+        connected=False,
+    )
+    db.add(conn)
+    await db.flush()
+    return conn.id
+
+
+async def test_demo_fs_test_succeeds_and_discovers_tools(app_session: AppSessionFactory) -> None:
+    assert Path(_DEMO_FS).exists(), _DEMO_FS  # noqa: ASYNC240 - a one-off existence check, not I/O on the hot path
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        conn_id = await _make_conn(db, tenant, sys.executable, [_DEMO_FS])
+        await db.commit()
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.post(f"/api/v1/mcp/connections/{conn_id}/test", headers=_h(tenant))
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["connected"] is True
+            assert body["health"]["status"] == "ok"
+            assert set(body["health"]["tools"]) == {"list_files", "read_file", "write_file"}
+            assert body["health"]["toolCount"] == 3
+
+            # persisted
+            g = await c.get("/api/v1/mcp/connections", headers=_h(tenant))
+            row = next(x for x in g.json() if x["id"] == str(conn_id))
+            assert row["connected"] is True
+
+
+async def test_bad_command_records_error_health(app_session: AppSessionFactory) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        conn_id = await _make_conn(db, tenant, "/nonexistent/binary/xyz", [])
+        await db.commit()
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.post(f"/api/v1/mcp/connections/{conn_id}/test", headers=_h(tenant))
+            assert r.status_code == 200, r.text  # the test ran; the server failed
+            body = r.json()
+            assert body["connected"] is False
+            assert body["health"]["status"] == "error"
+            assert body["health"]["error"]
+
+
+async def test_test_requires_admin(app_session: AppSessionFactory) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        conn_id = await _make_conn(db, tenant, "x", [])
+        await db.commit()
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.post(
+                f"/api/v1/mcp/connections/{conn_id}/test", headers=_h(tenant, "member")
+            )
+            assert r.status_code == 403
+
+
+async def test_test_missing_connection_404() -> None:
+    tenant = uuid.uuid4()
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.post(f"/api/v1/mcp/connections/{uuid.uuid4()}/test", headers=_h(tenant))
+            assert r.status_code == 404
+
+
+async def test_timeout_records_error(
+    app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A command that sleeps well past a shrunk timeout must fail fast, not hang.
+    import oc8.api.v1.mcp as mcp_mod
+
+    monkeypatch.setattr(mcp_mod, "_TEST_TIMEOUT_S", 0.5, raising=False)
+    tenant = uuid.uuid4()
+    sleeper_args = ["-c", "import time; time.sleep(30)"]
+    async with app_session(tenant) as db:
+        conn_id = await _make_conn(db, tenant, sys.executable, sleeper_args)
+        await db.commit()
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.post(f"/api/v1/mcp/connections/{conn_id}/test", headers=_h(tenant))
+            assert r.status_code == 200
+            assert r.json()["connected"] is False
+            assert r.json()["health"]["status"] == "error"
+
+
+async def test_patching_a_connection_answers_200_and_persists(
+    app_session: AppSessionFactory,
+) -> None:
+    """PATCH wrote correctly and then answered 500.
+
+    The handler committed mid-request and refreshed afterwards, but the RLS GUC
+    is TRANSACTION-local: after the commit the session is unbound, so the reload
+    ran with app.tenant_id = '' and blew up on the uuid cast. The row was already
+    saved, so an operator saw a server error for a change that had in fact
+    landed -- and the natural response, doing it again, hid the truth further.
+    Committing is the session's job here, not the handler's.
+    """
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        conn_id = await _make_conn(db, tenant, "bridge", ["serve"])
+        await db.commit()
+
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.patch(
+                f"/api/v1/mcp/connections/{conn_id}",
+                json={"secretEnv": {"SERVICE_TOKEN": "vault/token"}, "name": "renamed"},
+                headers=_h(tenant),
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["name"] == "renamed"
+
+    async with app_session(tenant) as db:
+        stored = await db.get(m.McpConnection, conn_id)
+        assert stored is not None
+        assert stored.name == "renamed"
+        assert stored.config["secret_env"] == {"SERVICE_TOKEN": "vault/token"}

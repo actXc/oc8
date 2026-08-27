@@ -1,0 +1,26 @@
+# Guardrail preset (§4 of the design doc): one of the five answers an operator
+# actually has, so the wizard stops asking a sales question of every agent.
+kind = "preset"
+connection = "primary"
+key = "internal_only"
+label = "Nur intern"
+label_en = "Internal only"
+summary = "Pflegt Leads, Angebote und Kontakte selbstständig, schreibt aber nie an Kundinnen und Kunden."
+summary_en = "Maintains leads, quotes and contacts on its own, but never writes to customers."
+recommended = false
+read = true
+write = false
+send = true
+approval_actions = []
+approval_eur = ""
+# `post_message` is this connection's only outward tool -- the only one that
+# reaches a person (see `outward_tools` in tool_pack.toml). Withholding it is
+# the whole preset: an agent may work the CRM all day and still be unable to say
+# anything to a customer. Rights cannot express that, because post_message
+# shares the `send` right with create/update. `delete_record` is out too; an
+# agent nobody is watching closely enough to let it message people should not be
+# erasing records either.
+only = [
+  "search_records", "get_record", "list_models", "list_resource_templates",
+  "aggregate_records", "create_record", "update_record",
+]

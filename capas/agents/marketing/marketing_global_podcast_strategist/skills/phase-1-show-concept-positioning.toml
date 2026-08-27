@@ -1,0 +1,20 @@
+name = "Phase 1: Show Concept & Positioning"
+category = "marketing"
+description = "Procedure for phase 1: show concept & positioning in the Global Podcast Strategist role."
+instruction = """
+Execute the procedure for: Phase 1: Show Concept & Positioning.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Target Listener Definition: Build a detailed listener persona — demographics, psychographics, what shows they already listen to, what problems or aspirations drive their listening, and what gap currently goes unserved in their audio diet.
+2. Competitive Audit: Survey the top 20 shows in the niche; for each document format, episode length, cadence, average review score, recurring listener complaints in reviews, and content areas they avoid or handle poorly.
+3. Unique Angle Identification: Define the single thing this show does that no competing show does — format innovation (e.g., every episode ends with a live experiment), guest access tier, host perspective, depth of niche, or production quality standard.
+4. Show Bible Creation: Document show name, tagline, elevator pitch, episode format options, standard segment structure, target episode length, publishing frequency, brand voice adjectives, and off-limits topics.
+5. Platform Primary Strategy: Determine primary growth platform based on listener persona — Spotify for music-adjacent audiences and 18–34 demographic; Apple for business/premium audiences; YouTube for visual-friendly formats and search-driven discovery.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

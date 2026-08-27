@@ -1,0 +1,151 @@
+# The tool-pack half of the odoo_mcp plugin. This file's TOP LEVEL *is* the
+# `tool_pack` table (design §2/§3) -- there is no `[plugin.tool_pack]` wrapper.
+# The guardrail presets that used to sit inside these connections now live one
+# file per key in guardrails/, alongside the curated use-case library.
+
+[[connections]]
+key = "primary"
+name = "odoo"
+transport = "stdio"
+server_url = ""
+# Which credential_types/*.toml entry a login for this connection must be --
+# lets the Hire dialog / NarrowingEditor's "New login" flow skip asking the
+# operator to pick a credential type by hand (agent tool login selection
+# design, Task 2).
+credential_type = "odoo_login"
+
+# env var name -> the credential_type's own field key (odoo_login.toml: url,
+# database, username, password). Without this a login created from that
+# credential lands in config.env/secret_env keyed "url"/"database"/... --
+# mcp-server-odoo reads ODOO_URL/ODOO_DB/ODOO_USER/ODOO_PASSWORD and never
+# sees them.
+#
+# ODOO_API_KEY carries the SAME value as ODOO_PASSWORD (the credential's one
+# `password` field, labelled "Odoo password or API key") under a second env
+# var name -- not a second secret. mcp-server-odoo treats the two as
+# different AUTH MODES, not interchangeable names for one value:
+# ODOO_API_KEY alone selects its dedicated, correct API-key auth path;
+# ODOO_PASSWORD alone makes it try a `/web/session/authenticate` interactive
+# web-session login instead -- which Odoo deliberately refuses for an API
+# key (a real password only), regardless of how many times the key is
+# rotated. Live-observed 2026-08-26: every fresh API key failed identically
+# with "no session cookie returned" until this was added. Setting both is
+# exactly this library's own documented fallback design ("try API key auth,
+# then username/password") -- see mcp_server_odoo/odoo_connection.py.
+[connections.credential_env_fields]
+ODOO_URL = "url"
+ODOO_DB = "database"
+ODOO_USER = "username"
+ODOO_PASSWORD = "password"
+ODOO_API_KEY = "password"
+
+# Right classification for the bridge's tools (drives the frame check): reads vs.
+# writes. Writes ("send") are the value-gated actions, so a department frame can
+# require approval on them above a €-threshold.
+#
+# READ THIS BEFORE ADDING A GUARDRAIL ENTRY. These 9 tools are the entire
+# alphabet every preset and every guardrails/ library entry is built from, and
+# not one of them is scoped to a specific Odoo model -- so nothing in
+# guardrails/ can restrict a call to "sale.order" versus "helpdesk.ticket", or
+# tell a status-changing update apart from any other update. No tool is
+# classified `write`, which is why every preset and library entry sets
+# `write = false`.
+[connections.scopes]
+read = ["search_records", "get_record", "list_models", "list_resource_templates", "aggregate_records"]
+send = ["create_record", "update_record", "delete_record", "post_message"]
+
+# How the bridge is launched. oc8 forwards only the env below and resolves the
+# password from the secret store into ODOO_PASSWORD. `uv tool run` is used
+# because the container's `uvx` shim mis-parses the package name as a subcommand.
+[connections.config]
+command = "uv"
+args = ["tool", "run", "mcp-server-odoo"]
+
+# NEUTRAL SEAM (outward_tools): which tools actually reach a PERSON. The core
+# uses it for one rule only -- at most one message per record per task -- because
+# a model having a bad turn will otherwise answer the same customer question
+# twice in a single run. It happened; a mission rule did not stop it. Everything
+# else here writes to the system, not to a human, and stays unlimited.
+outward_tools = ["post_message"]
+
+# NEUTRAL SEAM (tool_notes): free text appended to a specific tool's own
+# description, applied generically by oc8.agent.tool_notes -- core has no
+# idea this is about Odoo. This entry only ever grows by adding a SPECIFIC
+# wrong guess a model actually made against THIS install, verified against
+# the real data (fields_get / a live search) before being written down --
+# it is not a general Odoo reference, because the generic remedy for
+# everything else already exists as a tool: list_models.
+#
+# Known-wrong guesses on this install:
+# - helpdesk.ticket has no `sla_date` field (verified via fields_get,
+#   2026-08-26). A deterministic model (opaas_ai:odoo-gpt, which ignores
+#   temperature) guessed it on every fresh "Manual run" trigger, since an
+#   identical prompt always produces its identical first guess.
+# - helpdesk.stage names on this install are the English defaults --
+#   New / In Progress / On Hold / Solved / Cancelled -- never translated,
+#   even though the rest of this install's UI runs in German. Claude
+#   (claude-haiku-4-5) guessed the German "Neu" for a `stage_id.name`
+#   filter and silently got zero results back instead of an error, live-
+#   observed 2026-08-26 -- ticket #28 (real, in stage "New") went
+#   invisible to a domain filtering for "Neu". Filtering `stage_id` (the
+#   integer id, e.g. 1 for New) instead of `stage_id.name` sidesteps this
+#   whole class of guess.
+[connections.config.tool_notes]
+search_records = "Field names vary per Odoo model -- if unsure, call list_models first rather than guessing. Known-wrong guesses on THIS install: helpdesk.ticket has no `sla_date` field -- use `create_date`, `write_date`, or `close_date` for ticket age/deadline ordering, `priority`/`stage_id`/`kanban_state` for triage, `user_id`/`team_id`/`partner_id` for who's involved. helpdesk.stage names here are the English defaults (New, In Progress, On Hold, Solved, Cancelled), never translated -- a `stage_id.name` filter for a translated guess (e.g. German \"Neu\") silently returns zero results instead of erroring. Prefer filtering `stage_id` by its integer id (1=New, 2=In Progress, 3=On Hold, 4=Solved, 5=Cancelled) over `stage_id.name` by a guessed string."
+aggregate_records = "Field names vary per Odoo model -- if unsure, call list_models first rather than guessing. Known-wrong guesses on THIS install: helpdesk.ticket has no `sla_date` field -- use `create_date`, `write_date`, or `close_date` for ticket age/deadline ordering, `priority`/`stage_id`/`kanban_state` for triage, `user_id`/`team_id`/`partner_id` for who's involved. helpdesk.stage names here are the English defaults (New, In Progress, On Hold, Solved, Cancelled), never translated -- a `stage_id.name` filter for a translated guess (e.g. German \"Neu\") silently returns zero results instead of erroring. Prefer filtering `stage_id` by its integer id (1=New, 2=In Progress, 3=On Hold, 4=Solved, 5=Cancelled) over `stage_id.name` by a guessed string."
+
+[connections.config.env]
+ODOO_URL = "http://host.docker.internal:1000"
+ODOO_DB = "oc8"
+ODOO_USER = "admin"
+
+[connections.config.secret_env]
+ODOO_PASSWORD = "odoo/password"
+ODOO_API_KEY = "odoo/password"
+
+# NEUTRAL SEAM (value_spec): where the monetary value of a write lives, so the
+# core's approval threshold can act on an Odoo offer without the core knowing
+# anything about Odoo. A sale.order carries its value in order_line (price*qty);
+# a lead carries it directly in expected_revenue.
+[connections.config.value_spec]
+direct_fields = ["expected_revenue", "amount_total", "amount_untaxed", "price_total", "price_subtotal"]
+
+[connections.config.value_spec.line_items]
+path = ["values", "order_line"]
+price_field = "price_unit"
+qty_field = "product_uom_qty"
+
+# NEUTRAL SEAM (focus_spec): how to describe which record a call touches, for the
+# live log. Only listed entities are surfaced.
+[connections.config.focus_spec]
+entity_field = "model"
+id_fields = ["id", "record_id"]
+# Where a record's human name sits in what a call RETURNS. The arguments never
+# carry it -- an update sends an id and the fields to change -- so without this
+# a task card can only ever say "Ticket #55". display_name first: it is the one
+# Odoo itself shows.
+id_field = "id"
+title_fields = ["display_name", "name"]
+name_path = ["values", "name"]
+default_verb = "Bearbeitet"
+search_tools = ["search_records", "aggregate_records"]
+search_label = "Durchsucht"
+
+# An entity that is NOT listed here produces no live-log line and no task label
+# at all -- describe_focus returns None for it. That is why a helpdesk agent ran
+# for an hour with an empty live log and a task card still showing the trigger's
+# text: the models it works on were simply not named here.
+[connections.config.focus_spec.labels]
+"crm.lead" = "Lead"
+"sale.order" = "Angebot"
+"res.partner" = "Kontakt"
+"helpdesk.ticket" = "Ticket"
+"helpdesk.stage" = "Ticket-Stufe"
+"helpdesk.team" = "Support-Team"
+"mail.message" = "Gesprächsverlauf"
+
+[connections.config.focus_spec.verbs]
+create_record = "Erstellt"
+update_record = "Bearbeitet"
+get_record = "Öffnet"
+post_message = "Notiert an"

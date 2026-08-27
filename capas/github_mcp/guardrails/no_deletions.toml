@@ -1,0 +1,25 @@
+kind = "preset"
+connection = "primary"
+key = "no_deletions"
+label = "With approval, never deletes"
+label_en = "With approval, never deletes"
+summary = "Like \"Assist with approval\", except deleting a file from a repository is not possible at all."
+summary_en = "Like \"Assist with approval\", except deleting a file from a repository is not possible at all."
+recommended = false
+read = true
+write = false
+send = true
+approval_actions = ["send"]
+approval_eur = ""
+# The difference from `assist_with_approval` is "never" versus "only with a
+# human": there, a deletion is merely held for approval and somebody can wave
+# it through at four in the afternoon. Here the tool is not on the table.
+# There is no repository-deletion tool in this bridge at all -- delete_file
+# is the only destructive call it exposes.
+only = [
+    "add_issue_comment", "issue_write", "sub_issue_write",
+    "add_comment_to_pending_review", "add_reply_to_pull_request_comment",
+    "create_pull_request", "merge_pull_request", "pull_request_review_write",
+    "update_pull_request", "update_pull_request_branch", "create_branch",
+    "create_or_update_file", "create_repository", "fork_repository", "push_files",
+]

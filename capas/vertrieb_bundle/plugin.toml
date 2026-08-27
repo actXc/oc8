@@ -1,0 +1,42 @@
+# Example plugin: a whole sales department as a drop-in bundle.
+#
+# This is a DATA-ONLY plugin -- it ships no Python code, so it works today with
+# no code loading. Drop this folder into the plugins path, open the Plugins
+# screen, press Install, then instantiate it into a real department.
+
+[plugin]
+name = "vertrieb_bundle"
+version = "1.0.0"
+type = "department_template"
+trust = "first_party"
+summary = "Vertriebsabteilung mit Head of Sales, AE und SDR — Beispiel-Plugin"
+
+# The department frame is the ceiling of what every agent in this department may
+# do (§5.3). Unlike the built-in sales template, this one GRANTS department
+# memory: an empty `memory` table denies department- and company-tier access
+# outright, which silently breaks agents that try to share notes.
+[plugin.department_template.frame]
+tools = {}
+kbs = []
+memory = { department = ["read", "write"], company = ["read"] }
+
+[[plugin.department_template.agents]]
+name = "Head of Sales"
+role_title = "Sales Lead"
+mission = "Own the pipeline, set priorities, and coach the team."
+is_team_lead = true
+persona = "# Head of Sales\nDecisive, coaches the reps, owns the number."
+
+[[plugin.department_template.agents]]
+name = "Account Executive"
+role_title = "AE"
+mission = "Close inbound and outbound opportunities."
+reports_to = "Head of Sales"
+persona = "# Account Executive\nConsultative closer. Qualifies hard, follows up fast."
+
+[[plugin.department_template.agents]]
+name = "SDR"
+role_title = "Sales Development Rep"
+mission = "Qualify inbound leads and book meetings for the AE."
+reports_to = "Head of Sales"
+persona = "# SDR\nHigh-activity prospecting, short and specific outreach."

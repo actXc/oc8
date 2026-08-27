@@ -1,0 +1,604 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Self-hosted fonts (Space Grotesk, Inter, JetBrains Mono), served from
+ * /fonts/*.woff2 (frontend/public/fonts/) rather than fetched from Google
+ * Fonts at runtime -- no third-party request on page load, and the app
+ * keeps working in an air-gapped/offline deployment. Latin subset only,
+ * matching this app's supported languages (English/German); each file was
+ * pulled from Google's own CDN once, per weight, to keep it a genuine
+ * single-weight static file rather than a multi-weight variable font.
+ */
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/space-grotesk-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/space-grotesk-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/space-grotesk-600.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/space-grotesk-700.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url("/fonts/inter-300.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/inter-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/inter-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/inter-600.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/inter-700.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/jetbrains-mono-400.woff2") format("woff2");
+}
+
+/*
+ * Design system definition.
+ *
+ * The @theme inline block maps CSS custom properties to Tailwind utility
+ * classes (e.g. --color-primary -> bg-primary, text-primary).
+ *
+ * The :root and .dark blocks define the actual color values. Tokens the
+ * oc8 Brand Style Sheet (v1.0) defines explicitly are copied verbatim in
+ * its own hex/rgba format for 1:1 traceability back to that doc, rather
+ * than hand-converted to oklch and risking a silent drift; tokens the
+ * sheet doesn't cover keep the pre-existing oklch values.
+ *
+ * To add a new semantic color:
+ * 1. Add the variable to :root (light value) and .dark (dark value) --
+ *    hex/rgba if the brand sheet defines it, oklch otherwise
+ * 2. Register it in @theme inline as --color-<name>: var(--<name>)
+ */
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-status-running: var(--status-running);
+  --color-status-warning: var(--status-warning);
+  --color-status-error: var(--status-error);
+  --color-status-paused: var(--status-paused);
+  --color-status-waiting-for-task: var(--status-waiting-for-task);
+  --color-panel: var(--panel);
+  --font-serif: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+}
+
+:root {
+  /* oc8 Brand Style Sheet v1.0, section 03 (Theme tokens) -- values below
+     are copied verbatim from that doc, not approximated. Anything the doc
+     doesn't define (destructive, chart-3+, sidebar-*) keeps its prior
+     value, adjusted only where it visibly clashed with the new palette. */
+  --radius: 0.875rem; /* 14px, doc: --radius */
+  /* oc8 light theme */
+  --background: #f6f8fa; /* doc: --background */
+  --foreground: #0b1020; /* doc: --foreground */
+  --panel: #ffffff; /* doc: --surface / --card */
+  --card: #ffffff;
+  --card-foreground: #0b1020;
+  --popover: #ffffff;
+  --popover-foreground: #0b1020;
+  --primary: #286bff; /* doc: --primary, same both themes */
+  --primary-foreground: #ffffff; /* doc: --btn-primary-fg (light) */
+  --secondary: #eef1f6; /* doc: --secondary / --muted / --accent share one value */
+  --secondary-foreground: #0b1020;
+  --muted: #eef1f6;
+  --muted-foreground: #6b7280; /* doc: --slate / --muted-foreground */
+  --accent: #eef1f6;
+  --accent-foreground: #0b1020;
+  --destructive: oklch(0.58 0.22 25);
+  --destructive-foreground: oklch(0.98 0.01 240);
+  --border: rgba(11, 16, 32, 0.1); /* doc: --border / --input */
+  --input: rgba(11, 16, 32, 0.1);
+  --ring: #7a4dff; /* doc: --ring, same both themes */
+  --status-running: #20d4bf; /* doc: Mint -- "success and positive deltas only" */
+  --status-warning: #ff9a3c; /* doc: Orange */
+  --status-error: oklch(0.58 0.22 25);
+  --status-paused: oklch(0.65 0.02 250);
+  --status-waiting-for-task: #35d46a; /* doc: not in the brand sheet's 6-color palette -- a grass-green sibling of Mint (hue 140 vs Mint's 173), kept distinct so "waiting" and "running" dots don't read as the same status */
+  --chart-1: #286bff;
+  --chart-2: #20d4bf;
+  --chart-3: #ff9a3c;
+  --chart-4: oklch(0.58 0.22 25);
+  --chart-5: #7a4dff;
+  --sidebar: #f6f8fa;
+  --sidebar-foreground: #0b1020;
+  --sidebar-primary: #286bff;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eef1f6;
+  --sidebar-accent-foreground: #0b1020;
+  --sidebar-border: rgba(11, 16, 32, 0.1);
+  --sidebar-ring: #7a4dff;
+  --dot-grid-color: rgba(11, 16, 32, 0.08); /* doc: --dot-grid-color (light) */
+}
+
+.dark {
+  /* oc8 Brand Style Sheet v1.0, section 03 (Theme tokens), dark column. */
+  --background: #060b14; /* doc: Deep Navy */
+  --foreground: #f6f8fa; /* doc: Off White */
+  --panel: #0e1220; /* doc: Surface */
+  --card: #0e1220;
+  --card-foreground: #f6f8fa;
+  --popover: #0e1220;
+  --popover-foreground: #f6f8fa;
+  --primary: #286bff; /* doc: Electric Blue, same both themes */
+  --primary-foreground: #0b0d18; /* doc: --btn-primary-fg (dark) */
+  --secondary: #141827; /* doc: --secondary / --muted / --accent share one value */
+  --secondary-foreground: #f6f8fa;
+  --muted: #141827;
+  --muted-foreground: #8a94a6; /* doc: Slate */
+  --accent: #141827;
+  --accent-foreground: #f6f8fa;
+  --destructive: oklch(0.65 0.22 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: rgba(255, 255, 255, 0.08); /* doc: --border / --input */
+  --input: rgba(255, 255, 255, 0.08);
+  --ring: #7a4dff; /* doc: Purple */
+  --status-running: #20d4bf; /* doc: Mint -- "success and positive deltas only" */
+  --status-warning: #ff9a3c; /* doc: Orange */
+  --status-error: oklch(0.65 0.22 25);
+  --status-paused: oklch(0.6 0 0);
+  --status-waiting-for-task: #35d46a; /* doc: see light-theme comment above */
+  --chart-1: #286bff;
+  --chart-2: #20d4bf;
+  --chart-3: #ff9a3c;
+  --chart-4: oklch(0.65 0.22 25);
+  --chart-5: #7a4dff;
+  --sidebar: #060b14;
+  --sidebar-foreground: #f6f8fa;
+  --sidebar-primary: #286bff;
+  --sidebar-primary-foreground: #0b0d18;
+  --sidebar-accent: #141827;
+  --sidebar-accent-foreground: #f6f8fa;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-ring: #7a4dff;
+  --dot-grid-color: rgba(255, 255, 255, 0.06); /* doc: --dot-grid-color (dark) */
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  h1,
+  h2,
+  h3,
+  .font-serif {
+    font-family: var(--font-serif);
+    letter-spacing: -0.02em;
+    font-weight: 600;
+  }
+}
+
+/* Brand gradient, lifted verbatim from the octopus mark's own fill
+   (public/octopus_oc8.svg's linearGradient stops: cyan -> blue -> purple ->
+   pink -> orange) -- applied to every filled `bg-primary` surface app-wide
+   (buttons, progress fills, badges, chat bubbles) so the brand's signature
+   sweep shows up beyond the mascot itself, not just as a flat Electric Blue.
+   Layered on top of the flat `--primary` background-color Tailwind's
+   generated `.bg-primary` utility already sets (this rule comes later in
+   the cascade at equal specificity, so it wins) -- text/borders/rings stay
+   flat (--primary): a 5-stop gradient only reads cleanly on a filled
+   surface, not on thin strokes or small type.
+   An opacity-modified variant (`bg-primary/90`, used by Button/Badge's
+   hover state) changes the now-invisible background-color underneath, not
+   this opaque background-image, so it silently loses its visual effect --
+   compensated by a brightness bump on hover here instead. */
+.bg-primary {
+  background-image: linear-gradient(
+    135deg,
+    #26d9ff 0%,
+    #2775ff 20%,
+    #7a4dff 45%,
+    #e84ba5 75%,
+    #ff9a3c 100%
+  );
+}
+
+.bg-primary:hover {
+  filter: brightness(1.08);
+}
+
+@utility glow-teal {
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--primary) 40%, transparent),
+    0 0 24px -4px color-mix(in oklab, var(--primary) 45%, transparent);
+}
+
+@utility grid-bg {
+  /* doc: --dot-grid-color, 22px pitch -- a neutral texture, not a tinted
+     one; the brand gradient is reserved for accents, never a background
+     fill. */
+  background-image:
+    linear-gradient(var(--dot-grid-color) 1px, transparent 1px),
+    linear-gradient(90deg, var(--dot-grid-color) 1px, transparent 1px);
+  background-size: 22px 22px;
+  background-position: -1px -1px;
+}
+
+@utility room-glow {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--primary) 35%, transparent),
+    0 0 32px -12px color-mix(in oklab, var(--primary) 50%, transparent);
+}
+
+@keyframes bubble-in {
+  0% {
+    opacity: 0;
+    transform: translateY(4px) scale(0.94);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@utility bubble-in {
+  animation: bubble-in 0.35s ease-out both;
+}
+
+@keyframes room-pulse-teal {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in oklab, var(--primary) 30%, transparent),
+      0 0 20px -14px color-mix(in oklab, var(--primary) 60%, transparent);
+  }
+  50% {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in oklab, var(--primary) 55%, transparent),
+      0 0 30px -8px color-mix(in oklab, var(--primary) 70%, transparent);
+  }
+}
+
+@keyframes room-pulse-amber {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in oklab, var(--status-warning) 35%, transparent),
+      0 0 22px -12px color-mix(in oklab, var(--status-warning) 55%, transparent);
+  }
+  50% {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in oklab, var(--status-warning) 65%, transparent),
+      0 0 36px -6px color-mix(in oklab, var(--status-warning) 75%, transparent);
+  }
+}
+
+@utility room-pulse-teal {
+  animation: room-pulse-teal 3.6s ease-in-out infinite;
+}
+
+@utility room-pulse-amber {
+  animation: room-pulse-amber 2.4s ease-in-out infinite;
+}
+
+@keyframes bubble-swap {
+  0% {
+    opacity: 0;
+    transform: translateY(6px) scale(0.9);
+  }
+  15% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  85% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.95);
+  }
+}
+
+@utility bubble-swap {
+  animation: bubble-swap 3.6s ease-in-out;
+}
+
+@utility status-dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  box-shadow: 0 0 0 3px color-mix(in oklab, currentColor 18%, transparent);
+}
+
+@keyframes oc8-docking-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-0.7rem);
+  }
+}
+
+@keyframes oc8-docking-bubble-drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(1rem, -1.5rem, 0);
+  }
+}
+
+@keyframes oc8-docking-thinking-pulse {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 0 transparent);
+    transform: scale(1);
+  }
+  50% {
+    filter: drop-shadow(0 0 1rem color-mix(in oklab, white 45%, transparent));
+    transform: scale(1.04);
+  }
+}
+
+@keyframes oc8-docking-celebrate {
+  0%,
+  100% {
+    transform: rotate(0deg) translateY(0);
+  }
+  30% {
+    transform: rotate(-4deg) translateY(-0.45rem);
+  }
+  60% {
+    transform: rotate(4deg) translateY(-0.25rem);
+  }
+}
+
+.oc8-docking-station {
+  align-items: center;
+  background:
+    radial-gradient(circle at 14% 12%, oklch(0.65 0.2 285 / 0.42), transparent 32rem),
+    radial-gradient(circle at 82% 84%, oklch(0.72 0.18 190 / 0.24), transparent 26rem),
+    oklch(0.18 0.03 270);
+  color: white;
+  display: flex;
+  justify-content: center;
+  /* `min-height` (not `height`) plus in-flow content: a tall form on a short or
+     zoomed viewport grows the page and the document scrolls normally. Clipping
+     is scoped to the decorative layer so it can never hide real content. */
+  min-height: 100vh;
+  padding: 1.5rem;
+  position: relative;
+}
+
+.oc8-docking-station__ambient {
+  background-image: linear-gradient(oklch(1 0 0 / 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, oklch(1 0 0 / 0.05) 1px, transparent 1px);
+  background-size: 2.5rem 2.5rem;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  position: absolute;
+}
+
+.oc8-docking-station__frame {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  justify-content: center;
+  margin: auto;
+  max-width: 32rem;
+  padding: 1.5rem;
+  position: relative;
+  width: 100%;
+  z-index: 1;
+}
+
+@media (min-width: 768px) {
+  .oc8-docking-station__frame {
+    flex-direction: row;
+    gap: 3rem;
+    max-width: 60rem;
+  }
+}
+
+/* Left column: the large mark-only octopus companion. Hidden below the `md`
+   breakpoint (same convention as the app shell's sidebar, see app-shell.tsx)
+   so a narrow viewport never sacrifices space the login form needs. */
+.oc8-docking-station__mascot {
+  display: none;
+}
+
+@media (min-width: 768px) {
+  .oc8-docking-station__mascot {
+    align-items: center;
+    display: flex;
+    flex: 1 1 0%;
+    justify-content: center;
+  }
+}
+
+.oc8-docking-station__mascot .oc8-octopus-companion {
+  margin-top: 0;
+  width: min(100%, 18rem);
+}
+
+@media (min-width: 1024px) {
+  .oc8-docking-station__mascot .oc8-octopus-companion {
+    width: 22rem;
+  }
+}
+
+.oc8-docking-station__title {
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  position: absolute;
+  width: 1px;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.oc8-docking-station__content {
+  background: oklch(0.23 0.025 270 / 0.86);
+  border: 1px solid oklch(1 0 0 / 0.16);
+  border-radius: 1.25rem;
+  box-shadow: 0 1.5rem 4rem oklch(0.08 0.04 270 / 0.45);
+  flex-shrink: 0;
+  padding: 1.5rem;
+  width: min(100%, 28rem);
+}
+
+.oc8-docking-station__bubble {
+  background: oklch(0.82 0.12 210 / 0.16);
+  border: 1px solid oklch(1 0 0 / 0.2);
+  border-radius: 999px;
+  position: absolute;
+  animation: oc8-docking-bubble-drift 8s ease-in-out infinite;
+}
+
+.oc8-docking-station__bubble--one {
+  height: 2.25rem;
+  left: 12%;
+  top: 21%;
+  width: 2.25rem;
+}
+
+.oc8-docking-station__bubble--two {
+  animation-delay: -3s;
+  height: 1rem;
+  right: 16%;
+  top: 18%;
+  width: 1rem;
+}
+
+.oc8-docking-station__bubble--three {
+  animation-delay: -5s;
+  bottom: 18%;
+  height: 1.5rem;
+  left: 20%;
+  width: 1.5rem;
+}
+
+.oc8-octopus-companion {
+  margin-top: 1rem;
+  width: 7rem;
+}
+
+.oc8-octopus-companion img {
+  animation: oc8-docking-float 4s ease-in-out infinite;
+  display: block;
+  height: auto;
+  width: 100%;
+}
+
+.oc8-octopus-companion[data-mood="thinking"] img {
+  animation: oc8-docking-thinking-pulse 1.8s ease-in-out infinite;
+}
+
+.oc8-octopus-companion[data-mood="celebrating"] img {
+  animation: oc8-docking-celebrate 800ms ease-in-out 2;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oc8-docking-station *,
+  .oc8-docking-station *::before,
+  .oc8-docking-station *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

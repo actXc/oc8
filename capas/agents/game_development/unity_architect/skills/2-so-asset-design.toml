@@ -1,0 +1,19 @@
+name = "2. SO Asset Design"
+category = "game_development"
+description = "Procedure for 2. so asset design in the Unity Architect role."
+instruction = """
+Execute the procedure for: 2. SO Asset Design.
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. Create variable SOs for every shared runtime value (health, score, speed, etc.).
+2. Create event channel SOs for every cross-system trigger.
+3. Create RuntimeSet SOs for every entity type that needs to be tracked globally.
+4. Organize under Assets/ScriptableObjects/ with subfolders by domain.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]

@@ -1,0 +1,9 @@
+[plugin]
+name = "community_connector"
+version = "1.0.0"
+type = "connector"
+trust = "community"
+summary = "Test fixture: untrusted, must never be imported"
+
+[plugin.entry_points]
+connectors = "community_connector.connector:register"

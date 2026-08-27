@@ -1,0 +1,13 @@
+# At least one of these two fields must be filled in -- an empty/empty
+# submission would otherwise pass setup with nothing provable and 31 tools that
+# all 403/404 (the Microsoft plugin's finding C2's failure shape, with a
+# different trigger). Enforced by the existing SetupValidationSpec.any_of
+# mechanism (api/v1/plugins.py, reused unchanged -- no new core code was needed
+# for this specific check).
+#
+# This file's top level IS the `[plugin.setup.validation]` table (design §3);
+# discovery's `_read_setup_folder` merges it back under the `validation` key.
+# It is individually optional -- microsoft365 ships no validation.toml at all --
+# so its ABSENCE is not an error, which is exactly why the field names below
+# must stay in step with setup/fields.toml by hand.
+any_of = [["shared_drive_ids"], ["delegated_mailboxes"]]

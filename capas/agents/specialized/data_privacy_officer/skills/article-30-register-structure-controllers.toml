@@ -1,0 +1,20 @@
+name = "Article 30 Register Structure (Controllers)"
+category = "specialized"
+description = "Procedure for article 30 register structure (controllers) in the Data Privacy Officer role."
+instruction = """
+Execute the procedure for: Article 30 Register Structure (Controllers).
+Use available tools/knowledge; list missing inputs instead of inventing data.
+
+1. | Field | Description |.
+2. |---|---|.
+3. | Processing Activity Name | Descriptive label (e.g., "Employee Payroll Processing") |.
+4. | Controller Identity | Legal entity name and contact |.
+5. | DPO Contact | Name and contact details |.
+
+Finish with a short status: done / blocked, evidence used, and the next human action if any.
+"""
+guardrails = [
+  "Never invent facts, metrics, or source material.",
+  "Escalate irreversible or high-impact actions for human approval when governance requires it.",
+  "One focused deliverable per run unless the task says otherwise.",
+]
