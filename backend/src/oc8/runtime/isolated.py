@@ -24,7 +24,7 @@ from oc8.realtime.emit import record_activity
 from oc8.sandbox import get_sandbox_driver
 from oc8.sandbox.naming import container_name
 from oc8.sandbox.reaper import RUN_LABEL
-from oc8.sandbox.types import SandboxError, SandboxSpec
+from oc8.sandbox.types import SandboxError, SandboxHandle, SandboxSpec
 
 logger = logging.getLogger(__name__)
 
@@ -169,9 +169,12 @@ class DockerIsolatedRuntime:
             cpu_limit=1.0,
         )
         driver = get_sandbox_driver()
-        handle = await driver.provision(spec)
-        logger.info("run %s: isolated container %s started", run_id, handle.container_id[:12])
+        handle: SandboxHandle | None = None
         try:
+            handle = await driver.provision(spec)
+            logger.info(
+                "run %s: isolated container %s started", run_id, handle.container_id[:12]
+            )
             # The bound on the WORK, and the only thing that ends a wedged
             # container: one that never exits ends here and is torn down by the
             # finally below, whether wait raises (docker-py's ReadTimeout on the
@@ -190,21 +193,28 @@ class DockerIsolatedRuntime:
                     "run %s: isolated container exited %s\n%s", run_id, code, logs[-800:]
                 )
         finally:
-            await driver.teardown(handle)
+            if handle is not None:
+                await driver.teardown(handle)
+            # The mid-flight commit above ended the transaction that carried the
+            # transaction-local tenant GUC (tenant_session pins it with
+            # set_config('app.tenant_id', ..., is_local=true)). Without re-binding
+            # it, every subsequent statement on this session runs unbound, and RLS
+            # on agent_run casts the empty setting to `""` and aborts with
+            # `invalid input syntax for type uuid`. In the `finally` (not after
+            # the `try`) on purpose: a `provision`/`wait` failure (e.g. a flaky
+            # provisioner request) propagates out of this block as an exception,
+            # and the executor's own handler catches it and immediately writes
+            # `{"error": ...}` onto THIS SAME session -- unbound, that write
+            # itself crashed with the UUID error above, so the real error was
+            # never recorded and the run sat in "running" for the full
+            # reconciler window instead of failing with a clear message.
+            # Rebinding here, before the exception leaves this function, covers
+            # both the success path and every failure path in one place.
+            await db.execute(
+                text("SELECT set_config('app.tenant_id', :tid, true)"),
+                {"tid": str(tenant_id)},
+            )
 
-        # The mid-flight commit above ended the transaction that carried the
-        # transaction-local tenant GUC (tenant_session pins it with
-        # set_config('app.tenant_id', ..., is_local=true)). Without re-binding it,
-        # every subsequent statement on this session -- the result read here AND
-        # the executor's terminal transition, which share this session -- runs
-        # unbound, and RLS on agent_run aborts the transaction, stranding the run
-        # in "running". Re-bind on the fresh transaction now (after the container,
-        # so the connection held no open transaction during the run). The GUC then
-        # persists through the executor's transitions until it commits on exit.
-        await db.execute(
-            text("SELECT set_config('app.tenant_id', :tid, true)"),
-            {"tid": str(tenant_id)},
-        )
         fresh = await db.get(m.AgentRun, run_id)
         if fresh is not None:
             # The container wrote the verdict in its OWN transaction; refresh this

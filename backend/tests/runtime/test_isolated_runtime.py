@@ -473,17 +473,25 @@ async def test_a_container_that_never_exits_is_torn_down_and_the_run_fails(
     run 019fc303 at five minutes and left oc8-nora-agent-019fc303 running. It
     closed the row and left the wedge; this closes the wedge.
 
-    The run ROW is the other half, and is closed by machinery already tested
-    elsewhere: the container's death stops the heartbeat, so the reconciler fails
-    the run after ABANDONED_AFTER (test_reconcile), and the entry -- unacked and
-    no longer renewed -- is reclaimed after the SAME window and failed as "lease
-    lost" (test_recovery). Measured while writing this: the executor's own
-    terminal write is lost on this path, because the isolated runtime re-binds
-    the tenant GUC only AFTER a successful wait, so the post-run statements run
-    unbound and abort. Pre-existing and deliberately not fixed here -- it makes
-    those two sweeps the ones that close the row, a window later.
+    The run ROW is the other half. Measured live 2026-08-27 (the incident that
+    prompted this test's rewrite): the executor's own `except Exception as exc:
+    run_error = repr(exc)` catches whatever this raises and immediately writes
+    `{"error": run_error}` onto THIS SAME session via `merge_context` -- and
+    until now, `isolated.py` only re-bound the tenant GUC AFTER a *successful*
+    wait, so that write ran unbound, RLS cast the empty setting to `""`, and
+    `merge_context` itself crashed with `invalid input syntax for type uuid`.
+    The real error was never recorded, `_process`'s catch-all logged only the
+    secondary crash, and the run sat in "running" for the full ABANDONED_AFTER
+    window before the reconciler (test_reconcile) or the reclaim
+    (test_recovery) closed it -- indistinguishable, from the office view, from
+    the agent having silently vanished. Fixed by moving the re-bind into the
+    `finally` around provision/wait, so it runs on every exit path, not only
+    the happy one; asserted below by calling `merge_context` on the very same
+    session right after the raise, the same way the executor does.
     """
     from requests.exceptions import ReadTimeout
+
+    from oc8.runtime.run_context import merge_context
 
     tenant = uuid.uuid4()
     agent_id, run_id = await _agent_and_run(app_session, tenant)
@@ -508,13 +516,21 @@ async def test_a_container_that_never_exits_is_torn_down_and_the_run_fails(
     driver = _WedgedDriver()
     monkeypatch.setattr("oc8.runtime.isolated.get_sandbox_driver", lambda: driver)
 
-    with pytest.raises(ReadTimeout):
-        async with app_session(tenant) as db:
-            agent = await db.get(m.Agent, agent_id)
-            assert agent is not None
+    async with app_session(tenant) as db:
+        agent = await db.get(m.Agent, agent_id)
+        assert agent is not None
+        with pytest.raises(ReadTimeout):
             await DockerIsolatedRuntime().execute(
                 db, agent=agent, task_text="verkauf etwas", tenant_id=tenant, run_id=run_id
             )
+
+        # The tenant GUC survived the failure: the executor's own error-recording
+        # write, on this same session, does not itself crash on an unbound RLS
+        # GUC. Before the fix this raised `invalid input syntax for type uuid`.
+        run = await db.get(m.AgentRun, run_id)
+        assert run is not None
+        patched = await merge_context(db, run, {"error": "provisioner request failed"})
+        assert patched["error"] == "provisioner request failed"
 
     # The bound is real and finite -- an unbounded wait would make the wedge
     # permanent and this whole net imaginary.
