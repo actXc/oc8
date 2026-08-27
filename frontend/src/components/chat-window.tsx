@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState } from "react";
 import { MessageSquare, Plus, Send } from "lucide-react";
 import { Panel } from "@/components/app-shell";
+import { ChatMarkdown } from "@/components/chat-markdown";
 import { RUN_COMPONENT_REGISTRY } from "@/components/run-record-card";
 import {
   useChatSessions,
@@ -137,7 +138,11 @@ export function ChatWindow({ agentId, agentName }: { agentId: string; agentName:
                     : "border border-border bg-background/60",
                 )}
               >
-                <div className="whitespace-pre-wrap">{m.content}</div>
+                {m.role === "user" ? (
+                  <div className="whitespace-pre-wrap">{m.content}</div>
+                ) : (
+                  <ChatMarkdown text={m.content} />
+                )}
                 {m.renderedComponents.length > 0 && (
                   <div className="space-y-2">
                     {m.renderedComponents.map((c, i) => {

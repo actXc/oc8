@@ -1,6 +1,7 @@
 import { ChevronDown, Check, Send, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
+import { ChatMarkdown } from "@/components/chat-markdown";
 import { useT } from "@/lib/i18n";
 import { useCan } from "@/lib/governance-hooks";
 import {
@@ -201,7 +202,7 @@ export function CopilotDock() {
                       className="mt-0.5 h-6 w-6 shrink-0"
                       draggable={false}
                     />
-                    <p className="max-w-[88%] text-sm leading-relaxed text-foreground/90">{m.text}</p>
+                    <ChatMarkdown text={m.text} className="max-w-[88%]" />
                   </div>
                   {m.proposalId && (
                     <div className="ml-8">
