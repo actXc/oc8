@@ -1137,7 +1137,16 @@ type WizardStep = 1 | 2 | 3;
 // generic key badge: its `available` flag is unconditionally true for this
 // provider server-side (there is no tenant-wide key to check) and would
 // therefore claim "key set" for a tenant that has never signed in.
-export function AddProviderWizard({ onClose }: { onClose: () => void }) {
+export function AddProviderWizard({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  /** Called with the newly created model right before onClose -- lets a
+   * caller (e.g. onboarding's AgentModelStep) select it immediately instead
+   * of waiting for the models list to refetch. */
+  onCreated?: (model: ModelDTO) => void;
+}) {
   const t = useT();
   const { data: providers = [] } = useModelProviders();
   const createModel = useCreateModel();
@@ -1185,7 +1194,7 @@ export function AddProviderWizard({ onClose }: { onClose: () => void }) {
   const handleCreate = async () => {
     if (!provider || !modelTag.trim()) return;
     try {
-      await createModel.mutateAsync({
+      const model = await createModel.mutateAsync({
         provider: provider.canonical,
         model: modelTag.trim(),
         locality,
@@ -1198,6 +1207,7 @@ export function AddProviderWizard({ onClose }: { onClose: () => void }) {
           "Modelle sind jetzt für Agenten verfügbar.",
         ),
       });
+      onCreated?.(model);
       onClose();
     } catch (err) {
       toast.error(

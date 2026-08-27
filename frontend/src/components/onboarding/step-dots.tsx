@@ -14,12 +14,12 @@ export function StepDots<StepId extends string>({
   const t = useT();
   const idx = current === "done" ? steps.length : steps.indexOf(current as StepId);
   return (
-    <ol className="flex items-center justify-center gap-3">
+    <ol className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2">
       {steps.map((s, i) => (
         <li key={s} className="flex items-center gap-2">
           <span
             className={cn(
-              "grid h-6 w-6 place-items-center rounded-full text-[11px] font-semibold transition-transform",
+              "grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-semibold transition-transform",
               i < idx
                 ? "scale-100 bg-primary text-primary-foreground"
                 : i === idx
@@ -29,7 +29,14 @@ export function StepDots<StepId extends string>({
           >
             {i < idx ? <Check className="h-3.5 w-3.5" /> : i + 1}
           </span>
-          <span className="text-xs text-muted-foreground">{t(labels[s][0], labels[s][1])}</span>
+          <span
+            className={cn(
+              "whitespace-nowrap text-xs",
+              i === idx ? "text-foreground" : "text-muted-foreground",
+            )}
+          >
+            {t(labels[s][0], labels[s][1])}
+          </span>
         </li>
       ))}
     </ol>

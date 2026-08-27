@@ -1,10 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { CheckCircle2, Circle, Loader2, Play, Save, Settings2 } from "lucide-react";
+import { CheckCircle2, Circle, Loader2, Play, Save, Settings2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Panel } from "@/components/app-shell";
 import { BackupPanel } from "@/components/backup-panel";
-import { InstanceSetupWizard } from "@/components/instance-setup-wizard";
+import { OnboardingWizard } from "@/components/onboarding/onboarding-wizard";
 import { useT } from "@/lib/i18n";
 import {
   useCredentials,
@@ -19,6 +19,7 @@ export const Route = createFileRoute("/settings")({
 });
 
 function SettingsPage() {
+  const t = useT();
   const [setupOpen, setSetupOpen] = useState(false);
   return (
     <>
@@ -27,7 +28,34 @@ function SettingsPage() {
         <OrganizationPanel />
         <BackupPanel />
       </div>
-      {setupOpen && <InstanceSetupWizard onClose={() => setSetupOpen(false)} />}
+      {setupOpen && (
+        // The SAME wizard as the first-run /welcome route -- there used to be
+        // a second, older InstanceSetupWizard here with its own hardcoded
+        // provider/model list and no real credential flow, so "Guided setup"
+        // could not actually connect a provider (fixed by sharing this
+        // component instead of maintaining two).
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4"
+          onClick={() => setSetupOpen(false)}
+        >
+          <div
+            className="w-full max-w-lg rounded-xl border border-border bg-panel p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="font-serif text-lg">{t("Guided setup", "Geführte Einrichtung")}</h2>
+              <button
+                type="button"
+                onClick={() => setSetupOpen(false)}
+                className="rounded-md p-1 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <OnboardingWizard />
+          </div>
+        </div>
+      )}
     </>
   );
 }

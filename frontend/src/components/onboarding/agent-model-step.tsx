@@ -8,10 +8,17 @@ import {
   useModels,
   useRuntimes,
   type AgentDetail,
+  type ModelDTO,
 } from "@/lib/hooks";
 import { ModelPicker } from "@/components/model-picker";
 import { RuntimePicker } from "@/components/runtime-picker";
 import { AVATAR_COLORS, type AgentIdentity } from "@/components/agent-identity-fields";
+// Reused as-is (not re-implemented) so onboarding connects a provider through
+// the exact same credential flow as Settings -> Models: a bare
+// {provider, model, locality} POST with no credential attached, which is
+// what onboarding used to do here, never actually authenticates against the
+// provider.
+import { AddProviderWizard } from "@/routes/models";
 
 export function AgentModelStep({
   identity,
@@ -32,6 +39,11 @@ export function AgentModelStep({
   const createAgent = useCreateAgent();
   const [selectedId, setSelectedId] = useState("");
   const [runtimePluginId, setRuntimePluginId] = useState<string | null>(null);
+  const [wizardOpen, setWizardOpen] = useState(false);
+
+  const handleModelCreated = (model: ModelDTO) => {
+    setSelectedId(model.id);
+  };
 
   const create = async () => {
     const model = models.find((m) => m.id === selectedId);
@@ -74,12 +86,39 @@ export function AgentModelStep({
           )}
         </p>
       </div>
-      <ModelPicker
-        models={models}
-        providers={providers}
-        selectedId={selectedId}
-        onSelect={setSelectedId}
-      />
+      {models.length > 0 ? (
+        <>
+          <ModelPicker
+            models={models}
+            providers={providers}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+          />
+          <button
+            type="button"
+            onClick={() => setWizardOpen(true)}
+            className="text-xs text-primary hover:underline"
+          >
+            {t("Connect another provider", "Weiteren Anbieter verbinden")}
+          </button>
+        </>
+      ) : (
+        <div className="space-y-3 rounded-lg border border-dashed border-border bg-background/30 p-4 text-center">
+          <p className="text-sm text-muted-foreground">
+            {t(
+              "No model connected yet — connect a provider now to give this agent something to think with.",
+              "Noch kein Modell verbunden — verbinde jetzt einen Anbieter, damit dieser Agent etwas hat, womit er denken kann.",
+            )}
+          </p>
+          <button
+            type="button"
+            onClick={() => setWizardOpen(true)}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:brightness-110"
+          >
+            {t("Connect a provider", "Anbieter verbinden")}
+          </button>
+        </div>
+      )}
       <RuntimePicker value={runtimePluginId} onChange={setRuntimePluginId} runtimes={runtimes} />
       <button
         onClick={create}
@@ -90,6 +129,9 @@ export function AgentModelStep({
           ? t("Creating…", "Wird erstellt …")
           : t("Create agent", "Agent erstellen")}
       </button>
+      {wizardOpen && (
+        <AddProviderWizard onClose={() => setWizardOpen(false)} onCreated={handleModelCreated} />
+      )}
     </Panel>
   );
 }
