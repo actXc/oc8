@@ -172,6 +172,9 @@ Follow the complete [Getting Started guide](docs/GETTING_STARTED.md), or use
 the guided local installer:
 
 ```bash
+# Run oc8 locally (Docker)
+git clone https://github.com/oc8/oc8.git
+cd oc8
 ./scripts/quickstart.sh          # macOS / Linux
 # PowerShell on Windows:
 ./scripts/quickstart.ps1
