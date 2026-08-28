@@ -1,20 +1,33 @@
-"""Credential-type test for smtp_server (unified credentials framework).
+"""The one place that knows how to open a secured SMTP connection, plus the
+credential-type test for smtp_server (unified credentials framework).
 
-Opens a real SMTP connection and, if credentials were given, authenticates
--- the cheapest real proof the server is reachable and the credentials
-work, without sending an actual message. Mirrors `validate_s3`
-(`capas/s3_source/credential.py`): an async callable taking the resolved
-field values, raising on any failure. `test_credential`
+`smtp_connection` is deliberately the SINGLE source of truth for "how do we
+dial an SMTP server": both the admin-facing "Test" button (`validate_smtp`
+below, via `test_credential`) and the actual send path
+(`oc8.mail.send.send_mail`) go through it. Two independent copies of this
+logic would let "Test" and "Send" disagree about whether a given host is
+reachable or safe -- an admin would get a green tick from a connection
+shaped differently to the one that later carries a real password-reset
+link.
+
+Test itself opens a real connection and, if credentials were given,
+authenticates -- the cheapest real proof the server is reachable and the
+credentials work, without sending an actual message. It mirrors
+`validate_s3` (`capas/s3_source/credential.py`): an async callable taking
+the resolved field values, raising on any failure. `test_credential`
 (`oc8.credentials.service`) awaits it and converts whatever comes out into
-a `ValueError` carrying the message, so an `smtplib` exception here
-reaches the admin with the server's own wording (e.g. the 535 auth
-rejection) rather than a flattened "test failed".
+a `ValueError` carrying the message, so an `smtplib` exception here reaches
+the admin with the server's own wording (e.g. the 535 auth rejection)
+rather than a flattened "test failed".
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import smtplib
+import ssl
+from collections.abc import Iterator
 
 # The de-facto implicit-TLS ("SMTPS") port. Unlike 587, a server listening
 # here expects the TLS handshake FIRST -- there is no plaintext greeting to
@@ -26,23 +39,75 @@ _IMPLICIT_TLS_PORT = 465
 _CONNECT_TIMEOUT_SECONDS = 10
 
 
-def _check(host: str, port: int, username: str, password: str, use_tls: bool) -> None:
-    """Blocking connect/handshake/auth. Run via `asyncio.to_thread`."""
+def _tls_context() -> ssl.SSLContext:
+    """The TLS policy for every SMTP connection this codebase opens.
+
+    `ssl.create_default_context()` means certificates ARE verified against
+    the system trust store and the hostname IS checked. smtplib's own
+    default is the opposite (`ssl._create_stdlib_context()`:
+    check_hostname=False, CERT_NONE), i.e. encryption with no proof of who
+    is on the other end -- which is exactly the attacker-in-the-middle a
+    password-reset link must not be handed to.
+
+    The deliberate consequence: an internal relay presenting a self-signed
+    or private-CA certificate now fails, loudly, at "Test" time rather than
+    silently sending reset links into an unauthenticated tunnel. The two
+    supported answers are to put that CA in the container's trust store, or
+    to set the credential's `use_tls` to "false" -- an explicit, visible,
+    admin-owned choice to speak plaintext on a trusted network, instead of
+    an invisible middle state that looks encrypted but proves nothing.
+    (This is why `username`/`password` are optional on the credential type:
+    anonymous internal relays are real. They stay supported -- they just
+    have to say out loud which of the two they are.)
+    """
+    return ssl.create_default_context()
+
+
+@contextlib.contextmanager
+def smtp_connection(
+    *,
+    host: str,
+    port: int,
+    username: str = "",
+    password: str = "",
+    use_tls: bool = True,
+) -> Iterator[smtplib.SMTP]:
+    """Blocking: connect, secure, optionally authenticate, yield the client.
+
+    smtplib is synchronous, so every caller runs this inside
+    `asyncio.to_thread` rather than stalling the event loop on a slow or
+    unreachable host. Raises whatever smtplib raises -- `validate_smtp`
+    wants those verbatim for the admin, `send_mail` swallows them.
+    """
     implicit_tls = use_tls and port == _IMPLICIT_TLS_PORT
     factory: type[smtplib.SMTP] = smtplib.SMTP_SSL if implicit_tls else smtplib.SMTP
-    with factory(host, port, timeout=_CONNECT_TIMEOUT_SECONDS) as client:
+    # Only SMTP_SSL takes a context up front; plain SMTP gets one at STARTTLS.
+    extra = {"context": _tls_context()} if implicit_tls else {}
+    with factory(host, port, timeout=_CONNECT_TIMEOUT_SECONDS, **extra) as client:  # type: ignore[arg-type]
         client.ehlo()
         if use_tls and not implicit_tls:
             # Raises SMTPNotSupportedError if the server never advertised
             # STARTTLS -- a genuine misconfiguration worth surfacing rather
             # than silently continuing in plaintext with a password.
-            client.starttls()
+            client.starttls(context=_tls_context())
             # A second EHLO is mandatory after STARTTLS: the pre-TLS
             # capability list (crucially AUTH) is discarded on upgrade, and
             # without it `login` may not see the server's auth mechanisms.
             client.ehlo()
         if username:
             client.login(username, password)
+        yield client
+
+
+def _check(host: str, port: int, username: str, password: str, use_tls: bool) -> None:
+    """Blocking connect/handshake/auth. Run via `asyncio.to_thread`.
+
+    Opening the connection IS the whole test -- nothing is sent, and the
+    connection is torn down on the way out of the context manager."""
+    with smtp_connection(
+        host=host, port=port, username=username, password=password, use_tls=use_tls
+    ):
+        pass
 
 
 async def validate_smtp(values: dict[str, str]) -> None:

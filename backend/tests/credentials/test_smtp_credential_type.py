@@ -9,6 +9,7 @@ travel back out to `test_credential` rather than being swallowed.
 from __future__ import annotations
 
 import smtplib
+import ssl
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -151,6 +152,34 @@ async def test_port_465_uses_implicit_tls_instead_of_starttls() -> None:
         ssl_cls.assert_called_once()
         client.starttls.assert_not_called()
         client.login.assert_called_once_with("u", "p")
+
+
+# --- TLS policy ----------------------------------------------------------
+
+
+async def test_starttls_verifies_the_servers_certificate() -> None:
+    """smtplib's own default context is `check_hostname=False`/`CERT_NONE`:
+    encrypted, but with no proof of who is on the other end. Passing an
+    explicit default context is what turns that into real verification --
+    and `oc8.mail.send` gets it from the same helper, so Test and Send can
+    never disagree about whether a host is trusted."""
+    with patch("oc8.credentials.smtp.smtplib.SMTP") as smtp_cls:
+        client = _smtp_client(smtp_cls)
+        await validate_smtp({"host": "smtp.example.com", "port": "587"})
+    context = client.starttls.call_args.kwargs["context"]
+    assert isinstance(context, ssl.SSLContext)
+    assert context.check_hostname is True
+    assert context.verify_mode is ssl.CERT_REQUIRED
+
+
+async def test_implicit_tls_verifies_the_servers_certificate() -> None:
+    with patch("oc8.credentials.smtp.smtplib.SMTP_SSL") as ssl_cls:
+        _smtp_client(ssl_cls)
+        await validate_smtp({"host": "smtp.example.com", "port": "465"})
+    context = ssl_cls.call_args.kwargs["context"]
+    assert isinstance(context, ssl.SSLContext)
+    assert context.check_hostname is True
+    assert context.verify_mode is ssl.CERT_REQUIRED
 
 
 # --- failures reach the caller -------------------------------------------

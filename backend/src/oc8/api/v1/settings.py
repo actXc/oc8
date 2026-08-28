@@ -10,6 +10,7 @@ from oc8.agents.hire import require_hire_approval, set_require_hire_approval
 from oc8.api.deps import CurrentPrincipal, DbSession, require_permission
 from oc8.audit import append_event
 from oc8.authz.permissions import MANAGE, SETTINGS, VIEW, perm
+from oc8.credentials.service import list_credentials
 
 router = APIRouter()
 
@@ -24,11 +25,24 @@ class OrganizationSettings(BaseModel):
     slug: str
     tier: str
     region: str
+    #: Which of this tenant's `smtp_server` credentials outbound mail
+    #: actually goes through (`oc8.mail.send.active_smtp_credential`).
+    #: `None` means no mail server is configured, and every `send_mail`
+    #: for this tenant quietly returns False.
+    active_smtp_credential_id: str | None = None
 
 
 class OrganizationSettingsUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     region: str = Field(min_length=1, max_length=80)
+    #: Three-state on purpose, read via `model_fields_set` below: OMITTED
+    #: leaves the current pointer alone, an explicit `null` clears it, an id
+    #: selects that credential. Treating omitted as null instead would mean
+    #: the existing settings form -- which posts only {name, region}
+    #: (frontend/src/lib/hooks.ts `useUpdateOrganizationSettings`) -- silently
+    #: disconnected the mail server every time an admin renamed the org, and
+    #: password reset would stop working with nothing on screen to say why.
+    active_smtp_credential_id: str | None = None
 
     @field_validator("name", "region")
     @classmethod
@@ -46,6 +60,7 @@ def _organization_to_dto(organization: m.Organization) -> OrganizationSettings:
         slug=organization.slug,
         tier=organization.tier,
         region=organization.region,
+        active_smtp_credential_id=organization.settings.get("active_smtp_credential_id"),
     )
 
 
@@ -78,6 +93,19 @@ async def put_organization_settings(
         raise HTTPException(status_code=404, detail="organization not found")
     organization.name = body.name
     organization.region = body.region
+    if "active_smtp_credential_id" in body.model_fields_set:
+        if body.active_smtp_credential_id is not None:
+            # Server-side filter (credentials/service.py:108-115), so this
+            # never walks every credential the tenant owns.
+            smtp_credentials = await list_credentials(
+                db, tenant_id=principal.tenant_id, credential_type="smtp_server"
+            )
+            if not any(str(c.id) == body.active_smtp_credential_id for c in smtp_credentials):
+                raise HTTPException(status_code=404, detail="smtp_server credential not found")
+        organization.settings = {
+            **organization.settings,
+            "active_smtp_credential_id": body.active_smtp_credential_id,
+        }
     await append_event(
         db,
         tenant_id=principal.tenant_id,
