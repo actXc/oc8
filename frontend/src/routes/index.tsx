@@ -1,4 +1,4 @@
-import { createFileRoute, Link, Navigate } from "@tanstack/react-router";
+import { createFileRoute, Link, Navigate, useNavigate } from "@tanstack/react-router";
 import {
   Bell,
   Building2,
@@ -282,6 +282,7 @@ function DepartmentRoom({
   offset: number;
 }) {
   const t = useT();
+  const navigate = useNavigate();
   const members = agentsInDepartment(agents, d.id);
   const lead = leadOfDepartment(agents, d.id);
   // Backend presentation.icon is a free-form string (e.g. a freshly
@@ -310,12 +311,23 @@ function DepartmentRoom({
     Math.min(99, Math.round(d.activity + Math.sin((simTick + offset * 7) / 5) * 4)),
   );
 
+  // A plain div, not a Link: AgentTile below renders its own Link to the
+  // agent, and an <a> cannot nest inside another <a>. Clicking anywhere in
+  // the card OUTSIDE an agent tile still goes to the department -- agent
+  // tiles stop propagation so their own Link click doesn't also fire this.
   return (
-    <Link
-      to="/departments/$id"
-      params={{ id: d.id }}
+    <div
+      role="link"
+      tabIndex={0}
+      onClick={() => navigate({ to: "/departments/$id", params: { id: d.id } })}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          navigate({ to: "/departments/$id", params: { id: d.id } });
+        }
+      }}
       className={cn(
-        "group relative block rounded-xl border bg-panel/80 p-4 transition hover:border-primary/60",
+        "group relative block cursor-pointer rounded-xl border bg-panel/80 p-4 transition hover:border-primary/60",
         hasWarning
           ? "border-[color:var(--status-warning)]/40 room-pulse-amber"
           : hasActive
@@ -405,7 +417,7 @@ function DepartmentRoom({
           </span>
         </div>
       </footer>
-    </Link>
+    </div>
   );
 }
 
@@ -418,10 +430,15 @@ function AgentTile({ agent, isLead }: { agent: Agent; isLead: boolean }) {
     waiting_for_task: "var(--status-waiting-for-task)",
   }[agent.status];
   return (
-    <div className="relative flex flex-col items-center pt-7">
+    <Link
+      to="/agents/$id"
+      params={{ id: agent.id }}
+      onClick={(e) => e.stopPropagation()}
+      className="relative flex flex-col items-center pt-7"
+    >
       <div className="relative">
         <div
-          className="grid h-9 w-9 place-items-center rounded-full font-serif text-sm text-black shadow-[inset_0_0_0_1px_oklch(1_0_0/25%)]"
+          className="grid h-9 w-9 place-items-center rounded-full font-serif text-sm text-black shadow-[inset_0_0_0_1px_oklch(1_0_0/25%)] transition group-hover:brightness-100 hover:brightness-110"
           style={{ background: agent.avatarColor }}
         >
           {agent.name[0]}
@@ -445,7 +462,9 @@ function AgentTile({ agent, isLead }: { agent: Agent; isLead: boolean }) {
           />
         </span>
       </div>
-      <div className="mt-1.5 truncate text-[10px] text-muted-foreground">{agent.name}</div>
-    </div>
+      <div className="mt-1.5 truncate text-[10px] text-muted-foreground hover:text-foreground">
+        {agent.name}
+      </div>
+    </Link>
   );
 }
