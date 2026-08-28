@@ -22,6 +22,23 @@ import { DevSignIn } from "../components/dev-sign-in";
 const AUTH_CONFIG_URL =
   (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:8099/api/v1";
 
+// Routes reachable with no session at all: `/login` and `/welcome` (the
+// existing pair), plus the three self-service links added in Task 7 that a
+// person follows precisely BECAUSE they cannot sign in right now --
+// forgot-password is for someone locked out, and reset-password/confirm-email
+// are opened from a mailed link that may land in a browser with no session
+// (or a different one) to begin with. Both `AuthGate` (below) and
+// `RootComponent` key off this same list: the gate must never bounce any of
+// these to /login, and the shell must never wrap them in `AppShell`, which
+// assumes a session exists.
+const PUBLIC_ROUTES = new Set([
+  "/login",
+  "/welcome",
+  "/forgot-password",
+  "/reset-password",
+  "/confirm-email",
+]);
+
 import { EditionCompositionProvider } from "../edition/composition";
 import { editionExtensions } from "@oc8/edition-entry";
 
@@ -76,8 +93,9 @@ function AuthGate({ children }: { children: ReactNode }) {
     // unless we are already on it, in which case there is nothing to gate and
     // we fall through to render `children` (the public login `Outlet`).
     if (authMode === "community") {
-      const onLoginPage = typeof window !== "undefined" && window.location.pathname === "/login";
-      if (!onLoginPage) {
+      const onPublicRoute =
+        typeof window !== "undefined" && PUBLIC_ROUTES.has(window.location.pathname);
+      if (!onPublicRoute) {
         if (typeof window !== "undefined") {
           window.location.href = "/login";
         }
@@ -208,11 +226,12 @@ function RootShell({ children }: { children: ReactNode }) {
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  // `/welcome` renders the same always-dark `PublicAuthLayout` docking station as
-  // `/login` (see `routes/welcome.tsx`) -- both need the Toaster forced dark
-  // regardless of the stored preference, or a light-mode operator gets a light
-  // toast on a dark surface there too.
-  const publicRoute = pathname === "/login" || pathname === "/welcome";
+  // `/welcome`, `/forgot-password`, `/reset-password`, and `/confirm-email` all
+  // render the same always-dark `PublicAuthLayout` docking station as `/login`
+  // -- all of them need the Toaster forced dark regardless of the stored
+  // preference, or a light-mode operator gets a light toast on a dark surface
+  // there too.
+  const publicRoute = PUBLIC_ROUTES.has(pathname);
   // Single source of truth for "which UI wrapper does this route get". Computed
   // synchronously from the pathname so `/login` is never wrapped in `AppShell`,
   // regardless of auth state, session staleness or hydration timing.

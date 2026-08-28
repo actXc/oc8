@@ -13,6 +13,7 @@ import { Route as WorkspaceRouteImport } from './routes/workspace'
 import { Route as WelcomeRouteImport } from './routes/welcome'
 import { Route as SkillsRouteImport } from './routes/skills'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as PluginsRouteImport } from './routes/plugins'
 import { Route as ModelsRouteImport } from './routes/models'
@@ -22,10 +23,12 @@ import { Route as KnowledgeRouteImport } from './routes/knowledge'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as HandoffsRouteImport } from './routes/handoffs'
 import { Route as GovernanceRouteImport } from './routes/governance'
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as FlowsRouteImport } from './routes/flows'
 import { Route as DepartmentsRouteImport } from './routes/departments'
 import { Route as CredentialsRouteImport } from './routes/credentials'
 import { Route as CostsRouteImport } from './routes/costs'
+import { Route as ConfirmEmailRouteImport } from './routes/confirm-email'
 import { Route as ChatRouteImport } from './routes/chat'
 import { Route as CapasRouteImport } from './routes/capas'
 import { Route as AuditRouteImport } from './routes/audit'
@@ -59,6 +62,11 @@ const SkillsRoute = SkillsRouteImport.update({
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProfileRoute = ProfileRouteImport.update({
@@ -106,6 +114,11 @@ const GovernanceRoute = GovernanceRouteImport.update({
   path: '/governance',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: '/forgot-password',
+  path: '/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const FlowsRoute = FlowsRouteImport.update({
   id: '/flows',
   path: '/flows',
@@ -124,6 +137,11 @@ const CredentialsRoute = CredentialsRouteImport.update({
 const CostsRoute = CostsRouteImport.update({
   id: '/costs',
   path: '/costs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConfirmEmailRoute = ConfirmEmailRouteImport.update({
+  id: '/confirm-email',
+  path: '/confirm-email',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ChatRoute = ChatRouteImport.update({
@@ -206,10 +224,12 @@ export interface FileRoutesByFullPath {
   '/audit': typeof AuditRoute
   '/capas': typeof CapasRoute
   '/chat': typeof ChatRoute
+  '/confirm-email': typeof ConfirmEmailRoute
   '/costs': typeof CostsRoute
   '/credentials': typeof CredentialsRoute
   '/departments': typeof DepartmentsRouteWithChildren
   '/flows': typeof FlowsRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/governance': typeof GovernanceRoute
   '/handoffs': typeof HandoffsRoute
   '/integrations': typeof IntegrationsRoute
@@ -219,6 +239,7 @@ export interface FileRoutesByFullPath {
   '/models': typeof ModelsRoute
   '/plugins': typeof PluginsRoute
   '/profile': typeof ProfileRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
   '/skills': typeof SkillsRoute
   '/welcome': typeof WelcomeRoute
@@ -238,9 +259,11 @@ export interface FileRoutesByTo {
   '/audit': typeof AuditRoute
   '/capas': typeof CapasRoute
   '/chat': typeof ChatRoute
+  '/confirm-email': typeof ConfirmEmailRoute
   '/costs': typeof CostsRoute
   '/credentials': typeof CredentialsRoute
   '/flows': typeof FlowsRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/governance': typeof GovernanceRoute
   '/handoffs': typeof HandoffsRoute
   '/integrations': typeof IntegrationsRoute
@@ -249,6 +272,7 @@ export interface FileRoutesByTo {
   '/models': typeof ModelsRoute
   '/plugins': typeof PluginsRoute
   '/profile': typeof ProfileRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
   '/skills': typeof SkillsRoute
   '/welcome': typeof WelcomeRoute
@@ -270,10 +294,12 @@ export interface FileRoutesById {
   '/audit': typeof AuditRoute
   '/capas': typeof CapasRoute
   '/chat': typeof ChatRoute
+  '/confirm-email': typeof ConfirmEmailRoute
   '/costs': typeof CostsRoute
   '/credentials': typeof CredentialsRoute
   '/departments': typeof DepartmentsRouteWithChildren
   '/flows': typeof FlowsRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/governance': typeof GovernanceRoute
   '/handoffs': typeof HandoffsRoute
   '/integrations': typeof IntegrationsRoute
@@ -283,6 +309,7 @@ export interface FileRoutesById {
   '/models': typeof ModelsRoute
   '/plugins': typeof PluginsRoute
   '/profile': typeof ProfileRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
   '/skills': typeof SkillsRoute
   '/welcome': typeof WelcomeRoute
@@ -305,10 +332,12 @@ export interface FileRouteTypes {
     | '/audit'
     | '/capas'
     | '/chat'
+    | '/confirm-email'
     | '/costs'
     | '/credentials'
     | '/departments'
     | '/flows'
+    | '/forgot-password'
     | '/governance'
     | '/handoffs'
     | '/integrations'
@@ -318,6 +347,7 @@ export interface FileRouteTypes {
     | '/models'
     | '/plugins'
     | '/profile'
+    | '/reset-password'
     | '/settings'
     | '/skills'
     | '/welcome'
@@ -337,9 +367,11 @@ export interface FileRouteTypes {
     | '/audit'
     | '/capas'
     | '/chat'
+    | '/confirm-email'
     | '/costs'
     | '/credentials'
     | '/flows'
+    | '/forgot-password'
     | '/governance'
     | '/handoffs'
     | '/integrations'
@@ -348,6 +380,7 @@ export interface FileRouteTypes {
     | '/models'
     | '/plugins'
     | '/profile'
+    | '/reset-password'
     | '/settings'
     | '/skills'
     | '/welcome'
@@ -368,10 +401,12 @@ export interface FileRouteTypes {
     | '/audit'
     | '/capas'
     | '/chat'
+    | '/confirm-email'
     | '/costs'
     | '/credentials'
     | '/departments'
     | '/flows'
+    | '/forgot-password'
     | '/governance'
     | '/handoffs'
     | '/integrations'
@@ -381,6 +416,7 @@ export interface FileRouteTypes {
     | '/models'
     | '/plugins'
     | '/profile'
+    | '/reset-password'
     | '/settings'
     | '/skills'
     | '/welcome'
@@ -402,10 +438,12 @@ export interface RootRouteChildren {
   AuditRoute: typeof AuditRoute
   CapasRoute: typeof CapasRoute
   ChatRoute: typeof ChatRoute
+  ConfirmEmailRoute: typeof ConfirmEmailRoute
   CostsRoute: typeof CostsRoute
   CredentialsRoute: typeof CredentialsRoute
   DepartmentsRoute: typeof DepartmentsRouteWithChildren
   FlowsRoute: typeof FlowsRoute
+  ForgotPasswordRoute: typeof ForgotPasswordRoute
   GovernanceRoute: typeof GovernanceRoute
   HandoffsRoute: typeof HandoffsRoute
   IntegrationsRoute: typeof IntegrationsRoute
@@ -415,6 +453,7 @@ export interface RootRouteChildren {
   ModelsRoute: typeof ModelsRoute
   PluginsRoute: typeof PluginsRoute
   ProfileRoute: typeof ProfileRoute
+  ResetPasswordRoute: typeof ResetPasswordRoute
   SettingsRoute: typeof SettingsRoute
   SkillsRoute: typeof SkillsRoute
   WelcomeRoute: typeof WelcomeRoute
@@ -450,6 +489,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/profile': {
@@ -515,6 +561,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GovernanceRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/forgot-password': {
+      id: '/forgot-password'
+      path: '/forgot-password'
+      fullPath: '/forgot-password'
+      preLoaderRoute: typeof ForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/flows': {
       id: '/flows'
       path: '/flows'
@@ -541,6 +594,13 @@ declare module '@tanstack/react-router' {
       path: '/costs'
       fullPath: '/costs'
       preLoaderRoute: typeof CostsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/confirm-email': {
+      id: '/confirm-email'
+      path: '/confirm-email'
+      fullPath: '/confirm-email'
+      preLoaderRoute: typeof ConfirmEmailRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/chat': {
@@ -692,10 +752,12 @@ const rootRouteChildren: RootRouteChildren = {
   AuditRoute: AuditRoute,
   CapasRoute: CapasRoute,
   ChatRoute: ChatRoute,
+  ConfirmEmailRoute: ConfirmEmailRoute,
   CostsRoute: CostsRoute,
   CredentialsRoute: CredentialsRoute,
   DepartmentsRoute: DepartmentsRouteWithChildren,
   FlowsRoute: FlowsRoute,
+  ForgotPasswordRoute: ForgotPasswordRoute,
   GovernanceRoute: GovernanceRoute,
   HandoffsRoute: HandoffsRoute,
   IntegrationsRoute: IntegrationsRoute,
@@ -705,6 +767,7 @@ const rootRouteChildren: RootRouteChildren = {
   ModelsRoute: ModelsRoute,
   PluginsRoute: PluginsRoute,
   ProfileRoute: ProfileRoute,
+  ResetPasswordRoute: ResetPasswordRoute,
   SettingsRoute: SettingsRoute,
   SkillsRoute: SkillsRoute,
   WelcomeRoute: WelcomeRoute,

@@ -418,6 +418,7 @@ function LoginForm({
   loading: boolean;
   t: (en: string, de: string) => string;
 }) {
+  const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -464,6 +465,13 @@ function LoginForm({
             required
             className="mt-1 w-full rounded-md border border-border bg-background/40 px-3 py-2 text-sm"
           />
+          <button
+            type="button"
+            onClick={() => navigate({ to: "/forgot-password" })}
+            className="mt-1 text-xs text-muted-foreground hover:text-foreground"
+          >
+            {t("Forgot password?", "Passwort vergessen?")}
+          </button>
         </div>
       </div>
 

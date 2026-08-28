@@ -178,6 +178,26 @@ export const api = {
   delete: <T>(path: string) => request<T>("DELETE", path),
 };
 
+/** For the handful of routes with no session at all: `/auth/password/forgot`,
+ *  `/auth/password/reset`, `/auth/email/confirm`. `request()` (and so every
+ *  `api.*` method) opens with `getToken()`, which THROWS "not signed in" when
+ *  nothing is stored -- exactly the state of somebody who followed a
+ *  "forgot password" link because they cannot log in. Going through `api.post`
+ *  here would mean the request never leaves the browser for that caller. These
+ *  three are `unguarded` on the backend for the same reason (see `auth.py`):
+ *  the mailed token (or nothing, for the forgot-password ask) IS the
+ *  credential, so no bearer header belongs on the request in the first place. */
+export async function publicPost<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw await toError(res);
+  if (res.status === 204 || res.status === 202) return undefined as T;
+  return (await res.json()) as T;
+}
+
 // ---- Company backup / restore -----------------------------------------------
 // These three don't fit `api.*`: export returns a binary blob, and preview /
 // restore send multipart/form-data (a file), not JSON. `BackupPreviewDTO` and
