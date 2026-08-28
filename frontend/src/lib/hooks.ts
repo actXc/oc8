@@ -188,6 +188,15 @@ export interface OrganizationSettingsDTO {
   slug: string;
   tier: string;
   region: string;
+  // Deliberately snake_case, unlike every field above it: settings.py's
+  // `OrganizationSettings`/`OrganizationSettingsUpdate` are plain pydantic
+  // BaseModel, not this codebase's CamelModel, so the wire key really is
+  // `active_smtp_credential_id` -- sending `activeSmtpCredentialId` would be
+  // silently dropped (unknown key) rather than rejected. `null`/omitted from
+  // GET means no mail server is configured (task-8-brief.md). Optional here
+  // (not on every other field) only so existing fixtures that predate this
+  // task (e.g. backup-panel.test.tsx's ORG) don't have to be touched.
+  active_smtp_credential_id?: string | null;
 }
 
 export interface ModelWriteBody {
@@ -501,8 +510,14 @@ export function useOrganizationSettings() {
 export function useUpdateOrganizationSettings() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: Pick<OrganizationSettingsDTO, "name" | "region">) =>
-      api.put<OrganizationSettingsDTO>("/settings/organization", body),
+    // `active_smtp_credential_id` stays optional (Pick, not Required) so the
+    // existing OrganizationPanel save (name/region only) keeps omitting it --
+    // per settings.py's `model_fields_set` check, omitting the key leaves the
+    // mail-server pointer untouched, while including it with `null` clears it.
+    mutationFn: (
+      body: Pick<OrganizationSettingsDTO, "name" | "region"> &
+        Partial<Pick<OrganizationSettingsDTO, "active_smtp_credential_id">>,
+    ) => api.put<OrganizationSettingsDTO>("/settings/organization", body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["settings", "organization"] }),
   });
 }
