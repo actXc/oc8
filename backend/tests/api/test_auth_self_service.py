@@ -206,6 +206,26 @@ async def test_password_change_replaces_the_hash(app_session: AppSessionFactory)
     assert not verify_password(OLD_PASSWORD, stored)
 
 
+async def test_a_blank_display_name_is_refused(app_session: AppSessionFactory) -> None:
+    """`min_length=1` lets a string of spaces through, and a blank display
+    name is what the nav bar and every approval row name this person by."""
+    tenant = uuid.uuid4()
+    email = "ada@example.com"
+    async with app_session(tenant) as db:
+        db.add(_member(tenant, email))
+
+    async with _http() as http:
+        r = await http.put(
+            "/api/v1/auth/me/display-name",
+            json={"displayName": "   "},
+            headers=_headers(tenant, email),
+        )
+    assert r.status_code == 422, r.text
+
+    async with app_session(tenant) as db:
+        assert (await _row(db, tenant, email)).display_name == email
+
+
 # --- email: the no-mail-server branch ------------------------------------
 
 
@@ -290,6 +310,36 @@ async def test_email_change_refuses_an_address_somebody_else_signs_in_with(
 
     async with app_session(tenant) as db:
         assert (await _row(db, tenant, "ada@example.com")).subject == "ada@example.com"
+
+
+async def test_submitting_the_address_you_already_use_changes_nothing(
+    app_session: AppSessionFactory,
+) -> None:
+    """A no-op must not write an audit row claiming a rename -- and on the
+    mail-server branch it must not mail a link for the current address."""
+    tenant = uuid.uuid4()
+    email = "ada@example.com"
+    async with app_session(tenant) as db:
+        db.add(m.Organization(id=tenant, slug=str(tenant), name="t", settings={}))
+        await db.flush()
+        db.add(_member(tenant, email))
+        await _configure_smtp(db, tenant)
+
+    with patch("oc8.credentials.smtp.smtplib.SMTP") as smtp_cls:
+        async with _http() as http:
+            r = await http.put(
+                "/api/v1/auth/me/email",
+                json={"currentPassword": OLD_PASSWORD, "newEmail": email},
+                headers=_headers(tenant, email),
+            )
+    assert r.status_code == 200, r.text
+    assert r.json()["verificationRequired"] is False
+    smtp_cls.assert_not_called()
+
+    async with app_session(tenant) as db:
+        actions = await _actions(db, tenant)
+    assert "member.subject_renamed" not in actions
+    assert "member.email_change_requested" not in actions
 
 
 # --- email: the mail-server branch ---------------------------------------

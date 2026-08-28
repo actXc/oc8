@@ -340,8 +340,16 @@ async def update_own_display_name(
     is what every approval and audit row names a person by on screen.
     """
     member = await _own_member_or_404(db, principal)
+    display_name = body.display_name.strip()
+    # `min_length=1` passes a string of spaces, which strips to "" -- and an
+    # empty display name is what the nav bar, every approval row and every
+    # audit line names this person by. Refused rather than stored blank.
+    if not display_name:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "A display name cannot be blank."
+        )
     previous = member.display_name
-    member.display_name = body.display_name.strip()
+    member.display_name = display_name
     await append_event(
         db,
         tenant_id=principal.tenant_id,
@@ -453,6 +461,13 @@ async def change_own_email(
     _verified_or_401(member, body.current_password)
 
     new_email = body.new_email.strip()
+    if new_email == member.subject:
+        # Nothing to change. Falling through would either write an audit row
+        # claiming a rename that did not happen, or -- on the branch below --
+        # mail a confirmation link for the address the person already uses.
+        dto = await _member_dto(db, member)
+        return EmailChangeResponse(verification_required=False, member=dto)
+
     clash = (
         await db.execute(
             select(m.OrgMember.id).where(
