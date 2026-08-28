@@ -6,17 +6,31 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // by vitest, so a plain top-level `const apiGetMock = vi.fn()` referenced
 // inside the factory throws "Cannot access before initialization" -- see
 // the identical pattern in `hooks.test.tsx`/`credential-hooks.test.tsx`.
-const { apiGetMock, apiPostMock } = vi.hoisted(() => ({
+const {
+  apiGetMock,
+  apiPostMock,
+  apiPutMock,
+  hasCommunitySessionMock,
+  logoutCommunityMock,
+  logoutDevMock,
+} = vi.hoisted(() => ({
   apiGetMock: vi.fn(),
   apiPostMock: vi.fn(),
+  apiPutMock: vi.fn(),
+  hasCommunitySessionMock: vi.fn().mockReturnValue(false),
+  logoutCommunityMock: vi.fn(),
+  logoutDevMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {
     ...actual,
-    api: { ...actual.api, get: apiGetMock, post: apiPostMock },
+    api: { ...actual.api, get: apiGetMock, post: apiPostMock, put: apiPutMock },
     getToken: vi.fn().mockResolvedValue("fake-token"),
+    hasCommunitySession: hasCommunitySessionMock,
+    logoutCommunity: logoutCommunityMock,
+    logoutDev: logoutDevMock,
   };
 });
 vi.mock("@/lib/push-notifications", () => ({
@@ -52,6 +66,20 @@ vi.mock("@/lib/hooks", async (importOriginal) => {
 vi.mock("@/lib/governance-hooks", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/governance-hooks")>();
   return { ...actual, useCan: () => () => false };
+});
+// Only `toast.error`/`toast.success` are overridden -- everything else
+// (Toaster, etc.) passes through untouched, and this file's original two
+// tests never asserted on a toast, so this addition doesn't change them.
+const { toastErrorMock, toastSuccessMock } = vi.hoisted(() => ({
+  toastErrorMock: vi.fn(),
+  toastSuccessMock: vi.fn(),
+}));
+vi.mock("sonner", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("sonner")>();
+  return {
+    ...actual,
+    toast: { ...actual.toast, error: toastErrorMock, success: toastSuccessMock },
+  };
 });
 
 import { ProfilePage } from "@/routes/profile";
@@ -92,5 +120,196 @@ describe("Profile page — TOTP card", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /regenerate/i }));
     await waitFor(() => expect(screen.getByText("AAAA-1111")).toBeInTheDocument());
+  });
+});
+
+describe("Profile page — Account panel", () => {
+  const currentUser = { displayName: "Ada Lovelace", subject: "ada@example.com", role: "member" };
+  const reloadMock = vi.fn();
+
+  beforeEach(() => {
+    apiGetMock.mockReset();
+    apiPostMock.mockReset();
+    apiPutMock.mockReset();
+    hasCommunitySessionMock.mockReset().mockReturnValue(false);
+    logoutCommunityMock.mockReset();
+    logoutDevMock.mockReset();
+    toastErrorMock.mockReset();
+    toastSuccessMock.mockReset();
+    // Path-aware, since AccountPanel's `useAuth()` (`GET /me`) and the TOTP
+    // card's `GET /auth/totp/status` share this one mock.
+    apiGetMock.mockImplementation((path: string) => {
+      if (path === "/me") return Promise.resolve(currentUser);
+      if (path === "/auth/totp/status") return Promise.resolve({ enrolled: false });
+      return Promise.resolve({});
+    });
+    // jsdom's `window.location.reload` isn't configurable, so `vi.spyOn`
+    // throws "Cannot redefine property" -- replace the whole `location`
+    // instead, the same workaround used elsewhere for this jsdom limitation.
+    reloadMock.mockReset();
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...window.location, reload: reloadMock },
+    });
+  });
+
+  async function fetchOk(body: unknown) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => body }),
+    );
+  }
+
+  async function fetchError(status: number, detail: string) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status, json: async () => ({ detail }) }),
+    );
+  }
+
+  it("seeds the display-name field from GET /me and saves an edit via PUT /auth/me/display-name", async () => {
+    apiPutMock.mockResolvedValue({ ...currentUser, displayName: "Ada L." });
+    renderPage();
+
+    const input = await screen.findByDisplayValue("Ada Lovelace");
+    fireEvent.change(input, { target: { value: "Ada L." } });
+    // If a form is open, two "Save" buttons exist (display-name's own,
+    // always present, plus this form's) -- this form's is the last one.
+    fireEvent.click(screen.getAllByRole("button", { name: "Save" }).at(-1)!);
+
+    await waitFor(() =>
+      expect(apiPutMock).toHaveBeenCalledWith("/auth/me/display-name", { displayName: "Ada L." }),
+    );
+    await waitFor(() => expect(toastSuccessMock).toHaveBeenCalled());
+  });
+
+  it("shows the current password as the error when changing the password with a wrong one", async () => {
+    await fetchError(401, "current password is incorrect");
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: /change password/i }));
+    fireEvent.change(screen.getByPlaceholderText("Current password"), {
+      target: { value: "wrong-pass" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("New password"), {
+      target: { value: "a-new-password" },
+    });
+    // If a form is open, two "Save" buttons exist (display-name's own,
+    // always present, plus this form's) -- this form's is the last one.
+    fireEvent.click(screen.getAllByRole("button", { name: "Save" }).at(-1)!);
+
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining("/auth/me/password"),
+        expect.objectContaining({
+          method: "PUT",
+          headers: expect.objectContaining({ authorization: "Bearer fake-token" }),
+        }),
+      ),
+    );
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        "Could not change your password.",
+        expect.objectContaining({ description: "current password is incorrect" }),
+      ),
+    );
+    // A 401 here must NOT trip `@/lib/api`'s shared "session expired" handler
+    // -- see `putConfirmingPassword`'s comment in profile.tsx. Nobody got
+    // signed out over a typo.
+    expect(logoutDevMock).not.toHaveBeenCalled();
+    expect(logoutCommunityMock).not.toHaveBeenCalled();
+    expect(reloadMock).not.toHaveBeenCalled();
+  });
+
+  it("shows a confirmation message when email change requires verification", async () => {
+    await fetchOk({ verificationRequired: true, sentTo: "new@example.com", reauthRequired: false });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: /change email/i }));
+    fireEvent.change(screen.getByPlaceholderText("Current password"), {
+      target: { value: "correct-pass" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("New email"), {
+      target: { value: "new@example.com" },
+    });
+    // If a form is open, two "Save" buttons exist (display-name's own,
+    // always present, plus this form's) -- this form's is the last one.
+    fireEvent.click(screen.getAllByRole("button", { name: "Save" }).at(-1)!);
+
+    await waitFor(() =>
+      expect(screen.getByText(/check your inbox at new@example\.com/i)).toBeInTheDocument(),
+    );
+    expect(logoutDevMock).not.toHaveBeenCalled();
+    expect(reloadMock).not.toHaveBeenCalled();
+  });
+
+  it("shows a 409 conflict message when the new email is already taken", async () => {
+    await fetchError(409, "Another user already signs in with that identity.");
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: /change email/i }));
+    fireEvent.change(screen.getByPlaceholderText("Current password"), {
+      target: { value: "correct-pass" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("New email"), {
+      target: { value: "taken@example.com" },
+    });
+    // If a form is open, two "Save" buttons exist (display-name's own,
+    // always present, plus this form's) -- this form's is the last one.
+    fireEvent.click(screen.getAllByRole("button", { name: "Save" }).at(-1)!);
+
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        "Could not change your email.",
+        expect.objectContaining({
+          description: "Another user already signs in with that identity.",
+        }),
+      ),
+    );
+  });
+
+  it("signs the caller out and reloads when the email change reports reauthRequired", async () => {
+    await fetchOk({ verificationRequired: false, reauthRequired: true });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: /change email/i }));
+    fireEvent.change(screen.getByPlaceholderText("Current password"), {
+      target: { value: "correct-pass" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("New email"), {
+      target: { value: "renamed@example.com" },
+    });
+    // If a form is open, two "Save" buttons exist (display-name's own,
+    // always present, plus this form's) -- this form's is the last one.
+    fireEvent.click(screen.getAllByRole("button", { name: "Save" }).at(-1)!);
+
+    // reauthRequired: true -- the backend has just rewritten the caller's
+    // sign-in identity, so the frontend MUST sign them out rather than only
+    // toast about it (see profile.tsx's `changeEmail`).
+    await waitFor(() => expect(logoutDevMock).toHaveBeenCalled());
+    expect(hasCommunitySessionMock).toHaveBeenCalled();
+    expect(logoutCommunityMock).not.toHaveBeenCalled();
+    expect(reloadMock).toHaveBeenCalled();
+  });
+
+  it("uses logoutCommunity (not logoutDev) when a community session is active", async () => {
+    hasCommunitySessionMock.mockReturnValue(true);
+    await fetchOk({ verificationRequired: false, reauthRequired: true });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: /change email/i }));
+    fireEvent.change(screen.getByPlaceholderText("Current password"), {
+      target: { value: "correct-pass" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("New email"), {
+      target: { value: "renamed@example.com" },
+    });
+    // If a form is open, two "Save" buttons exist (display-name's own,
+    // always present, plus this form's) -- this form's is the last one.
+    fireEvent.click(screen.getAllByRole("button", { name: "Save" }).at(-1)!);
+
+    await waitFor(() => expect(logoutCommunityMock).toHaveBeenCalled());
+    expect(logoutDevMock).not.toHaveBeenCalled();
+    expect(reloadMock).toHaveBeenCalled();
   });
 });

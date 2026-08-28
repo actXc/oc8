@@ -6,8 +6,9 @@ import { Panel } from "@/components/app-shell";
 import { BackupCodesReveal } from "@/components/totp-backup-codes";
 import { TotpEnroll } from "@/components/totp-enroll";
 import { useT } from "@/lib/i18n";
-import { api, getToken } from "@/lib/api";
+import { API_URL, api, getToken, hasCommunitySession, logoutCommunity, logoutDev } from "@/lib/api";
 import {
+  useAuth,
   useAvailableChannels,
   useChannelBindings,
   useRequestChannelLink,
@@ -35,8 +36,258 @@ export const Route = createFileRoute("/profile")({
   component: ProfilePage,
 });
 
+/** `PUT /auth/me/password` and `PUT /auth/me/email` answer a wrong CURRENT
+ *  PASSWORD with a 401 (`_verified_or_401` in `auth.py`) -- the very status
+ *  `api.put`'s shared `request()` (`@/lib/api`) treats everywhere else as
+ *  "the session itself expired," reacting by signing the caller out and
+ *  reloading the page before the promise it returns ever rejects. Routing
+ *  these two calls through `api.put` would turn a mistyped current password
+ *  into an involuntary sign-out instead of a "that password is wrong"
+ *  message on the form. So they go through a bare `fetch` instead, exactly
+ *  the way `@/lib/totp`'s client already does for its own "don't touch the
+ *  shared 401 handling" reason. */
+async function putConfirmingPassword<T>(path: string, body: unknown): Promise<T> {
+  const token = await getToken();
+  const res = await fetch(`${API_URL}${path}`, {
+    method: "PUT",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(typeof error.detail === "string" ? error.detail : "Request failed");
+  }
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+function AccountPanel({ initialDisplayName }: { initialDisplayName: string }) {
+  const t = useT();
+  const [displayName, setDisplayName] = useState(initialDisplayName);
+  // `initialDisplayName` arrives from `useAuth()` (`GET /me`), which is still
+  // pending on this component's first render -- `useState`'s initializer only
+  // runs once, so without this the field would stay stuck on the empty string
+  // it mounted with even after the real name lands a moment later.
+  useEffect(() => {
+    setDisplayName(initialDisplayName);
+  }, [initialDisplayName]);
+  const [nameBusy, setNameBusy] = useState(false);
+
+  const [showPasswordForm, setShowPasswordForm] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [passwordBusy, setPasswordBusy] = useState(false);
+
+  const [showEmailForm, setShowEmailForm] = useState(false);
+  const [emailCurrentPassword, setEmailCurrentPassword] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [emailBusy, setEmailBusy] = useState(false);
+  const [emailPendingConfirmation, setEmailPendingConfirmation] = useState<string | null>(null);
+
+  async function saveDisplayName() {
+    setNameBusy(true);
+    try {
+      await api.put("/auth/me/display-name", { displayName });
+      toast.success(t("Name updated", "Name aktualisiert"));
+    } catch (err) {
+      toast.error(t("Could not update your name.", "Name konnte nicht aktualisiert werden."), {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setNameBusy(false);
+    }
+  }
+
+  async function changePassword() {
+    setPasswordBusy(true);
+    try {
+      await putConfirmingPassword("/auth/me/password", { currentPassword, newPassword });
+      toast.success(t("Password changed", "Passwort geändert"));
+      setShowPasswordForm(false);
+      setCurrentPassword("");
+      setNewPassword("");
+    } catch (err) {
+      toast.error(t("Could not change your password.", "Passwort konnte nicht geändert werden."), {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setPasswordBusy(false);
+    }
+  }
+
+  async function changeEmail() {
+    setEmailBusy(true);
+    try {
+      const r = await putConfirmingPassword<{
+        verificationRequired: boolean;
+        sentTo?: string;
+        reauthRequired: boolean;
+      }>("/auth/me/email", { currentPassword: emailCurrentPassword, newEmail });
+      if (r.reauthRequired) {
+        // Immediate-apply branch (no mail server configured): the backend has
+        // just rewritten `org_member.subject`, the identity this session's
+        // token names. The token itself can't be revoked -- the next
+        // authenticated request under it would mint a ghost member row under
+        // the OLD subject (see `EmailChangeResponse.reauth_required`'s
+        // docstring in auth.py) -- so the caller must be signed out right
+        // now, not merely told about it. Same precedence and same steps as
+        // the sign-out button in `app-shell.tsx`.
+        if (hasCommunitySession()) logoutCommunity();
+        else logoutDev();
+        window.location.reload();
+        return;
+      }
+      if (r.verificationRequired) {
+        setEmailPendingConfirmation(r.sentTo ?? newEmail);
+      } else {
+        toast.success(t("Email updated", "E-Mail aktualisiert"));
+        setShowEmailForm(false);
+      }
+      setEmailCurrentPassword("");
+      setNewEmail("");
+    } catch (err) {
+      toast.error(t("Could not change your email.", "E-Mail konnte nicht geändert werden."), {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setEmailBusy(false);
+    }
+  }
+
+  return (
+    <Panel className="p-4">
+      <h2 className="mb-3 text-sm font-semibold text-foreground">{t("Account", "Konto")}</h2>
+
+      <div className="mb-4">
+        <label className="mb-1 block text-xs font-medium text-muted-foreground">
+          {t("Display name", "Anzeigename")}
+        </label>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            className="h-8 flex-1 rounded-md border border-border bg-background/60 px-2 text-sm"
+          />
+          <button
+            type="button"
+            disabled={nameBusy || !displayName.trim()}
+            onClick={saveDisplayName}
+            className="h-8 shrink-0 rounded-md border border-border bg-panel px-3 text-xs font-medium text-foreground transition hover:bg-accent disabled:opacity-50"
+          >
+            {t("Save", "Speichern")}
+          </button>
+        </div>
+      </div>
+
+      <div className="mb-4 border-t border-border pt-4">
+        {!showPasswordForm ? (
+          <button
+            type="button"
+            onClick={() => setShowPasswordForm(true)}
+            className="h-8 rounded-md border border-border bg-panel px-3 text-xs font-medium text-foreground transition hover:bg-accent"
+          >
+            {t("Change password", "Passwort ändern")}
+          </button>
+        ) : (
+          <div className="space-y-2">
+            <input
+              type="password"
+              placeholder={t("Current password", "Aktuelles Passwort")}
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              className="h-8 w-full rounded-md border border-border bg-background/60 px-2 text-sm"
+            />
+            <input
+              type="password"
+              placeholder={t("New password", "Neues Passwort")}
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              className="h-8 w-full rounded-md border border-border bg-background/60 px-2 text-sm"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={passwordBusy || !currentPassword || newPassword.length < 8}
+                onClick={changePassword}
+                className="h-8 rounded-md border border-border bg-panel px-3 text-xs font-medium text-foreground transition hover:bg-accent disabled:opacity-50"
+              >
+                {t("Save", "Speichern")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowPasswordForm(false)}
+                className="h-8 rounded-md border border-border px-3 text-xs text-muted-foreground transition hover:text-foreground"
+              >
+                {t("Cancel", "Abbrechen")}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="border-t border-border pt-4">
+        {emailPendingConfirmation ? (
+          <p className="text-xs text-muted-foreground">
+            {t(
+              `Check your inbox at ${emailPendingConfirmation} to confirm this change.`,
+              `Bestätige die Änderung über den Link, den wir an ${emailPendingConfirmation} geschickt haben.`,
+            )}
+          </p>
+        ) : !showEmailForm ? (
+          <button
+            type="button"
+            onClick={() => setShowEmailForm(true)}
+            className="h-8 rounded-md border border-border bg-panel px-3 text-xs font-medium text-foreground transition hover:bg-accent"
+          >
+            {t("Change email", "E-Mail ändern")}
+          </button>
+        ) : (
+          <div className="space-y-2">
+            <input
+              type="password"
+              placeholder={t("Current password", "Aktuelles Passwort")}
+              value={emailCurrentPassword}
+              onChange={(e) => setEmailCurrentPassword(e.target.value)}
+              className="h-8 w-full rounded-md border border-border bg-background/60 px-2 text-sm"
+            />
+            <input
+              type="email"
+              placeholder={t("New email", "Neue E-Mail")}
+              value={newEmail}
+              onChange={(e) => setNewEmail(e.target.value)}
+              className="h-8 w-full rounded-md border border-border bg-background/60 px-2 text-sm"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={emailBusy || !emailCurrentPassword || !newEmail}
+                onClick={changeEmail}
+                className="h-8 rounded-md border border-border bg-panel px-3 text-xs font-medium text-foreground transition hover:bg-accent disabled:opacity-50"
+              >
+                {t("Save", "Speichern")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowEmailForm(false)}
+                className="h-8 rounded-md border border-border px-3 text-xs text-muted-foreground transition hover:text-foreground"
+              >
+                {t("Cancel", "Abbrechen")}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
 export function ProfilePage() {
   const t = useT();
+  const { data: currentUser } = useAuth();
   const [subscription, setSubscription] = useState<PushSubscription | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -132,6 +383,7 @@ export function ProfilePage() {
 
   return (
     <div className="grid gap-4 md:grid-cols-2">
+      <AccountPanel initialDisplayName={currentUser?.displayName ?? ""} />
       <Panel className="p-4">
         <h2 className="mb-3 text-sm font-semibold text-foreground">
           {t("Notifications", "Benachrichtigungen")}
