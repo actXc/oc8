@@ -74,3 +74,36 @@ CORE_CREDENTIAL_TYPES["openai_chatgpt_subscription"] = CredentialTypeSpec(
     display_name="ChatGPT subscription",
     fields=[],
 )
+
+# SMTP server (design: docs/superpowers/specs/2026-08-28-account-self-
+# service-design.md §4.1). Reuses the credentials framework unchanged for
+# a system-level integration, not a per-agent one -- nothing else in this
+# codebase ever asks for a "smtp_server"-typed credential, so it simply
+# never appears in any per-agent tool/model credential picker.
+CORE_CREDENTIAL_TYPES["smtp_server"] = CredentialTypeSpec(
+    name="smtp_server",
+    display_name="SMTP server",
+    fields=[
+        SetupFieldSpec(key="host", label="Host", kind="text"),
+        SetupFieldSpec(key="port", label="Port", kind="text", default="587"),
+        # Optional on purpose: some internal/relay SMTP servers accept
+        # anonymous connections. `validate_smtp` only attempts AUTH when a
+        # username is present.
+        SetupFieldSpec(key="username", label="Username", kind="text", required=False),
+        SetupFieldSpec(key="password", label="Password", kind="password", required=False),
+        SetupFieldSpec(
+            key="from_address",
+            label="From address",
+            kind="text",
+            placeholder="noreply@yourcompany.com",
+        ),
+        SetupFieldSpec(
+            key="use_tls",
+            label="Use STARTTLS",
+            kind="text",
+            default="true",
+            help='"true" or "false".',
+        ),
+    ],
+    validate_entry_point="oc8.credentials.smtp:validate_smtp",
+)
