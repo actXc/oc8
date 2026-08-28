@@ -764,16 +764,18 @@ export function AppShell() {
               to="/profile"
               aria-label={t("Profile", "Profil")}
               title={t("Profile", "Profil")}
-              className="grid h-7 w-7 place-items-center rounded-full bg-primary/20 text-xs font-semibold text-primary transition hover:bg-primary/30"
+              className="flex items-center gap-2 rounded-md transition hover:opacity-80"
             >
-              {initials(standing.displayName)}
-            </Link>
-            <div className="hidden text-xs leading-tight sm:block">
-              <div className="font-medium">{standing.displayName || "—"}</div>
-              <div className="text-muted-foreground">
-                {assignedRole ?? roleLabel(standing.role, t)}
+              <span className="grid h-7 w-7 place-items-center rounded-full bg-primary/20 text-xs font-semibold text-primary">
+                {initials(standing.displayName)}
+              </span>
+              <div className="hidden text-xs leading-tight sm:block">
+                <div className="font-medium">{standing.displayName || "—"}</div>
+                <div className="text-muted-foreground">
+                  {assignedRole ?? roleLabel(standing.role, t)}
+                </div>
               </div>
-            </div>
+            </Link>
             <button
               type="button"
               onClick={() => {
