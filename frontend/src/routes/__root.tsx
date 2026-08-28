@@ -22,22 +22,32 @@ import { DevSignIn } from "../components/dev-sign-in";
 const AUTH_CONFIG_URL =
   (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:8099/api/v1";
 
-// Routes reachable with no session at all: `/login` and `/welcome` (the
-// existing pair), plus the three self-service links added in Task 7 that a
-// person follows precisely BECAUSE they cannot sign in right now --
-// forgot-password is for someone locked out, and reset-password/confirm-email
-// are opened from a mailed link that may land in a browser with no session
-// (or a different one) to begin with. Both `AuthGate` (below) and
-// `RootComponent` key off this same list: the gate must never bounce any of
-// these to /login, and the shell must never wrap them in `AppShell`, which
-// assumes a session exists.
-const PUBLIC_ROUTES = new Set([
+// Routes genuinely reachable with NO session at all: `/login` plus the three
+// self-service links added in Task 7 that a person follows precisely BECAUSE
+// they cannot sign in right now -- forgot-password is for someone locked out,
+// and reset-password/confirm-email are opened from a mailed link that may
+// land in a browser with no session (or a different one) to begin with.
+// `AuthGate`'s community-mode redirect check uses exactly this set: a
+// session-less visitor anywhere else in community mode still gets bounced to
+// /login, same as always. Deliberately NOT `/welcome` -- that route always
+// requires a session by construction (it's only ever reached right after
+// setup/login mints one), and widening the actual auth gate to admit it would
+// be a real, unrequested change to the app's auth behavior, not a Task 7 concern.
+const GATE_PUBLIC_ROUTES = new Set([
   "/login",
-  "/welcome",
   "/forgot-password",
   "/reset-password",
   "/confirm-email",
 ]);
+
+// Routes that skip the `<AppShell/>` wrapper: the gate set above, plus
+// `/welcome`, which has never needed the "reachable without a session"
+// treatment (see above) but has always needed this one -- it renders the same
+// always-dark `PublicAuthLayout` docking station as `/login` and must not be
+// wrapped in `AppShell`. Kept as a superset of `GATE_PUBLIC_ROUTES` rather
+// than its own hand-maintained list so the four Task-7-relevant names are
+// still declared in exactly one place.
+const SHELL_PUBLIC_ROUTES = new Set([...GATE_PUBLIC_ROUTES, "/welcome"]);
 
 import { EditionCompositionProvider } from "../edition/composition";
 import { editionExtensions } from "@oc8/edition-entry";
@@ -94,7 +104,7 @@ function AuthGate({ children }: { children: ReactNode }) {
     // we fall through to render `children` (the public login `Outlet`).
     if (authMode === "community") {
       const onPublicRoute =
-        typeof window !== "undefined" && PUBLIC_ROUTES.has(window.location.pathname);
+        typeof window !== "undefined" && GATE_PUBLIC_ROUTES.has(window.location.pathname);
       if (!onPublicRoute) {
         if (typeof window !== "undefined") {
           window.location.href = "/login";
@@ -231,7 +241,7 @@ function RootComponent() {
   // -- all of them need the Toaster forced dark regardless of the stored
   // preference, or a light-mode operator gets a light toast on a dark surface
   // there too.
-  const publicRoute = PUBLIC_ROUTES.has(pathname);
+  const publicRoute = SHELL_PUBLIC_ROUTES.has(pathname);
   // Single source of truth for "which UI wrapper does this route get". Computed
   // synchronously from the pathname so `/login` is never wrapped in `AppShell`,
   // regardless of auth state, session staleness or hydration timing.
