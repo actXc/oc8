@@ -408,6 +408,50 @@ class RenameMemberSubjectRequest(CamelModel):
     subject: str = Field(..., min_length=1, max_length=255)
 
 
+class UpdateDisplayNameRequest(CamelModel):
+    """Self-service display-name change (`PUT /auth/me/display-name`).
+
+    No password confirmation: a display name is cosmetic and carries no
+    authority, which mirrors `CreateMemberRequest` accepting `display_name`
+    with no extra gate. The two requests that DO move the sign-in identity
+    (`ChangeOwnPasswordRequest`, `ChangeOwnEmailRequest`) demand the current
+    password instead.
+    """
+
+    display_name: str = Field(..., min_length=1, max_length=255)
+
+
+class ChangeOwnPasswordRequest(CamelModel):
+    """Self-service password change (`PUT /auth/me/password`).
+
+    `current_password` is mandatory and is the whole difference from the
+    admin-only `SetMemberPasswordRequest`: a caller here proves they still
+    know the OLD password before setting a new one, so a borrowed session
+    cannot silently lock the real owner out of their own account.
+
+    `new_password` mirrors `SetMemberPasswordRequest`/`PasswordSetupRequest`
+    bounds exactly -- a password accepted at first-run setup must be accepted
+    here too.
+    """
+
+    current_password: str = Field(..., min_length=1, max_length=1024)
+    new_password: str = Field(..., min_length=8, max_length=1024)
+
+
+class ChangeOwnEmailRequest(CamelModel):
+    """Self-service email (sign-in identity) change (`PUT /auth/me/email`).
+
+    Same current-password gate as `ChangeOwnPasswordRequest`, for a sharper
+    reason: the email IS the login, so an unguarded change would let whoever
+    holds a session move the account to an address they control. Whether the
+    new address applies at once or only after a confirmation link depends on
+    whether the tenant has a mail server configured -- see the endpoint.
+    """
+
+    current_password: str = Field(..., min_length=1, max_length=1024)
+    new_email: str = Field(..., min_length=1, max_length=255)
+
+
 class GrantSeatRequest(CamelModel):
     """Put somebody in a department, at one of exactly two seat roles.
 

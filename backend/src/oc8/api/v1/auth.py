@@ -11,6 +11,8 @@ the only two identity paths this edition ships.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
+import secrets
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -23,16 +25,24 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from oc8 import models as m
 from oc8.api.deps import CurrentPrincipal, DbSession, unguarded
 from oc8.api.v1._serializers import member_to_dto, seat_to_dto
+from oc8.api.v1.members import _member_dto
+from oc8.audit import append_event
 from oc8.auth import Principal, get_identity_provider
 from oc8.auth.password import PasswordHashingError, hash_password, verify_password
 from oc8.auth.totp_gate import totp_gate
 from oc8.authz.permissions import MEMBER_ROLE
-from oc8.authz.scope import scope_for_principal
+from oc8.authz.scope import scope_for_principal, subject_uuid_for
 from oc8.config import get_settings
 from oc8.constants import ACME_TENANT_ID, DEV_OPERATOR_SUBJECT
 from oc8.db.session import tenant_session
+from oc8.mail.send import active_smtp_credential, send_mail
 from oc8.schemas.base import CamelModel
 from oc8.schemas.dto import AuthConfig, MeDTO, MemberDTO
+from oc8.schemas.requests import (
+    ChangeOwnEmailRequest,
+    ChangeOwnPasswordRequest,
+    UpdateDisplayNameRequest,
+)
 from oc8.tenants.provision import TenantExists, create_tenant, list_tenants
 from oc8.workspace.members import list_members, seats_for
 
@@ -261,6 +271,281 @@ async def me(principal: CurrentPrincipal, db: DbSession) -> MeDTO:
         seats=[seat_to_dto(s) for s in seats],
         onboarding_status=onboarding_status,
     )
+
+
+# =============================================================================
+# Self-service account settings
+# =============================================================================
+# Three routes a person may run on THEMSELVES without holding `member:manage`.
+# Every one of them resolves the member row from the caller's own principal --
+# there is deliberately no `{member_id}` path parameter anywhere below, because
+# that parameter is the whole difference between "change my own password" and
+# "change anybody's password", and the second one already exists, admin-gated,
+# in `api/v1/members.py`. `unguarded(...)` is honest here for exactly that
+# reason: the authorization IS the token's own subject.
+#
+# Design: docs/superpowers/specs/2026-08-28-account-self-service-design.md.
+
+#: How long a mailed email-change confirmation link stays usable. Short on
+#: purpose: the link, in the wrong inbox, moves somebody's login.
+EMAIL_CHANGE_TOKEN_TTL = dt.timedelta(hours=1)
+
+
+async def _own_member_or_404(db: AsyncSession, principal: Principal) -> m.OrgMember:
+    """The caller's own `org_member` row, minted on first sight.
+
+    `upsert=True` for the same reason `GET /me` uses it: a person's first
+    request is what creates their row, and a self-service screen must not be
+    the one place that says "no such account" to somebody holding a valid
+    session.
+
+    A non-operator principal (an agent or plugin token) has no account to
+    edit at all; `scope_for_principal` raises for it and that becomes a 403,
+    not the 500 an uncaught `PermissionError` would be.
+    """
+    try:
+        member, _scope = await scope_for_principal(db, principal, upsert=True)
+    except PermissionError as exc:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "this token does not belong to a person with an account"
+        ) from exc
+    if member is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no member record for this caller")
+    return member
+
+
+def _verified_or_401(member: m.OrgMember, current_password: str) -> None:
+    """Re-prove the password before anything that moves the sign-in identity.
+
+    A member with no `password_hash` (SSO/dev-token identity) has no current
+    password to confirm, so these two routes are simply closed to them --
+    same 401, so the response never reveals which of the two it was.
+    """
+    if member.password_hash is None or not verify_password(current_password, member.password_hash):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "current password is incorrect")
+
+
+@router.put(
+    "/auth/me/display-name",
+    response_model=MemberDTO,
+    dependencies=[Depends(unguarded("self-service: acts only on the caller's own member row"))],
+)
+async def update_own_display_name(
+    body: UpdateDisplayNameRequest, db: DbSession, principal: CurrentPrincipal
+) -> MemberDTO:
+    """Rename yourself as the workspace shows you.
+
+    No password confirmation: this is the one self-service field that grants
+    nothing and unlocks nothing. It is still audited, because a display name
+    is what every approval and audit row names a person by on screen.
+    """
+    member = await _own_member_or_404(db, principal)
+    previous = member.display_name
+    member.display_name = body.display_name.strip()
+    await append_event(
+        db,
+        tenant_id=principal.tenant_id,
+        actor_type="operator",
+        actor_id=member.id,
+        category="member",
+        action="member.display_name_changed",
+        resource={
+            "member_id": str(member.id),
+            "previous_display_name": previous,
+            "display_name": member.display_name,
+        },
+        reason="changed by the member themselves",
+        principal=principal,
+    )
+    # Built before the commit: a commit inside `tenant_session` unbinds
+    # `app.tenant_id`, so the seat query behind this DTO would come back empty
+    # afterwards and the response would say the person holds nothing. Same
+    # ordering as every writer in `api/v1/members.py`, for the same reason.
+    dto = await _member_dto(db, member)
+    await db.commit()
+    return dto
+
+
+@router.put(
+    "/auth/me/password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(unguarded("self-service: acts only on the caller's own member row"))],
+)
+async def change_own_password(
+    body: ChangeOwnPasswordRequest, db: DbSession, principal: CurrentPrincipal
+) -> None:
+    """Change your own password, having first proven you know the old one.
+
+    The current-password check is not a formality: without it, anyone who
+    borrows an unlocked browser could set a new password and lock the owner
+    out of their own account without ever knowing the old one. Answers 204 --
+    the hash is never echoed, and neither password appears in any audit row.
+    """
+    member = await _own_member_or_404(db, principal)
+    _verified_or_401(member, body.current_password)
+    try:
+        member.password_hash = hash_password(body.new_password)
+    except PasswordHashingError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "Could not hash password."
+        ) from exc
+    await append_event(
+        db,
+        tenant_id=principal.tenant_id,
+        actor_type="operator",
+        actor_id=member.id,
+        category="member",
+        action="member.password_changed",
+        resource={"member_id": str(member.id)},
+        reason="changed by the member themselves",
+        principal=principal,
+    )
+    await db.commit()
+
+
+class EmailChangeResponse(CamelModel):
+    """Which of the two branches `PUT /auth/me/email` took."""
+
+    #: True when a confirmation email was sent INSTEAD of applying the change
+    #: -- the frontend swaps its form for "check your inbox" on this flag.
+    verification_required: bool
+    #: Echoed back only on the verification branch, so the screen can name the
+    #: inbox to go and look in.
+    sent_to: str | None = None
+    #: The updated member, present only when the change applied immediately.
+    member: MemberDTO | None = None
+
+
+@router.put(
+    "/auth/me/email",
+    response_model=EmailChangeResponse,
+    dependencies=[Depends(unguarded("self-service: acts only on the caller's own member row"))],
+)
+async def change_own_email(
+    body: ChangeOwnEmailRequest, db: DbSession, principal: CurrentPrincipal
+) -> EmailChangeResponse:
+    """Change your own sign-in identity, in one of two ways.
+
+    The email IS the login here (`org_member.subject`), so this is the most
+    dangerous of the three self-service routes and it branches on a fact
+    about the deployment rather than on a preference:
+
+    * **No mail server configured** -- the change applies immediately. There
+      is no way to prove the new address is reachable and no way to tell the
+      person if it is not, so refusing here would leave a self-hosted
+      instance with no way to correct a typo'd login at all, short of an
+      administrator. `subject` and `subject_uuid` are rewritten together,
+      exactly as `PUT /members/{id}/subject` does -- the second is a pure
+      function of the first, and leaving the old one behind desyncs the row
+      from the identity check the rename exists to update.
+    * **Mail server configured** -- nothing on the member row moves yet. A
+      single-use token is stored (hashed; the plaintext is mailed once and
+      never persisted) and the change lands only when the link comes back to
+      `POST /auth/confirm-email`. That is what stops a typo -- or a
+      deliberately hostile address -- from silently becoming the only way
+      into this account.
+
+    Either way the address is refused with a 409 if another live member in
+    this tenant already signs in with it: `(tenant_id, subject)` is unique,
+    and the row that lost that race would look like it had simply vanished.
+    """
+    member = await _own_member_or_404(db, principal)
+    _verified_or_401(member, body.current_password)
+
+    new_email = body.new_email.strip()
+    clash = (
+        await db.execute(
+            select(m.OrgMember.id).where(
+                m.OrgMember.tenant_id == principal.tenant_id,
+                m.OrgMember.subject == new_email,
+                m.OrgMember.deleted_at.is_(None),
+                m.OrgMember.id != member.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if clash is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Another user already signs in with that identity."
+        )
+
+    if await active_smtp_credential(db, tenant_id=principal.tenant_id) is None:
+        old_subject = member.subject
+        member.subject = new_email
+        member.subject_uuid = subject_uuid_for(new_email)
+        await append_event(
+            db,
+            tenant_id=principal.tenant_id,
+            actor_type="operator",
+            actor_id=member.id,
+            category="member",
+            action="member.subject_renamed",
+            resource={
+                "member_id": str(member.id),
+                "previous_subject": old_subject,
+                "subject": new_email,
+            },
+            reason="changed by the member themselves; no mail server configured to confirm it",
+            principal=principal,
+        )
+        dto = await _member_dto(db, member)
+        await db.commit()
+        return EmailChangeResponse(verification_required=False, member=dto)
+
+    token = secrets.token_urlsafe(32)
+    db.add(
+        m.AccountVerificationToken(
+            tenant_id=principal.tenant_id,
+            member_id=member.id,
+            purpose="email_change",
+            token_hash=hashlib.sha256(token.encode()).hexdigest(),
+            new_email=new_email,
+            expires_at=dt.datetime.now(tz=dt.UTC) + EMAIL_CHANGE_TOKEN_TTL,
+        )
+    )
+    await append_event(
+        db,
+        tenant_id=principal.tenant_id,
+        actor_type="operator",
+        actor_id=member.id,
+        category="member",
+        action="member.email_change_requested",
+        resource={
+            "member_id": str(member.id),
+            "subject": member.subject,
+            "requested_subject": new_email,
+        },
+        reason="awaiting confirmation of the new address",
+        principal=principal,
+    )
+    # Flush, don't commit, and send BEFORE committing. `app.tenant_id` is
+    # transaction-local (`set_config(..., is_local=true)`), so a commit here
+    # would unbind RLS for the rest of the request -- and `send_mail` reads
+    # the SMTP credential and its vaulted password through this very session,
+    # which would then come back empty and silently send nothing at all.
+    await db.flush()
+    base = get_settings().frontend_base_url.rstrip("/")
+    sent = await send_mail(
+        db,
+        tenant_id=principal.tenant_id,
+        to=new_email,
+        subject="Confirm your new email address",
+        body=(
+            f"Click this link to confirm your new email address:\n"
+            f"{base}/confirm-email?token={token}\n\n"
+            "This link expires in 1 hour. If you didn't request this, ignore this email."
+        ),
+    )
+    if not sent:
+        # A configured mail server that could not deliver. Answering
+        # "check your inbox" here would be a lie the person cannot act on,
+        # and the token would sit there unusable -- rolled back with the
+        # request instead. `send_mail` has already logged the real cause.
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            "Could not send the confirmation email. Check the mail server settings.",
+        )
+    await db.commit()
+    return EmailChangeResponse(verification_required=True, sent_to=new_email)
 
 
 @router.get(
