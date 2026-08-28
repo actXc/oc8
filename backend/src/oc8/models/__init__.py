@@ -1,6 +1,7 @@
 """ORM models. Importing this package registers every table on Base.metadata."""
 
 from oc8.copilot.models import CopilotOperation, CopilotProposal
+from oc8.models.account import AccountVerificationToken
 from oc8.models.capas import Capa, CapaInstallation, CapaVersion
 from oc8.models.channels import ApprovalChannelBinding
 from oc8.models.chat import ChatMessage, ChatSession
@@ -54,6 +55,7 @@ from oc8.models.skills import Skill, SkillAssignment, SkillVersion
 from oc8.models.triggers import Trigger
 
 __all__ = [
+    "AccountVerificationToken",
     "ActivityEvent",
     "Agent",
     "AgentRun",
