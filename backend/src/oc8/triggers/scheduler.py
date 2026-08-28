@@ -141,11 +141,19 @@ async def run_scheduler_tick() -> int:
 
 
 async def run_scheduler(*, once: bool = False, interval_seconds: float = 30.0) -> None:
+    # Deferred: oc8.channels.poll imports list_active_tenant_ids from this
+    # module, so importing it at module scope here would be circular.
+    from oc8.channels.poll import poll_tick
+
     while True:
         try:
             await run_scheduler_tick()
         except Exception:
             logger.exception("unhandled error in scheduler tick")
+        try:
+            await poll_tick()
+        except Exception:
+            logger.exception("unhandled error in channel poll tick")
         if once:
             return
         await asyncio.sleep(interval_seconds)

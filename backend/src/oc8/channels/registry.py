@@ -40,6 +40,8 @@ async def channels_for_tenant(
     bot may interfere with that.
     """
     from oc8.capas.contributions import channels_for
+    from oc8.capas.discovery import find_plugin
+    from oc8.capas.loader import load_plugin
     from oc8.models import Capa, CapaInstallation, CapaVersion
 
     try:
@@ -60,6 +62,22 @@ async def channels_for_tenant(
 
     built: dict[str, ApprovalChannel] = {}
     for plugin_name, manifest, installation_config in rows:
+        # `channels_for` reads an in-process, load-triggered catalogue
+        # (`capas.contributions`, populated by the plugin's own `register()`
+        # entry point) -- it is empty until something in THIS process has
+        # loaded the plugin at least once. Every other *_for(plugin_name)
+        # registry in this codebase (runtime, modelrouter, credentials,
+        # knowledge.connectors) calls load_plugin itself for exactly this
+        # reason; this one had not, which worked by accident in the
+        # `backend`/`worker` processes (something else always happened to
+        # load an enabled plugin first) and failed silently in `scheduler`
+        # the moment oc8.channels.poll became the first caller there.
+        discovered = find_plugin(str(plugin_name))
+        if discovered is None or not load_plugin(discovered):
+            logger.info(
+                "approval channel plugin %s is enabled but could not be loaded", plugin_name
+            )
+            continue
         factories = channels_for(str(plugin_name))
         if not factories:
             # Installed and enabled, but its code never loaded -- untrusted, or

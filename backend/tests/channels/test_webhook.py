@@ -172,7 +172,7 @@ async def test_a_signed_call_from_an_unbound_sender_decides_nothing(
     async with app_session(tenant) as db:
         fresh = await db.get(m.ApprovalRequest, approval_id)
         assert fresh is not None and fresh.status == "pending"
-    assert channel.said and "nicht berechtigt" in channel.said[0][1]
+    assert channel.said and "not authorized" in channel.said[0][1]
 
 
 async def test_a_bound_sender_decides_and_the_approval_moves(
@@ -214,7 +214,7 @@ async def test_answering_twice_is_told_what_happened_not_that_it_failed(
     async with _http() as http:
         got = await http.post(f"/api/v1/channels/{CHANNEL}/webhook/{tenant}", json={})
     assert got.status_code == 200
-    assert channel.said and "Schon entschieden" in channel.said[0][1]
+    assert channel.said and "Already decided" in channel.said[0][1]
 
 
 async def test_a_code_sent_to_the_bot_binds_that_account(
@@ -230,7 +230,7 @@ async def test_a_code_sent_to_the_bot_binds_that_account(
     async with _http() as http:
         got = await http.post(f"/api/v1/channels/{CHANNEL}/webhook/{tenant}", json={})
     assert got.status_code == 200
-    assert channel.said and "Verbunden" in channel.said[0][1]
+    assert channel.said and "Connected" in channel.said[0][1]
 
     async with app_session(tenant) as db:
         from oc8.channels.binding import resolve
@@ -246,7 +246,7 @@ async def test_a_bad_code_says_the_same_thing_every_time(
     async with _http() as http:
         got = await http.post(f"/api/v1/channels/{CHANNEL}/webhook/{tenant}", json={})
     assert got.status_code == 200
-    assert channel.said and channel.said[0][1] == "Dieser Code gilt nicht."
+    assert channel.said and channel.said[0][1] == "This code is not valid."
 
 
 async def test_anything_the_plugin_does_not_recognise_is_simply_acknowledged(

@@ -283,6 +283,12 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+    # Needed as of the channel-poll tick (oc8.channels.poll): unlike firing
+    # a cron Trigger, polling an approval channel has to load the owning
+    # plugin's own code (channels_for_tenant -> capas.contributions.channels_for),
+    # the same way backend/worker already do.
+    volumes:
+      - ./capas:/app/capas:ro
     command: ["oc8", "scheduler"]
 
   frontend:

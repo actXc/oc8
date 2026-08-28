@@ -22,7 +22,14 @@ from oc8 import models as m
 from oc8.agent.decision_followup import option_labels
 from oc8.channels import binding
 from oc8.channels.base import ApprovalChannel
-from oc8.channels.notice import ApprovalNotice, NoticeOption, outranks
+from oc8.channels.binding import BindingError, redeem_code
+from oc8.channels.notice import (
+    ApprovalNotice,
+    ChannelDecision,
+    ChannelLink,
+    NoticeOption,
+    outranks,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -271,3 +278,112 @@ async def decision_from(
         # every `budget_incident` and every `hire_agent` tapped from a phone lands
         # here however unrestricted its sender is.
         raise PermissionError(REFUSED) from exc
+
+
+async def tell_sender(impl: Any, external_id: str, text: str) -> None:
+    """Tell the sender what happened, if the plugin can. Best-effort: the
+    decision is already recorded and a silent bot must not undo it."""
+    say = getattr(impl, "say", None)
+    if say is None:
+        return
+    try:
+        await say(external_id, text)
+    except Exception:
+        logger.warning("could not reply on an approval channel", exc_info=True)
+
+
+async def bind_from_link(
+    db: AsyncSession, impl: Any, *, tenant_id: uuid.UUID, channel: str, link: ChannelLink
+) -> None:
+    """Redeem a one-time link code a person sent the bot into a live binding.
+    Reused identically by the inbound webhook and the poll-based ingress
+    (`oc8.channels.poll`) -- whichever delivery mechanism a platform uses,
+    the code itself is turned into a binding the same way."""
+    try:
+        await redeem_code(
+            db,
+            tenant_id=tenant_id,
+            channel=channel,
+            code=link.code,
+            external_id=link.external_id,
+        )
+        await db.commit()
+        await tell_sender(
+            impl, link.external_id, "Connected. Approvals will arrive here from now on."
+        )
+    except BindingError:
+        await db.rollback()
+        # The same sentence whatever went wrong -- expired, spent, never issued.
+        # Anything more specific turns the bot into an oracle for live codes.
+        await tell_sender(impl, link.external_id, "This code is not valid.")
+
+
+async def apply_decision(
+    db: AsyncSession, impl: Any, *, tenant_id: uuid.UUID, channel: str, decision: ChannelDecision
+) -> None:
+    """An approve/reject tapped on a channel, taken through `decision_from`
+    and reported back to the sender. Reused identically by the inbound
+    webhook and the poll-based ingress."""
+    from oc8.approvals import AlreadyDecided, ApprovalError, NotYourDepartment, NotYourSayAtAll
+
+    try:
+        result = await decision_from(
+            db,
+            tenant_id=tenant_id,
+            channel_id=channel,
+            external_id=decision.external_id,
+            approval_id=decision.approval_id,
+            verdict=decision.verdict,
+            option_key=decision.option_key,
+            reason=decision.reason,
+        )
+    # `NotYourDepartment` is the funnel's defence in depth and is unreachable
+    # while `decision_from` checks `may_decide` first. Answered with the SAME
+    # sentence anyway: if that pre-check ever drifts, the bot must still not
+    # start telling "not yours" apart from "no such approval".
+    except (PermissionError, NotYourDepartment, NotYourSayAtAll):
+        await db.rollback()
+        await tell_sender(impl, decision.external_id, "You're not authorized to decide this.")
+        return
+    except AlreadyDecided as exc:
+        await db.rollback()
+        when = f" ({exc.decided_at:%d.%m. %H:%M})" if exc.decided_at else ""
+        await tell_sender(impl, decision.external_id, f"Already decided: {exc.status}{when}.")
+        return
+    except ApprovalError:
+        await db.rollback()
+        await tell_sender(impl, decision.external_id, "That couldn't be recorded.")
+        return
+
+    run_id = result.resumed_run_id
+    await db.commit()
+    if run_id is not None:
+        # Published only after the commit: a stream entry whose run row is not
+        # yet visible is a run a worker picks up and cannot find.
+        from oc8.runtime.intake import publish_run
+
+        await publish_run(run_id=run_id, tenant_id=tenant_id)
+    await tell_sender(impl, decision.external_id, f"Recorded: {result.approval.status}.")
+
+
+async def process_inbound(
+    db: AsyncSession,
+    impl: ApprovalChannel,
+    *,
+    tenant_id: uuid.UUID,
+    channel: str,
+    update: dict[str, Any],
+) -> None:
+    """One raw platform update, parsed and routed. The single entrypoint both
+    the inbound webhook (`api/v1/channels.py`) and the poll loop
+    (`oc8.channels.poll`) call, so a platform update is handled identically
+    regardless of how it arrived."""
+    parsed = impl.parse_inbound(update)
+    if parsed is None:
+        # Somebody typing at the bot, a delivery receipt, the platform's own
+        # housekeeping. Normal, and not an error.
+        return
+    if isinstance(parsed, ChannelLink):
+        await bind_from_link(db, impl, tenant_id=tenant_id, channel=channel, link=parsed)
+    elif isinstance(parsed, ChannelDecision):
+        await apply_decision(db, impl, tenant_id=tenant_id, channel=channel, decision=parsed)

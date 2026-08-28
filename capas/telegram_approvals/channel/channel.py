@@ -241,6 +241,30 @@ class TelegramChannel:
             raise RuntimeError(f"telegram refused {method}: {body.get('description')}")
         return body.get("result") or {}
 
+    async def poll(self, *, offset: int) -> tuple[list[dict[str, Any]], int]:
+        """Fetch whatever Telegram has queued since `offset`, for a deployment
+        with no public webhook URL to receive on (`oc8.channels.poll`).
+
+        `timeout=0`: a short, non-blocking `getUpdates` call rather than
+        Telegram's own long-polling wait -- this runs inside a shared
+        scheduler tick alongside other tenants' work, so it must return
+        promptly and let the tick's own interval set the polling cadence,
+        not hold the connection open itself.
+
+        Returns the raw updates and the next offset to persist -- one past
+        the highest `update_id` seen, or `offset` unchanged if nothing was
+        new. Telegram's own contract: passing that value back as `offset`
+        on the next call is what marks these updates as read.
+        """
+        result: Any = await self._post("getUpdates", {"offset": offset, "timeout": 0})
+        updates: list[dict[str, Any]] = result if isinstance(result, list) else []
+        next_offset = offset
+        for update in updates:
+            update_id = update.get("update_id")
+            if isinstance(update_id, int) and update_id + 1 > next_offset:
+                next_offset = update_id + 1
+        return updates, next_offset
+
     async def deliver(self, notice: ApprovalNotice, *, external_id: str) -> str | None:
         payload: dict[str, Any] = {
             "chat_id": external_id,

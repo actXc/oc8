@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
-from sqlalchemy import DateTime, Text, Uuid
+from sqlalchemy import DateTime, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from oc8.db.base import Base, TimestampMixin
@@ -51,3 +51,25 @@ class ApprovalChannelBinding(Base, PkMixin, TenantMixin, TimestampMixin):
     code: Mapped[str | None] = mapped_column(Text)
     code_expires_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ChannelPollCursor(Base, PkMixin, TenantMixin, TimestampMixin):
+    """Where a poll-based channel (one with no public webhook URL to receive,
+    e.g. `telegram_approvals` running with no tunnel) left off reading the
+    platform's own update queue -- one row per (tenant, channel).
+
+    `last_update_id` is the platform's own monotonically increasing cursor
+    (Telegram's `update_id`); a fresh row starts at 0, which every platform's
+    "give me everything from here" convention treats as "the beginning."
+    """
+
+    __tablename__ = "channel_poll_cursor"
+
+    #: Same free-form channel id as `ApprovalChannelBinding.channel` -- core
+    #: must not know which messengers exist.
+    channel: Mapped[str] = mapped_column(Text, nullable=False)
+    last_update_id: Mapped[int] = mapped_column(nullable=False, default=0)
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "channel", name="uq_channel_poll_cursor_tenant_channel"),
+    )
