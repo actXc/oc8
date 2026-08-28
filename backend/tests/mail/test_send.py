@@ -11,17 +11,21 @@ certificate-verification decisions as the credential's own Test button.
 from __future__ import annotations
 
 import base64
+import logging
 import ssl
 import uuid
 from unittest.mock import MagicMock, patch
 
 import pytest
+from cryptography.exceptions import InvalidTag
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from oc8 import models as m
 from oc8.credentials.service import create_credential
 from oc8.credentials.smtp import validate_smtp
 from oc8.mail.send import active_smtp_credential, send_mail
+from oc8.secrets.keyprovider import SecretStoreUnavailable
+from oc8.secrets.service import SecretNotFound
 from tests.conftest import AppSessionFactory
 
 pytestmark = pytest.mark.asyncio
@@ -218,6 +222,98 @@ async def test_an_unparseable_port_returns_false(app_session: AppSessionFactory)
             result = await send_mail(db, tenant_id=tenant, to="x@y.com", subject="s", body="b")
         assert result is False
         smtp_cls.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        SecretNotFound("credential/x/password"),
+        SecretStoreUnavailable("secret_kek is not configured"),
+        InvalidTag(),
+    ],
+    ids=["secret-row-gone", "kek-misconfigured", "bad-decrypt"],
+)
+async def test_a_vault_failure_returns_false_instead_of_raising(
+    app_session: AppSessionFactory, error: Exception
+) -> None:
+    """Resolving the secret-kind `password` field reaches into the vault,
+    whose failures are neither credential errors nor `ValueError`s -- a
+    rotated KEK or a deleted secret row must still be "no usable mail
+    server", not an exception surfacing in a forgot-password handler."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        await _tenant_with_smtp(db, tenant, username="mailer", password="s3cret")
+        with (
+            patch("oc8.credentials.service.resolve_secret", side_effect=error),
+            patch("oc8.credentials.smtp.smtplib.SMTP") as smtp_cls,
+        ):
+            result = await send_mail(db, tenant_id=tenant, to="x@y.com", subject="s", body="b")
+        assert result is False
+        smtp_cls.assert_not_called()
+
+
+# --- server-side evidence ------------------------------------------------
+
+
+async def test_a_resolution_failure_is_logged(
+    app_session: AppSessionFactory, caplog: pytest.LogCaptureFixture
+) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        await _tenant_with_smtp(db, tenant, username="mailer", password="s3cret")
+        with (
+            caplog.at_level(logging.WARNING, logger="oc8.mail.send"),
+            patch(
+                "oc8.credentials.service.resolve_secret",
+                side_effect=SecretStoreUnavailable("secret_kek is not configured"),
+            ),
+        ):
+            assert (
+                await send_mail(db, tenant_id=tenant, to="x@y.com", subject="s", body="b") is False
+            )
+    record = next(r for r in caplog.records if r.name == "oc8.mail.send")
+    assert record.levelno == logging.WARNING
+    assert "could not be resolved" in record.getMessage()
+    # The traceback is the whole point: without it a rotated KEK and a
+    # never-set host are indistinguishable in the log.
+    assert record.exc_info is not None
+
+
+async def test_a_send_failure_is_logged(
+    app_session: AppSessionFactory, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A relay that rejects our certificate or our password otherwise
+    produces a password-reset flow that looks fine from every angle a user
+    or an admin can see, with no server-side evidence at all."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        await _tenant_with_smtp(db, tenant)
+        with (
+            caplog.at_level(logging.WARNING, logger="oc8.mail.send"),
+            patch("oc8.credentials.smtp.smtplib.SMTP", side_effect=OSError("connection refused")),
+        ):
+            assert (
+                await send_mail(db, tenant_id=tenant, to="x@y.com", subject="s", body="b") is False
+            )
+    record = next(r for r in caplog.records if r.name == "oc8.mail.send")
+    assert record.levelno == logging.WARNING
+    assert "x@y.com" in record.getMessage()
+    assert record.exc_info is not None
+
+
+async def test_an_unconfigured_mail_server_is_logged(
+    app_session: AppSessionFactory, caplog: pytest.LogCaptureFixture
+) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        db.add(m.Organization(id=tenant, slug=str(tenant), name="t", settings={}))
+        await db.flush()
+        with caplog.at_level(logging.WARNING, logger="oc8.mail.send"):
+            assert (
+                await send_mail(db, tenant_id=tenant, to="x@y.com", subject="s", body="b") is False
+            )
+    record = next(r for r in caplog.records if r.name == "oc8.mail.send")
+    assert "no active SMTP credential" in record.getMessage()
 
 
 # --- parity with the credential's own "Test" button ----------------------

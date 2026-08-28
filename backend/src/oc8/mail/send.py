@@ -17,18 +17,17 @@ differently.
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from email.message import EmailMessage
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from oc8 import models as m
-from oc8.credentials.service import (
-    CredentialFieldNotSet,
-    CredentialNotFound,
-    resolve_credential_field,
-)
+from oc8.credentials.service import CredentialFieldNotSet, resolve_credential_field
 from oc8.credentials.smtp import smtp_connection
+
+logger = logging.getLogger(__name__)
 
 
 async def active_smtp_credential(db: AsyncSession, *, tenant_id: uuid.UUID) -> uuid.UUID | None:
@@ -77,15 +76,26 @@ async def send_mail(
 ) -> bool:
     credential_id = await active_smtp_credential(db, tenant_id=tenant_id)
     if credential_id is None:
+        logger.warning(
+            "mail not sent for tenant %s: no active SMTP credential is configured", tenant_id
+        )
         return False
+    # Blanket `except Exception` rather than an enumerated tuple, on purpose.
+    # Resolving these fields reaches through `resolve_credential_field` into
+    # the secret vault, whose failure modes (`SecretNotFound`,
+    # `SecretStoreUnavailable`, `cryptography`'s `InvalidTag` on a bad
+    # decrypt) share no base class with the credential errors and are not
+    # `ValueError`s -- an enumerated list silently drifts out of date every
+    # time a layer below grows a new one, and the cost of that drift is this
+    # function breaking its "never raises" contract inside a forgot-password
+    # handler that must answer identically either way. Every one of them means
+    # the same thing to a caller ("this tenant has no usable mail server"), so
+    # they get the same handling: log it server-side, return False.
     try:
         host = await resolve_credential_field(
             db, tenant_id=tenant_id, credential_id=credential_id, field_key="host"
         )
-        # ValueError is caught alongside the credential errors below: a port
-        # typed as "five-eight-seven" is a broken configuration, not an
-        # exception this function is allowed to leak to a forgot-password
-        # handler that must answer identically either way.
+        # int() on a port typed as "five-eight-seven" lands in the same place.
         port = int(
             await resolve_credential_field(
                 db, tenant_id=tenant_id, credential_id=credential_id, field_key="port"
@@ -115,12 +125,33 @@ async def send_mail(
         # Same rule as `validate_smtp`: only an explicit "false" turns TLS
         # off, so a blank or missing value still encrypts.
         use_tls = use_tls_raw.strip().lower() != "false"
-    except (CredentialNotFound, CredentialFieldNotSet, ValueError):
+    except Exception:
+        # `exc_info=True` at WARNING, not `logger.exception` (which is ERROR):
+        # without the traceback an InvalidTag from a rotated KEK and a
+        # never-set `host` are the same log line, and an operator has nothing
+        # else to go on -- the caller is deliberately told nothing.
+        logger.warning(
+            "mail not sent for tenant %s: SMTP credential %s could not be resolved",
+            tenant_id,
+            credential_id,
+            exc_info=True,
+        )
         return False
     try:
         await asyncio.to_thread(
             _send, host, port, username, password, use_tls, from_address, to, subject, body
         )
     except Exception:
+        # The whole point of this log line: a relay that rejects our
+        # certificate, our password, or the connection itself otherwise
+        # produces a password-reset flow that looks fine from every angle a
+        # user or an admin can see, with no server-side evidence at all.
+        logger.warning(
+            "mail not sent for tenant %s: SMTP delivery to %s via credential %s failed",
+            tenant_id,
+            to,
+            credential_id,
+            exc_info=True,
+        )
         return False
     return True

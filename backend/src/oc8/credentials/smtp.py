@@ -51,14 +51,19 @@ def _tls_context() -> ssl.SSLContext:
 
     The deliberate consequence: an internal relay presenting a self-signed
     or private-CA certificate now fails, loudly, at "Test" time rather than
-    silently sending reset links into an unauthenticated tunnel. The two
-    supported answers are to put that CA in the container's trust store, or
-    to set the credential's `use_tls` to "false" -- an explicit, visible,
-    admin-owned choice to speak plaintext on a trusted network, instead of
-    an invisible middle state that looks encrypted but proves nothing.
-    (This is why `username`/`password` are optional on the credential type:
-    anonymous internal relays are real. They stay supported -- they just
-    have to say out loud which of the two they are.)
+    silently sending reset links into an unauthenticated tunnel. THE FIX FOR
+    THAT IS TO TRUST THE CA -- install it in the container's trust store (or
+    point `SSL_CERT_FILE`/`SSL_CERT_DIR` at it). If a deployment genuinely
+    cannot, the answer is a `verify_tls` escape hatch on the credential type,
+    which would be changed HERE and nowhere else; it is out of scope today.
+
+    Setting `use_tls` to "false" is NOT that workaround. It is a different
+    decision with a different shape: it means "this relay is anonymous and
+    the network between us is trusted", which is the same deployment that
+    makes `username`/`password` `required=False` on this credential type. For
+    an AUTHENTICATED relay it is strictly worse than the problem it appears
+    to solve -- it moves the AUTH password from encrypted-but-unverified to
+    cleartext on the wire. Never reach for it to silence a certificate error.
     """
     return ssl.create_default_context()
 
