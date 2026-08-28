@@ -35,6 +35,13 @@ x-backend-env: &backend-env
   OC8_REDIS_URL: redis://redis:6379/0
   OC8_JWT_SECRET: ${OC8_JWT_SECRET:?set OC8_JWT_SECRET in .env}
   OC8_SECRET_KEK: ${OC8_SECRET_KEK:?set OC8_SECRET_KEK in .env}
+  # Externally reachable base URL of this stack (Caddy, not the backend
+  # container's own internal port) -- used for OAuth redirect URIs and for
+  # displaying an inbound webhook trigger's URL. Unset, these silently fall
+  # back to oc8.config.Settings' dev defaults (http://localhost:8000 /
+  # :8080), neither of which is actually reachable in this compose stack.
+  OC8_OAUTH_REDIRECT_BASE_URL: ${OC8_OAUTH_REDIRECT_BASE_URL:-http://localhost}
+  OC8_FRONTEND_BASE_URL: ${OC8_FRONTEND_BASE_URL:-http://localhost}
   OC8_ANTHROPIC_API_KEY: ${OC8_ANTHROPIC_API_KEY:-}
   OC8_OPENAI_API_KEY: ${OC8_OPENAI_API_KEY:-}
   OC8_MISTRAL_API_KEY: ${OC8_MISTRAL_API_KEY:-}
