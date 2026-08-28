@@ -1274,12 +1274,16 @@ async def confirm_email_change(body: ConfirmEmailChangeRequest) -> MemberDTO:
         await append_event(
             db,
             tenant_id=org.id,
-            # "operator" and not a fourth actor_type word: a person did this,
-            # the audit screen's actor-type filter only knows the three that
-            # exist, and a row nobody can filter for is a row nobody finds.
-            # That no session was involved is said in `reason`, where it is
-            # readable, and `principal=None` keeps `resolve_responsible` from
-            # attributing it to a caller who never authenticated.
+            # "operator" and not a fourth actor_type word. The column is a
+            # plain unconstrained `str` -- no CHECK, no enum anywhere in the
+            # schema -- so the only thing keeping it meaningful is that every
+            # call site in this codebase uses one of three words, and
+            # `change_own_email` one function up already writes "operator" for
+            # this same class of self-service change. Inventing "member" here
+            # would put two words on one action in one file. That no session
+            # was involved is said in `reason`, where it is readable, and
+            # `principal=None` keeps `resolve_responsible` from attributing
+            # the row to a caller who never authenticated.
             actor_type="operator",
             actor_id=member.id,
             category="member",
