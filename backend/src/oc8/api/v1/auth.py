@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from oc8 import models as m
@@ -41,6 +41,9 @@ from oc8.schemas.dto import AuthConfig, MeDTO, MemberDTO
 from oc8.schemas.requests import (
     ChangeOwnEmailRequest,
     ChangeOwnPasswordRequest,
+    ConfirmEmailChangeRequest,
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
     UpdateDisplayNameRequest,
 )
 from oc8.tenants.provision import TenantExists, create_tenant, list_tenants
@@ -1080,3 +1083,395 @@ async def password_logout() -> None:
     # the authorization layer. Future work could implement token revocation via
     # a blacklist (see spec §8 rate limits + audit events).
     pass
+
+
+# =============================================================================
+# Public, token-authenticated account routes
+# =============================================================================
+# The three routes below carry NO bearer token, and that is the point: two of
+# them are reached from a link in an inbox, and the third has to be reachable
+# by somebody who cannot log in at all. What authenticates them is possession
+# of an `account_verification_token` whose sha256 is stored -- or, for
+# forgot-password, nothing whatsoever.
+#
+# They resolve the organization the same way `password_setup`/`password_login`
+# do (unbound read of the singleton, then a tenant-bound session) rather than
+# taking a `db: DbSession` parameter, for the reason spelled out on
+# `password_setup`: `DbSession` resolves through `get_principal` -> a MANDATORY
+# Bearer token, so a public route that declared one would answer 401/403 to
+# every caller it exists for. `unguarded(...)` exempts the route from
+# permission governance; it does nothing to a `DbSession` parameter.
+#
+# Design: docs/superpowers/specs/2026-08-28-account-self-service-design.md §5.4-5.6, §7.
+
+#: How long a mailed password-reset link stays usable. Same hour as the
+#: email-change link above, and for the same reason: the link IS a credential
+#: while it lives, and it lives in an inbox somebody else may reach.
+PASSWORD_RESET_TOKEN_TTL = dt.timedelta(hours=1)
+
+#: The ONE sentence every failure of `/auth/email/confirm` and
+#: `/auth/password/reset` answers with. Never expanded per case: "expired",
+#: "already used" and "no such token" are three different pieces of
+#: intelligence about somebody else's account, and a caller who can tell them
+#: apart can probe for live links. A single constant rather than three equal
+#: string literals so the next person to edit one edits all of them.
+INVALID_LINK_MESSAGE = "This link is invalid or has expired."
+
+#: The ONE sentence `/auth/password/forgot` answers with, always -- unknown
+#: address, known address, no mail server, no organization at all, mail server
+#: that refused the connection. See that endpoint's docstring.
+FORGOT_PASSWORD_MESSAGE = (
+    "If that address belongs to an account and this instance can send mail, "
+    "a reset link is on its way."
+)
+
+
+class ForgotPasswordResponse(CamelModel):
+    """The whole body of `POST /auth/password/forgot`.
+
+    One constant field, because a response with anything variable in it is a
+    response that can be compared -- and the entire contract of that endpoint
+    is that two callers cannot tell their two cases apart.
+    """
+
+    message: str
+
+
+async def _redeem_token(
+    db: AsyncSession, *, tenant_id: uuid.UUID, token: str, purpose: str
+) -> m.AccountVerificationToken:
+    """Find an unused, unexpired token of exactly `purpose` and SPEND it.
+
+    Marking `used_at` here, rather than at the end of the caller, is what
+    makes single-use structural instead of remembered: every path out of this
+    function has either raised or already spent the row, so a caller cannot
+    forget the second step. The write lands in the caller's transaction and
+    commits with the action it authorizes (`tenant_session` commits once, on
+    exit) -- so a token is never spent by an action that then rolls back, and
+    an action never lands without spending its token.
+
+    `with_for_update()` is the concurrency half, and it is not decorative. A
+    plain `SELECT ... WHERE used_at IS NULL` followed by an `UPDATE` is a
+    read-modify-write with an `await` in the middle: two requests carrying the
+    SAME link both see NULL, both write, and both succeed -- the second one's
+    UPDATE simply queues on the row lock and then applies on top. With `FOR
+    UPDATE` the second request blocks on the lock, and PostgreSQL re-checks
+    the WHERE clause against the row version it finds when the lock is
+    released (READ COMMITTED EvalPlanQual); `used_at` is no longer NULL, the
+    row drops out, and the loser gets the same generic refusal as any other
+    spent link.
+
+    `purpose` is part of the WHERE, not an assertion afterwards, which is what
+    makes a `password_reset` token presented to `/auth/email/confirm`
+    indistinguishable from a token that never existed -- it does not match, so
+    it is not spent, and the caller is told nothing.
+
+    Raises `HTTPException(400, INVALID_LINK_MESSAGE)` for every failure --
+    malformed, unknown, wrong purpose, expired, already spent.
+    """
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    row = (
+        await db.execute(
+            select(m.AccountVerificationToken)
+            .where(
+                m.AccountVerificationToken.tenant_id == tenant_id,
+                m.AccountVerificationToken.token_hash == token_hash,
+                m.AccountVerificationToken.purpose == purpose,
+                m.AccountVerificationToken.used_at.is_(None),
+                m.AccountVerificationToken.expires_at > dt.datetime.now(tz=dt.UTC),
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, INVALID_LINK_MESSAGE)
+    row.used_at = dt.datetime.now(tz=dt.UTC)
+    await db.flush()
+    return row
+
+
+async def _member_for_token(
+    db: AsyncSession, row: m.AccountVerificationToken
+) -> m.OrgMember:
+    """The live member a spent token belongs to, or the same generic refusal.
+
+    A member deleted between minting and confirming is answered exactly like a
+    bad token: the link is dead either way, and "that account no longer
+    exists" is a fact about somebody else the holder of a stale link has no
+    business learning.
+    """
+    member = await db.get(m.OrgMember, row.member_id)
+    if member is None or member.deleted_at is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, INVALID_LINK_MESSAGE)
+    return member
+
+
+@router.post(
+    "/auth/email/confirm",
+    response_model=MemberDTO,
+    dependencies=[
+        Depends(
+            unguarded(
+                "token-authenticated: the mailed link is the only credential, and holding "
+                "it is the proof that the caller reads the address being moved to"
+            )
+        )
+    ],
+)
+async def confirm_email_change(body: ConfirmEmailChangeRequest) -> MemberDTO:
+    """Land the email change that `PUT /auth/me/email` parked (§5.4).
+
+    The new address is read off the STORED row, never off this request: a body
+    that also carried an address would let whoever intercepts a link redirect
+    it, which is the one thing the confirmation exists to prevent.
+
+    The uniqueness check runs again here rather than being trusted from when
+    the link was mailed -- an hour is long enough for somebody else to claim
+    the address, and `(tenant_id, subject)` is unique, so the row that lost
+    that race would look like it had simply vanished. That 409 is the one
+    outcome deliberately NOT folded into the generic message: by then the
+    caller has already proved possession of a valid link for this account, so
+    they learn nothing new, and it is the only refusal here they can act on.
+    The link survives that 409 -- raising rolls the whole transaction back,
+    `used_at` included -- which is what makes it actionable: the address can
+    be freed and the same link clicked again inside its hour.
+
+    The token is spent even though the caller must then sign in again with the
+    new address -- their old session's `subject` claim no longer names a row,
+    exactly as on the immediate-apply branch of `PUT /auth/me/email`.
+    """
+    async with tenant_session(None) as unbound_db:
+        org = await _get_singleton_organization(unbound_db)
+
+    async with tenant_session(org.id) as db:
+        row = await _redeem_token(db, tenant_id=org.id, token=body.token, purpose="email_change")
+        if row.new_email is None:
+            # An `email_change` row with no target address cannot be applied
+            # to anything. Unreachable while `PUT /auth/me/email` is the only
+            # writer, and answered generically rather than as a 500 if it ever
+            # stops being.
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, INVALID_LINK_MESSAGE)
+        member = await _member_for_token(db, row)
+
+        clash = (
+            await db.execute(
+                select(m.OrgMember.id).where(
+                    m.OrgMember.tenant_id == org.id,
+                    m.OrgMember.subject == row.new_email,
+                    m.OrgMember.deleted_at.is_(None),
+                    m.OrgMember.id != member.id,
+                )
+            )
+        ).scalar_one_or_none()
+        if clash is not None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, "Another user already signs in with that identity."
+            )
+
+        old_subject = member.subject
+        member.subject = row.new_email
+        member.subject_uuid = subject_uuid_for(row.new_email)
+        await append_event(
+            db,
+            tenant_id=org.id,
+            # "operator" and not a fourth actor_type word: a person did this,
+            # the audit screen's actor-type filter only knows the three that
+            # exist, and a row nobody can filter for is a row nobody finds.
+            # That no session was involved is said in `reason`, where it is
+            # readable, and `principal=None` keeps `resolve_responsible` from
+            # attributing it to a caller who never authenticated.
+            actor_type="operator",
+            actor_id=member.id,
+            category="member",
+            action="member.subject_renamed",
+            resource={
+                "member_id": str(member.id),
+                "previous_subject": old_subject,
+                "subject": row.new_email,
+            },
+            reason="confirmed by the member via an emailed link; no session was involved",
+        )
+        # Built before the block exits, because exiting is what commits, and a
+        # commit inside `tenant_session` unbinds `app.tenant_id` -- the seat
+        # query behind this DTO would then come back empty. Same ordering as
+        # every other writer in this module.
+        dto = await _member_dto(db, member)
+    return dto
+
+
+@router.post(
+    "/auth/password/forgot",
+    response_model=ForgotPasswordResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[
+        Depends(
+            unguarded(
+                "public by necessity: this is the route for somebody who cannot log in, "
+                "so it must be reachable before and without any token"
+            )
+        )
+    ],
+)
+async def forgot_password(body: ForgotPasswordRequest) -> ForgotPasswordResponse:
+    """Mail a reset link, and say the same thing either way (§5.5, §7).
+
+    **Every** exit from this function returns `202` with
+    `FORGOT_PASSWORD_MESSAGE` and nothing else -- there is no branch that
+    returns a different status, a different body, or an error. That is the
+    whole contract, and each of these cases has to reach it:
+
+    * the instance has no organization yet, or somehow more than one;
+    * no mail server is configured;
+    * no member signs in with that address;
+    * the member exists but has no password (an SSO/dev-token identity, with
+      nothing for a reset to reset);
+    * everything is fine and a link really was mailed;
+    * everything looked fine and the relay refused the connection --
+      `send_mail` never raises and its return value is deliberately ignored
+      here, unlike `PUT /auth/me/email` where the caller is authenticated and
+      HAS to be told their mail did not leave.
+
+    Any of those answering differently turns this route into an oracle for
+    "does this person have an account here", which is exactly what a login
+    form is careful not to be. The server-side log lines inside `send_mail`
+    are where an operator finds out a send failed.
+
+    What this does NOT claim is constant time: a real address costs a member
+    lookup, a token write and an SMTP round-trip that a fake one does not, and
+    equalising that needs a queue this deployment does not have (§7 asks for
+    an identical *response*, and that is what is enforced and tested).
+
+    A repeat request while a live link exists spends the old one before
+    minting a new one. That is the rate limit the design asks for: a burst
+    collapses to one usable link rather than one per request, and a link
+    somebody has already been mailed stops working the moment a newer one is
+    requested.
+    """
+    generic = ForgotPasswordResponse(message=FORGOT_PASSWORD_MESSAGE)
+    try:
+        async with tenant_session(None) as unbound_db:
+            org = await _get_singleton_organization(unbound_db)
+    except HTTPException:
+        # Not initialized, or multi-organization. Both are real 404/409s for
+        # `password_login`, which is authenticated-adjacent; here they would
+        # be a free fingerprint of the deployment.
+        return generic
+
+    async with tenant_session(org.id) as db:
+        if await active_smtp_credential(db, tenant_id=org.id) is None:
+            return generic
+        member = (
+            await db.execute(
+                select(m.OrgMember).where(
+                    m.OrgMember.tenant_id == org.id,
+                    m.OrgMember.subject == body.email.strip(),
+                    m.OrgMember.deleted_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if member is None or member.password_hash is None:
+            return generic
+
+        await db.execute(
+            update(m.AccountVerificationToken)
+            .where(
+                m.AccountVerificationToken.tenant_id == org.id,
+                m.AccountVerificationToken.member_id == member.id,
+                m.AccountVerificationToken.purpose == "password_reset",
+                m.AccountVerificationToken.used_at.is_(None),
+            )
+            .values(used_at=dt.datetime.now(tz=dt.UTC))
+        )
+        token = secrets.token_urlsafe(32)
+        db.add(
+            m.AccountVerificationToken(
+                tenant_id=org.id,
+                member_id=member.id,
+                purpose="password_reset",
+                # The plaintext is mailed once and never stored: a dump of this
+                # table is then a list of spent hashes, not a list of live links.
+                token_hash=hashlib.sha256(token.encode()).hexdigest(),
+                expires_at=dt.datetime.now(tz=dt.UTC) + PASSWORD_RESET_TOKEN_TTL,
+            )
+        )
+        await append_event(
+            db,
+            tenant_id=org.id,
+            actor_type="operator",
+            actor_id=member.id,
+            category="member",
+            action="member.password_reset_requested",
+            resource={"member_id": str(member.id), "subject": member.subject},
+            reason="a reset link was requested for this address; nobody was authenticated",
+        )
+        # Flushed, not committed, and sent BEFORE the block exits -- for the
+        # same reason as `PUT /auth/me/email`: `app.tenant_id` is
+        # transaction-local, so committing first would unbind RLS and
+        # `send_mail`, which reads the SMTP credential and its vaulted
+        # password through THIS session, would silently send nothing.
+        await db.flush()
+        base = get_settings().frontend_base_url.rstrip("/")
+        # Return value ignored on purpose -- see the docstring. A failed send
+        # must not change the answer, and it must not roll the token back
+        # either: the person is no worse off with an unusable row than with
+        # none, and a rollback here would be a second, timing-visible branch.
+        await send_mail(
+            db,
+            tenant_id=org.id,
+            to=member.subject,
+            subject="Reset your password",
+            body=(
+                f"Click this link to set a new password:\n"
+                f"{base}/reset-password?token={token}\n\n"
+                "This link expires in 1 hour. If you didn't request this, ignore this email."
+            ),
+        )
+    return generic
+
+
+@router.post(
+    "/auth/password/reset",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[
+        Depends(
+            unguarded(
+                "token-authenticated: the mailed link is the only credential a person "
+                "locked out of their account can present, and it is single-use"
+            )
+        )
+    ],
+)
+async def reset_password(body: ResetPasswordRequest) -> None:
+    """Spend a reset link on a new password (§5.6).
+
+    No current-password gate, because there is nobody here who knows one --
+    that is the situation this route exists for. What replaces it is the
+    token: mailed to the address already on the account, valid for an hour,
+    and spent in the same transaction as the hash it authorizes.
+
+    Answers `204` and echoes nothing. Every failure is the same generic 400
+    (`_redeem_token`), so a caller cannot use this to test whether a link they
+    found is still live for some other reason.
+    """
+    async with tenant_session(None) as unbound_db:
+        org = await _get_singleton_organization(unbound_db)
+
+    async with tenant_session(org.id) as db:
+        row = await _redeem_token(db, tenant_id=org.id, token=body.token, purpose="password_reset")
+        member = await _member_for_token(db, row)
+        try:
+            member.password_hash = hash_password(body.new_password)
+        except PasswordHashingError as exc:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT, "Could not hash password."
+            ) from exc
+        await append_event(
+            db,
+            tenant_id=org.id,
+            actor_type="operator",
+            actor_id=member.id,
+            category="member",
+            action="member.password_reset",
+            resource={"member_id": str(member.id)},
+            reason="reset by the member via an emailed link; no session was involved",
+        )

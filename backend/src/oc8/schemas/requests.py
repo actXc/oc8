@@ -452,6 +452,47 @@ class ChangeOwnEmailRequest(CamelModel):
     new_email: str = Field(..., min_length=1, max_length=255)
 
 
+class ConfirmEmailChangeRequest(CamelModel):
+    """The mailed link coming back (`POST /auth/email/confirm`).
+
+    One field, and no `email` beside it on purpose: the address to move to is
+    read off the stored token row, never off the request. A body that also
+    carried the target address would let whoever holds a link redirect it
+    somewhere else, which is the entire thing the confirmation exists to stop.
+
+    No bearer token accompanies this: the link is the credential, and it is
+    proof the caller reads the address the change is moving TO.
+    """
+
+    token: str = Field(..., min_length=1, max_length=512)
+
+
+class ForgotPasswordRequest(CamelModel):
+    """Ask for a reset link (`POST /auth/password/forgot`).
+
+    Deliberately the same shape as `PasswordLoginRequest` minus the password:
+    email only, no tenant field, because Community is single-instance and the
+    organization is resolved server-side by `_get_singleton_organization`.
+    """
+
+    email: str = Field(..., min_length=1, max_length=255)
+
+
+class ResetPasswordRequest(CamelModel):
+    """Spend a reset link on a new password (`POST /auth/password/reset`).
+
+    No `current_password` -- there is none to know; possession of the mailed
+    token IS the proof, which is why the token is single-use and short-lived.
+    `new_password` mirrors `PasswordSetupRequest`/`ChangeOwnPasswordRequest`
+    bounds exactly: a password accepted at first-run setup must be accepted
+    here, or somebody locked out of their account meets a rule for the first
+    time at the worst possible moment.
+    """
+
+    token: str = Field(..., min_length=1, max_length=512)
+    new_password: str = Field(..., min_length=8, max_length=1024)
+
+
 class GrantSeatRequest(CamelModel):
     """Put somebody in a department, at one of exactly two seat roles.
 
