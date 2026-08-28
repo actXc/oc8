@@ -249,6 +249,11 @@ async def test_email_change_applies_immediately_without_a_mail_server(
     body = r.json()
     assert body["verificationRequired"] is False
     assert body["member"]["subject"] == "ada@newmail.com"
+    assert body["reauthRequired"] is True, (
+        "the caller's stateless token still carries the OLD subject and nothing "
+        "here can revoke it -- without this flag the frontend leaves them signed "
+        "in, and their next request mints a ghost member row under the old subject"
+    )
 
     async with app_session(tenant) as db:
         row = await _row(db, tenant, "ada@newmail.com")
@@ -268,6 +273,35 @@ async def test_email_change_applies_immediately_without_a_mail_server(
             .all()
         )
     assert tokens == [], "nothing to confirm, so nothing should have been stored"
+
+
+async def test_a_blank_email_is_refused(app_session: AppSessionFactory) -> None:
+    """Whitespace-only, specifically: `Field(min_length=1)` already blocks ""
+    but passes " ", which strips to "" here.
+
+    `org_member.subject` has no CHECK constraint and `POST /auth/login`
+    matches it exactly against a non-empty `email` field, so committing a
+    blank subject locks the account out for good -- no login, and no
+    self-service route left to reach, since every one of them resolves the
+    caller through the very subject that is now gone.
+    """
+    tenant = uuid.uuid4()
+    email = "ada@example.com"
+    async with app_session(tenant) as db:
+        db.add(_member(tenant, email))
+
+    async with _http() as http:
+        r = await http.put(
+            "/api/v1/auth/me/email",
+            json={"currentPassword": OLD_PASSWORD, "newEmail": "   "},
+            headers=_headers(tenant, email),
+        )
+    assert r.status_code == 422, r.text
+
+    async with app_session(tenant) as db:
+        row = await _row(db, tenant, email)
+    assert row.subject == email
+    assert row.subject_uuid == subject_uuid_for(email)
 
 
 async def test_email_change_needs_the_current_password(app_session: AppSessionFactory) -> None:
@@ -334,6 +368,9 @@ async def test_submitting_the_address_you_already_use_changes_nothing(
             )
     assert r.status_code == 200, r.text
     assert r.json()["verificationRequired"] is False
+    # Nothing moved, so the session is untouched -- a no-op must not sign
+    # somebody out.
+    assert r.json()["reauthRequired"] is False
     smtp_cls.assert_not_called()
 
     async with app_session(tenant) as db:
@@ -371,6 +408,9 @@ async def test_email_change_with_a_mail_server_waits_for_a_confirmation(
     assert body["verificationRequired"] is True
     assert body["sentTo"] == "ada@newmail.com"
     assert body["member"] is None
+    # Nothing has moved yet, so the session is still perfectly valid --
+    # signing the caller out here would be a pointless interruption.
+    assert body["reauthRequired"] is False
 
     async with app_session(tenant) as db:
         # The sign-in identity has NOT moved yet -- that is the whole point.

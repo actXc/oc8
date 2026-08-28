@@ -422,6 +422,24 @@ class EmailChangeResponse(CamelModel):
     sent_to: str | None = None
     #: The updated member, present only when the change applied immediately.
     member: MemberDTO | None = None
+    #: True when the caller's CURRENT session no longer matches their identity
+    #: and they must sign in again. **The frontend must act on this, not just
+    #: render it**: discard the token and redirect to /login.
+    #:
+    #: Sessions are stateless JWTs carrying the subject as a claim, and this
+    #: endpoint has no way to revoke one. So the moment the immediate-apply
+    #: branch rewrites `org_member.subject`, the token in the caller's browser
+    #: names an identity that no longer has a row -- and the next authenticated
+    #: request runs `scope_for_principal(upsert=True)`, which INSERTS a fresh
+    #: empty member under the old subject: no seats, no role, no password. The
+    #: person is then silently signed in as a ghost of themselves with none of
+    #: their access, and that ghost holds `(tenant_id, old_subject)` for good,
+    #: so changing the address back later 409s against their own leftovers.
+    #:
+    #: Signing out immediately is what avoids all of it. Left False on the
+    #: verification branch, where nothing has moved yet and the session is
+    #: still perfectly valid.
+    reauth_required: bool = False
 
 
 @router.put(
@@ -445,7 +463,10 @@ async def change_own_email(
       administrator. `subject` and `subject_uuid` are rewritten together,
       exactly as `PUT /members/{id}/subject` does -- the second is a pure
       function of the first, and leaving the old one behind desyncs the row
-      from the identity check the rename exists to update.
+      from the identity check the rename exists to update. The response
+      carries `reauthRequired: true` on this branch and the frontend MUST
+      sign the caller out on it; see `EmailChangeResponse.reauth_required`
+      for what happens to a session that is allowed to survive.
     * **Mail server configured** -- nothing on the member row moves yet. A
       single-use token is stored (hashed; the plaintext is mailed once and
       never persisted) and the change lands only when the link comes back to
@@ -461,6 +482,16 @@ async def change_own_email(
     _verified_or_401(member, body.current_password)
 
     new_email = body.new_email.strip()
+    # `min_length=1` passes a string of spaces, which strips to "". Blank is
+    # far worse here than it is for a display name: `org_member.subject` has
+    # no CHECK constraint, `POST /auth/login` matches it exactly against a
+    # non-empty `email` field, and the immediate-apply branch below would
+    # commit it. That is a permanently locked-out account, recoverable only
+    # by an administrator or direct database access.
+    if not new_email:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "An email address cannot be blank."
+        )
     if new_email == member.subject:
         # Nothing to change. Falling through would either write an audit row
         # claiming a rename that did not happen, or -- on the branch below --
@@ -504,7 +535,10 @@ async def change_own_email(
         )
         dto = await _member_dto(db, member)
         await db.commit()
-        return EmailChangeResponse(verification_required=False, member=dto)
+        # `reauth_required`: the caller's own token still carries the OLD
+        # subject and nothing here can revoke it. See the field's own comment
+        # -- the next request would mint them a ghost member row.
+        return EmailChangeResponse(verification_required=False, member=dto, reauth_required=True)
 
     token = secrets.token_urlsafe(32)
     db.add(
