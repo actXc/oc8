@@ -236,6 +236,15 @@ class DockerIsolatedRuntime:
         # executor to publish after it commits. Dropping them here would create a
         # queued run nothing ever picks up: a silently lost delegation.
         pending_raw = (fresh.context.get("pending_runs", []) if fresh is not None else []) or []
+        # Same reasoning as pending_raw above: /tool (internal_agent.py) already
+        # wrote every render_component call onto run.context as it happened --
+        # this is the one place that copy makes it onto the RunResult the
+        # executor's merge_context() persists. Omitting it here previously
+        # meant the RunResult's empty default silently overwrote the real,
+        # already-durable list with `[]` at the run's own terminal commit.
+        rendered_components = (
+            fresh.context.get("rendered_components", []) if fresh is not None else []
+        ) or []
         return RunResult(
             task_id=task_id,
             agent_id=agent.id,
@@ -243,4 +252,5 @@ class DockerIsolatedRuntime:
             output=str(result.get("output", "")),
             steps=int((fresh.context.get("steps", 0)) if fresh is not None else 0),
             pending_runs=[uuid.UUID(str(r)) for r in pending_raw],
+            rendered_components=list(rendered_components),
         )

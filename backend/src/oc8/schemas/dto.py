@@ -686,6 +686,22 @@ class McpConnectionDTO(CamelModel):
     credential_type: str | None = None
 
 
+class RenderedComponentDTO(CamelModel):
+    """One render_component call's durable record -- the raw dict stored in
+    `agent_run.context["rendered_components"]` / `chat_message.
+    rendered_components` (control_tools.py's `ControlOutcome.
+    rendered_component`) is `{"component_key": ..., "props": ...}`, plain
+    Python, not itself a CamelModel. Typing every consumer's field as THIS
+    model (instead of a raw `dict[str, object]`) is what makes
+    `component_key` actually reach the wire as `componentKey` -- a field
+    typed as a bare dict bypasses CamelModel's alias generator entirely, so
+    the frontend's `c.componentKey` lookup silently read `undefined` and
+    rendered nothing, on every durable (non-live-WS) path."""
+
+    component_key: str
+    props: dict[str, object] = {}
+
+
 class RunDTO(CamelModel):
     id: str
     agent_id: str
@@ -700,7 +716,7 @@ class RunDTO(CamelModel):
     # RunResult.rendered_components / internal_agent.py's ctx["rendered_components"]).
     # Unlike the live-only `run.component_rendered` WS event, this survives a page
     # reload or an unattended run nobody watched live.
-    rendered_components: list[dict[str, object]] = []
+    rendered_components: list[RenderedComponentDTO] = []
 
 
 class ChatSessionDTO(CamelModel):
@@ -717,7 +733,7 @@ class ChatMessageDTO(CamelModel):
     role: str
     content: str
     run_id: str | None = None
-    rendered_components: list[dict[str, object]] = []
+    rendered_components: list[RenderedComponentDTO] = []
     created_at: str
 
 
@@ -730,7 +746,7 @@ class ReportDTO(CamelModel):
     agent_id: str
     agent_name: str
     created_at: str
-    rendered_components: list[dict[str, object]] = []
+    rendered_components: list[RenderedComponentDTO] = []
 
 
 class WorkspaceFileDTO(CamelModel):

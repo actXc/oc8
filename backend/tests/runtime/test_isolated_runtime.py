@@ -457,6 +457,42 @@ async def test_a_delegated_sub_run_reaches_the_executor_for_publishing(
     assert result.pending_runs == [sub_run_id]
 
 
+async def test_a_rendered_component_reaches_the_run_result(
+    app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """render_component under isolation writes onto run.context inside /tool
+    (internal_agent.py), the same way pending_runs does. Regression test for a
+    bug where RunResult's rendered_components defaulted to [] here, so the
+    executor's own merge_context() call silently overwrote the already-durable
+    list with an empty one at the run's terminal commit -- a chat/cron agent
+    that called render_component successfully still ended up with no durable
+    record of it."""
+    tenant = uuid.uuid4()
+    agent_id, run_id = await _agent_and_run(app_session, tenant)
+    rendered = {"component_key": "data_table", "props": {"title": "Tickets", "columns": []}}
+
+    async def renders() -> None:
+        async with app_session(tenant) as db:
+            run = await db.get(m.AgentRun, run_id)
+            assert run is not None
+            run.context = {
+                **run.context,
+                "rendered_components": [rendered],
+                "isolated_result": {"status": "done", "output": "hier die tabelle"},
+            }
+
+    monkeypatch.setattr("oc8.runtime.isolated.get_sandbox_driver", lambda: _FakeDriver(renders))
+    async with app_session(tenant) as db:
+        agent = await db.get(m.Agent, agent_id)
+        assert agent is not None
+        result = await DockerIsolatedRuntime().execute(
+            db, agent=agent, task_text="Zeig mir die Tickets", tenant_id=tenant, run_id=run_id
+        )
+
+    assert result.status == "done"
+    assert result.rendered_components == [rendered]
+
+
 async def test_a_container_that_never_exits_is_torn_down_and_the_run_fails(
     app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:

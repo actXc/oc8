@@ -110,6 +110,51 @@ async def test_send_message_creates_a_chat_source_run(
         assert run.context["task"] == "User: Hallo!"
 
 
+async def test_rendered_components_reach_the_wire_as_camel_case(
+    app_session: AppSessionFactory,
+) -> None:
+    """Regression test: `rendered_components` is stored as plain
+    `{"component_key": ..., "props": ...}` dicts (control_tools.py's
+    ControlOutcome, never itself a CamelModel). A DTO field typed as a bare
+    `dict[str, object]` bypasses CamelModel's alias generator entirely, so
+    the wire response silently kept the snake_case key -- the frontend's
+    `c.componentKey` lookup then read `undefined` and rendered nothing,
+    even though the data had round-tripped through the database correctly."""
+    tenant = uuid.uuid4()
+    agent_id = await _seed_agent(app_session, tenant)
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            create_r = await c.post(
+                "/api/v1/chat/sessions",
+                json={"agentId": str(agent_id)},
+                headers=_headers(tenant),
+            )
+            session_id = create_r.json()["id"]
+
+    async with app_session(tenant) as db:
+        db.add(
+            m.ChatMessage(
+                tenant_id=tenant,
+                session_id=session_id,
+                role="assistant",
+                content="Hier ist die Tabelle.",
+                rendered_components=[
+                    {"component_key": "data_table", "props": {"title": "Tickets"}}
+                ],
+            )
+        )
+
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.get(
+                f"/api/v1/chat/sessions/{session_id}/messages", headers=_headers(tenant)
+            )
+            assert r.status_code == 200, r.text
+            components = r.json()[0]["renderedComponents"]
+            assert components == [{"componentKey": "data_table", "props": {"title": "Tickets"}}]
+
+
 async def test_send_message_to_a_foreign_session_is_refused(
     app_session: AppSessionFactory,
 ) -> None:

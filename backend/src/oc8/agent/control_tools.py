@@ -188,15 +188,21 @@ SEARCH_MEMORY = NeutralTool(
 RENDER_COMPONENT = NeutralTool(
     name="render_component",
     description=(
-        "Show the human a structured visual instead of describing it in prose. "
-        "'record_card': one concrete record you already looked up (a deal, a "
-        "ticket, an order) -- a title, a few key facts as label/value pairs, "
-        "and an optional link back to the source system. 'data_table': a "
-        "multi-row report (e.g. a daily timesheet summary) -- columns + rows. "
-        "'bar_chart'/'line_chart': one or more numeric series plotted against "
-        "labels. Only use data you already obtained through a real tool call "
-        "in this conversation; never invent values. `component_key` must be "
-        "one you have been granted -- if you are unsure, try 'record_card'."
+        "REQUIRED whenever you present tabular data, a chart, or a single "
+        "record to the human -- never format that data as a markdown table, "
+        "bullet list, or prose description instead; call this tool with the "
+        "structured data as soon as you have it. 'record_card': one concrete "
+        "record you already looked up (a deal, a ticket, an order) -- a "
+        "title, a few key facts as label/value pairs, and an optional link "
+        "back to the source system. 'data_table': a multi-row report (e.g. a "
+        "daily timesheet or ticket summary) -- columns + rows. "
+        "'bar_chart'/'line_chart': one or more numeric series plotted "
+        "against labels. Only use data you already obtained through a real "
+        "tool call earlier in this conversation -- never invent or reuse "
+        "stale values, and never claim you rendered a component or fetched "
+        "fresh data unless you actually did so this turn. `component_key` "
+        "must be one you have been granted -- if you are unsure, try "
+        "'record_card'."
     ),
     parameters={
         "type": "object",
