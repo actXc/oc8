@@ -17,6 +17,7 @@ from oc8.api.v1 import (
     channels,
     chat,
     clarifications,
+    components,
     contracts,
     copilot,
     credentials,
@@ -65,6 +66,7 @@ api_router.include_router(knowledge.router, tags=["knowledge"])
 api_router.include_router(feed.router, tags=["feed"])
 api_router.include_router(approvals.router, tags=["approvals"])
 api_router.include_router(clarifications.router, tags=["approvals"])
+api_router.include_router(components.router, tags=["components"])
 api_router.include_router(members.router, tags=["members"])
 api_router.include_router(mcp.router, tags=["mcp"])
 api_router.include_router(mcp_logins.router, tags=["mcp"])

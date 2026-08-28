@@ -75,6 +75,7 @@ import {
 import { type Skill } from "@/lib/skills";
 import { AgentRuntimePanel } from "@/components/agent-runtime-panel";
 import { ChatWindow } from "@/components/chat-window";
+import { ComponentGrantPanel } from "@/components/component-grant-panel";
 import { AgentInstructionsPanel } from "@/components/agent-instructions-panel";
 import { KnowledgeAssignment } from "@/components/knowledge-assignment";
 import { RUN_COMPONENT_REGISTRY } from "@/components/run-record-card";
@@ -451,6 +452,12 @@ function AgentDetail() {
               deptEnabled={deptEnabled}
             />
           </div>
+          <ComponentGrantPanel
+            granteeType="agent"
+            granteeId={agent.id}
+            mayManage={mayManage}
+            departmentId={agent.departmentId}
+          />
         </div>
       )}
 

@@ -491,6 +491,13 @@ class GrantDTO(CamelModel):
     grantee_id: str
 
 
+class ComponentGrantDTO(CamelModel):
+    id: str
+    component_key: str
+    grantee_type: str
+    grantee_id: str
+
+
 class IngestionJobDTO(CamelModel):
     id: str
     status: str
