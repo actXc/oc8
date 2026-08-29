@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 
@@ -14,6 +15,38 @@ from oc8.db.engine import dispose_engine
 from oc8.edition import EditionExtension
 from oc8.edition.runtime import COMMUNITY_RUNTIME_COMPOSITION, EditionRuntimeComposition
 
+logger = logging.getLogger(__name__)
+
+
+def warn_about_unreachable_links(settings: Settings) -> None:
+    """Say so, once, when every mailed link would point at localhost.
+
+    `frontend_base_url` is what the password-reset and email-confirmation
+    mails are built from (`api/v1/auth.py`). Its default is
+    `http://localhost:8080`, which is right for a laptop and wrong for every
+    deployment behind a real domain -- and getting it wrong fails SILENTLY in
+    the worst possible way: the send succeeds, the endpoint answers "check
+    your inbox", and the person receives a mail whose link goes nowhere from
+    their machine. Nothing raises, nothing 500s, and the only person who could
+    notice is the one who cannot log in.
+
+    A warning and not a refusal: `env == "dev"` is exempt outright, and a
+    genuinely local self-hosted instance reached at localhost is a real
+    deployment, not a mistake. One line at startup is what an operator needs
+    to connect "my users say the link is broken" to the setting that caused it.
+    """
+    if settings.is_dev:
+        return
+    if "localhost" not in settings.frontend_base_url:
+        return
+    logger.warning(
+        "OC8_FRONTEND_BASE_URL is %s: every password-reset and email-confirmation "
+        "link this instance mails will point at localhost, which is unreachable "
+        "for anybody reading that mail elsewhere. Set it to the URL this "
+        "workspace is actually opened at. (Ignore this if localhost is correct here.)",
+        settings.frontend_base_url,
+    )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -25,6 +58,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # warning from oc8.* is discarded.
     setup_logging(get_settings())
     setup_observability(get_settings())
+    # ...and immediately after, because a warning emitted before setup_logging
+    # would be discarded exactly like the ones that motivated that call.
+    warn_about_unreachable_links(get_settings())
 
     # Hook registries are per-tenant now (see oc8.hooks.registry.get_hook_registry)
     # and declare their core points lazily on first access -- there is no single

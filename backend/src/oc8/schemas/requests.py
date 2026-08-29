@@ -5,9 +5,25 @@ from __future__ import annotations
 import uuid
 from typing import Any, Literal
 
-from pydantic import AwareDatetime, ConfigDict, Field
+from pydantic import AwareDatetime, ConfigDict, EmailStr, Field, field_validator
 
 from oc8.schemas.base import CamelModel
+
+
+def _normalized_address(value: str) -> str:
+    """One spelling per person: trimmed, lowercased.
+
+    `org_member.subject` IS the sign-in identity, and every comparison it takes
+    part in is exact -- the no-op check and the uniqueness check in
+    `change_own_email`, `subject_uuid_for` (which the messenger door resolves
+    people by), the login lookup. Left as typed, `Ada@x.com` and `ada@x.com`
+    are two accounts for one person, each able to hold the unique
+    `(tenant_id, subject)` row the other one wanted. Addresses are
+    case-insensitive in practice at every provider anybody self-hosts against,
+    so the value that reaches the database is canonicalised once, here, rather
+    than at each of the four places that compare it.
+    """
+    return value.strip().lower()
 
 
 class CreateChatSessionRequest(CamelModel):
@@ -446,10 +462,18 @@ class ChangeOwnEmailRequest(CamelModel):
     holds a session move the account to an address they control. Whether the
     new address applies at once or only after a confirmation link depends on
     whether the tenant has a mail server configured -- see the endpoint.
+
+    `new_email` is an `EmailStr`, not a length-checked `str`. On the
+    no-mail-server branch this value is written straight into
+    `org_member.subject` and committed, so "nonsense" was a valid new LOGIN --
+    and one nobody can mail a correction to. It is lowercased on the way in;
+    see `_normalized_address`.
     """
 
     current_password: str = Field(..., min_length=1, max_length=1024)
-    new_email: str = Field(..., min_length=1, max_length=255)
+    new_email: EmailStr = Field(..., max_length=255)
+
+    _normalize_new_email = field_validator("new_email")(_normalized_address)
 
 
 class ConfirmEmailChangeRequest(CamelModel):
@@ -473,9 +497,17 @@ class ForgotPasswordRequest(CamelModel):
     Deliberately the same shape as `PasswordLoginRequest` minus the password:
     email only, no tenant field, because Community is single-instance and the
     organization is resolved server-side by `_get_singleton_organization`.
+
+    Validated and lowercased like `ChangeOwnEmailRequest.new_email`, so the
+    same person typing the same address two different ways reaches the same
+    account. A malformed address is a 422 -- that is a fact about the request,
+    not about who has an account here, so it leaks nothing the generic 202 was
+    protecting.
     """
 
-    email: str = Field(..., min_length=1, max_length=255)
+    email: EmailStr = Field(..., max_length=255)
+
+    _normalize_email = field_validator("email")(_normalized_address)
 
 
 class ResetPasswordRequest(CamelModel):

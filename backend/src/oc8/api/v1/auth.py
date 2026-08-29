@@ -35,7 +35,7 @@ from oc8.authz.scope import scope_for_principal, subject_uuid_for
 from oc8.config import get_settings
 from oc8.constants import ACME_TENANT_ID, DEV_OPERATOR_SUBJECT
 from oc8.db.session import tenant_session
-from oc8.mail.send import active_smtp_credential, send_mail
+from oc8.mail.send import active_smtp_credential, deliver, resolve_smtp_config
 from oc8.schemas.base import CamelModel
 from oc8.schemas.dto import AuthConfig, MeDTO, MemberDTO
 from oc8.schemas.requests import (
@@ -53,6 +53,24 @@ router = APIRouter()
 
 _COMMUNITY_INITIAL_SLUG = "oc8-community"
 _COMMUNITY_INITIAL_NAME = "OC8 Community"
+
+#: How long after a link is minted a further request for the same member is
+#: answered WITHOUT minting or mailing a second one (design §3: "a simple
+#: per-subject cooldown on the public endpoints").
+#:
+#: Both mailing routes need it, for one reason: spending the previous token --
+#: which is all that was here before -- bounds how many links are USABLE (one),
+#: not how many emails are SENT. Without a cooldown, anybody who knows an
+#: address can drive `/auth/password/forgot` in a loop, unauthenticated, and
+#: fill that inbox for ever, at one outbound SMTP dial per request.
+#:
+#: 60 seconds, because the window has to be short enough that somebody who
+#: genuinely did not receive the first mail retries successfully within the
+#: time they would spend looking for it, and long enough that a scripted loop
+#: collapses to one mail a minute. It is not a general rate limiter and does
+#: not pretend to be one: it is per member, and a real limiter (per IP, at the
+#: proxy) is a deployment concern this process cannot see.
+VERIFICATION_MAIL_COOLDOWN_SECONDS = 60
 
 
 class DevLoginRequest(CamelModel):
@@ -317,6 +335,95 @@ async def _own_member_or_404(db: AsyncSession, principal: Principal) -> m.OrgMem
     return member
 
 
+async def _mail_is_cooling_down(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    member_id: uuid.UUID,
+    purpose: str,
+    new_email: str | None = None,
+) -> bool:
+    """Was a link of this `purpose` minted for this member moments ago?
+
+    True means the caller already has a live link in the inbox this request
+    would mail again -- so nothing is minted and nothing is sent, and the
+    caller is told exactly what they would have been told anyway (see
+    `VERIFICATION_MAIL_COOLDOWN_SECONDS`).
+
+    Only UNUSED tokens count: a link that has already been spent is not
+    sitting in anybody's inbox, and the person who spent it and now wants
+    another one is not the bombing case this exists for.
+
+    `created_at` is compared against this process's clock while the column
+    itself carries PostgreSQL's `now()` default. That is the same mixed pair
+    `_redeem_token` already lives with on `expires_at`, and a window this
+    coarse (60s) does not care about the millisecond of skew between a
+    backend and its database.
+
+    `new_email` narrows the window to ONE target address, and only the
+    email-change route passes it. Correcting a mistyped new address is the
+    common, legitimate second request there, and answering it with "check your
+    inbox" -- pointing at the typo -- would be a trap. The abuse this stops
+    (one inbox, mailed in a loop) is unaffected: bombing needs the address
+    fixed. Forgot-password has no such second address and passes nothing.
+    """
+    minted_after = dt.datetime.now(tz=dt.UTC) - dt.timedelta(
+        seconds=VERIFICATION_MAIL_COOLDOWN_SECONDS
+    )
+    stmt = (
+        select(m.AccountVerificationToken.id)
+        .where(
+            m.AccountVerificationToken.tenant_id == tenant_id,
+            m.AccountVerificationToken.member_id == member_id,
+            m.AccountVerificationToken.purpose == purpose,
+            m.AccountVerificationToken.used_at.is_(None),
+            m.AccountVerificationToken.created_at > minted_after,
+        )
+        .limit(1)
+    )
+    if new_email is not None:
+        stmt = stmt.where(m.AccountVerificationToken.new_email == new_email)
+    return (await db.execute(stmt)).first() is not None
+
+
+async def _member_by_sign_in_address(
+    db: AsyncSession, *, tenant_id: uuid.UUID, email: str
+) -> m.OrgMember | None:
+    """The live member who signs in with `email`, casing ignored.
+
+    `org_member.subject` IS the login, and until email addresses were
+    normalized (`ChangeOwnEmailRequest`/`ForgotPasswordRequest` lowercase
+    theirs) nothing stopped one instance from holding `Ada@x.com` and
+    `ada@x.com` as two separate accounts -- `(tenant_id, subject)` is unique
+    byte-for-byte. So rows written before that may carry any casing, and an
+    exact-match lookup would leave those people unable to log in or to ask for
+    a reset the moment the INPUT side started normalizing. Comparing on
+    `lower()` is what keeps them reachable.
+
+    Ambiguity is resolved, never guessed: if two rows differ only in case, the
+    one spelled EXACTLY as typed wins, and if none is, this answers `None`
+    (a 401 / a generic 202) rather than picking one at random or raising a
+    500 out of `scalar_one_or_none`.
+    """
+    typed = email.strip()
+    candidates = list(
+        (
+            await db.execute(
+                select(m.OrgMember).where(
+                    m.OrgMember.tenant_id == tenant_id,
+                    func.lower(m.OrgMember.subject) == typed.lower(),
+                    m.OrgMember.deleted_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if len(candidates) == 1:
+        return candidates[0]
+    return next((c for c in candidates if c.subject == typed), None)
+
+
 def _verified_or_401(member: m.OrgMember, current_password: str) -> None:
     """Re-prove the password before anything that moves the sign-in identity.
 
@@ -480,17 +587,23 @@ async def change_own_email(
     Either way the address is refused with a 409 if another live member in
     this tenant already signs in with it: `(tenant_id, subject)` is unique,
     and the row that lost that race would look like it had simply vanished.
+
+    On the mail-server branch a repeat request for the SAME address inside
+    `VERIFICATION_MAIL_COOLDOWN_SECONDS` mints and mails nothing, and answers
+    with the "check your inbox" it would have answered anyway -- which is true,
+    because the link from a moment ago is still live. A different address is
+    never held back, so correcting a typo is instant.
     """
     member = await _own_member_or_404(db, principal)
     _verified_or_401(member, body.current_password)
 
+    # Already validated as an address and lowercased by the request model --
+    # `org_member.subject` IS the login, so a value that is not an address (or
+    # that differs from an existing row only in casing) is not a cosmetic
+    # problem here. The strip is belt and braces: the normalizer does it too,
+    # and this line is what stops a future edit to that model from quietly
+    # reaching the immediate-apply branch below with whitespace in it.
     new_email = body.new_email.strip()
-    # `min_length=1` passes a string of spaces, which strips to "". Blank is
-    # far worse here than it is for a display name: `org_member.subject` has
-    # no CHECK constraint, `POST /auth/login` matches it exactly against a
-    # non-empty `email` field, and the immediate-apply branch below would
-    # commit it. That is a permanently locked-out account, recoverable only
-    # by an administrator or direct database access.
     if not new_email:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT, "An email address cannot be blank."
@@ -543,17 +656,41 @@ async def change_own_email(
         # -- the next request would mint them a ghost member row.
         return EmailChangeResponse(verification_required=False, member=dto, reauth_required=True)
 
-    token = secrets.token_urlsafe(32)
-    db.add(
-        m.AccountVerificationToken(
-            tenant_id=principal.tenant_id,
-            member_id=member.id,
-            purpose="email_change",
-            token_hash=hashlib.sha256(token.encode()).hexdigest(),
-            new_email=new_email,
-            expires_at=dt.datetime.now(tz=dt.UTC) + EMAIL_CHANGE_TOKEN_TTL,
+    if await _mail_is_cooling_down(
+        db,
+        tenant_id=principal.tenant_id,
+        member_id=member.id,
+        purpose="email_change",
+        new_email=new_email,
+    ):
+        # A link for THIS address was mailed seconds ago and is still live, so
+        # the answer is the true one the caller already has: go and look. See
+        # `VERIFICATION_MAIL_COOLDOWN_SECONDS` -- without this, a held session
+        # mails somebody's inbox once per click.
+        return EmailChangeResponse(verification_required=True, sent_to=new_email)
+
+    # Resolve the mail server BEFORE writing the token, because a credential
+    # that cannot be resolved is a 502 and must leave nothing behind -- and
+    # this read needs the transaction still open and still RLS-bound
+    # (`app.tenant_id` dies at commit; the vaulted password would come back
+    # empty afterwards). See oc8.mail.send's module docstring.
+    smtp = await resolve_smtp_config(db, tenant_id=principal.tenant_id)
+    if smtp is None:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            "Could not send the confirmation email. Check the mail server settings.",
         )
+
+    token = secrets.token_urlsafe(32)
+    row = m.AccountVerificationToken(
+        tenant_id=principal.tenant_id,
+        member_id=member.id,
+        purpose="email_change",
+        token_hash=hashlib.sha256(token.encode()).hexdigest(),
+        new_email=new_email,
+        expires_at=dt.datetime.now(tz=dt.UTC) + EMAIL_CHANGE_TOKEN_TTL,
     )
+    db.add(row)
     await append_event(
         db,
         tenant_id=principal.tenant_id,
@@ -569,16 +706,18 @@ async def change_own_email(
         reason="awaiting confirmation of the new address",
         principal=principal,
     )
-    # Flush, don't commit, and send BEFORE committing. `app.tenant_id` is
-    # transaction-local (`set_config(..., is_local=true)`), so a commit here
-    # would unbind RLS for the rest of the request -- and `send_mail` reads
-    # the SMTP credential and its vaulted password through this very session,
-    # which would then come back empty and silently send nothing at all.
     await db.flush()
+    token_id = row.id
+    # Commit BEFORE the socket, which is the opposite of what this used to do.
+    # Sending first kept RLS bound (see above) but held this request's pooled
+    # DB connection for however long the relay took to answer -- up to ~40
+    # seconds of per-operation timeouts. `resolve_smtp_config` above already
+    # took everything the send needs out of the database, so the connection can
+    # go back to the pool now and `deliver` dials with nothing checked out.
+    await db.commit()
     base = get_settings().frontend_base_url.rstrip("/")
-    sent = await send_mail(
-        db,
-        tenant_id=principal.tenant_id,
+    sent = await deliver(
+        smtp,
         to=new_email,
         subject="Confirm your new email address",
         body=(
@@ -588,15 +727,28 @@ async def change_own_email(
         ),
     )
     if not sent:
-        # A configured mail server that could not deliver. Answering
-        # "check your inbox" here would be a lie the person cannot act on,
-        # and the token would sit there unusable -- rolled back with the
-        # request instead. `send_mail` has already logged the real cause.
+        # A configured mail server that could not deliver. Answering "check
+        # your inbox" would be a lie the person cannot act on, so this is still
+        # a 502 -- but the token is already committed and cannot be rolled back
+        # with the request any more, so it is SPENT instead, which leaves
+        # exactly what a rollback left: nothing anybody can use. Spending it
+        # also frees the retry: an unused row inside the cooldown window would
+        # make the caller's immediate second attempt answer "check your inbox"
+        # for mail that never left.
+        #
+        # A fresh session, not `db`: this one committed a moment ago, and
+        # `app.tenant_id` is transaction-local, so `db` is no longer bound to
+        # anything and the UPDATE would silently match zero rows.
+        async with tenant_session(principal.tenant_id) as cleanup:
+            await cleanup.execute(
+                update(m.AccountVerificationToken)
+                .where(m.AccountVerificationToken.id == token_id)
+                .values(used_at=dt.datetime.now(tz=dt.UTC))
+            )
         raise HTTPException(
             status.HTTP_502_BAD_GATEWAY,
             "Could not send the confirmation email. Check the mail server settings.",
         )
-    await db.commit()
     return EmailChangeResponse(verification_required=True, sent_to=new_email)
 
 
@@ -933,9 +1085,10 @@ async def password_login(body: PasswordLoginRequest) -> PasswordSessionResponse:
     created via /auth/setup). A member with no password_hash set receives a
     401.
 
-    Email lookup is case-sensitive and exact-match. Passwords are compared
-    using constant-time verification (Argon2). Failed logins do not disclose
-    whether the email exists.
+    Email lookup ignores casing (`_member_by_sign_in_address`), and the minted
+    token carries the STORED spelling of the subject rather than the typed one.
+    Passwords are compared using constant-time verification (Argon2). Failed
+    logins do not disclose whether the email exists.
 
     Request: email and password (plain).
     Response: token (JWT), principal (parsed claims), member_id (UUID).
@@ -951,18 +1104,20 @@ async def password_login(body: PasswordLoginRequest) -> PasswordSessionResponse:
     async with tenant_session(None) as unbound_db:
         org = await _get_singleton_organization(unbound_db)
 
-    # Look up the member by email (exact match, case-sensitive), tenant-bound
+    # Look up the member by email, tenant-bound. Casing is ignored (and
+    # ambiguity resolved by exact spelling) -- see `_member_by_sign_in_address`
+    # for why an exact-match-only lookup is a lockout now that the addresses
+    # written by the self-service routes are normalized to lowercase.
     async with tenant_session(org.id) as db:
-        result = await db.execute(
-            select(m.OrgMember).where(
-                m.OrgMember.tenant_id == org.id,
-                m.OrgMember.subject == body.email,
-                m.OrgMember.deleted_at.is_(None),
-            )
-        )
-        member = result.scalar_one_or_none()
+        member = await _member_by_sign_in_address(db, tenant_id=org.id, email=body.email)
         member_id = member.id if member is not None else None
         password_hash = member.password_hash if member is not None else None
+        # The STORED spelling, not the typed one. Every token minted below
+        # carries this as its `sub` claim, and a claim that does not match the
+        # row is how `scope_for_principal(upsert=True)` mints a ghost member
+        # on the caller's very next request -- see `EmailChangeResponse.
+        # reauth_required` for what that costs the person it happens to.
+        subject = member.subject if member is not None else body.email
 
     # Fail closed: wrong email, missing password_hash, or soft-deleted member
     if member_id is None or password_hash is None:
@@ -1009,7 +1164,7 @@ async def password_login(body: PasswordLoginRequest) -> PasswordSessionResponse:
         # Outcome 3: a challenge is required, whatever the member's role.
         token = provider.mint(
             tenant_id=org.id,
-            subject=body.email,
+            subject=subject,
             role=token_role,
             kind="operator",
             scopes=["totp:challenge"],
@@ -1027,7 +1182,7 @@ async def password_login(body: PasswordLoginRequest) -> PasswordSessionResponse:
         # enrolled -- refuse a full session.
         token = provider.mint(
             tenant_id=org.id,
-            subject=body.email,
+            subject=subject,
             role=token_role,
             kind="operator",
             scopes=["totp:enroll"],
@@ -1046,7 +1201,7 @@ async def password_login(body: PasswordLoginRequest) -> PasswordSessionResponse:
     # member has no clock at all and gets exactly the response they always got.
     token = provider.mint(
         tenant_id=org.id,
-        subject=body.email,
+        subject=subject,
         role=token_role,
         kind="operator",
     )
@@ -1329,9 +1484,10 @@ async def forgot_password(body: ForgotPasswordRequest) -> ForgotPasswordResponse
     * no member signs in with that address;
     * the member exists but has no password (an SSO/dev-token identity, with
       nothing for a reset to reset);
+    * a link was already mailed to this member seconds ago (the cooldown);
     * everything is fine and a link really was mailed;
     * everything looked fine and the relay refused the connection --
-      `send_mail` never raises and its return value is deliberately ignored
+      `deliver` never raises and its return value is deliberately ignored
       here, unlike `PUT /auth/me/email` where the caller is authenticated and
       HAS to be told their mail did not leave.
 
@@ -1345,11 +1501,18 @@ async def forgot_password(body: ForgotPasswordRequest) -> ForgotPasswordResponse
     equalising that needs a queue this deployment does not have (§7 asks for
     an identical *response*, and that is what is enforced and tested).
 
-    A repeat request while a live link exists spends the old one before
-    minting a new one. That is the rate limit the design asks for: a burst
-    collapses to one usable link rather than one per request, and a link
-    somebody has already been mailed stops working the moment a newer one is
-    requested.
+    Two things bound the damage, and they are not the same thing:
+
+    * a repeat request spends the previous link before minting a new one, so a
+      burst collapses to ONE usable link rather than one per request, and a
+      link somebody has already been mailed stops working;
+    * `VERIFICATION_MAIL_COOLDOWN_SECONDS` bounds how many mails are SENT.
+      Without it the point above still leaves anybody who knows an address
+      free to drive this route in a loop and fill that inbox, unauthenticated
+      -- one link at a time, but one SMTP dial per request.
+
+    A throttled request answers with the same object as every other one, so
+    the cooldown cannot itself become the oracle this endpoint exists to deny.
     """
     generic = ForgotPasswordResponse(message=FORGOT_PASSWORD_MESSAGE)
     try:
@@ -1364,16 +1527,24 @@ async def forgot_password(body: ForgotPasswordRequest) -> ForgotPasswordResponse
     async with tenant_session(org.id) as db:
         if await active_smtp_credential(db, tenant_id=org.id) is None:
             return generic
-        member = (
-            await db.execute(
-                select(m.OrgMember).where(
-                    m.OrgMember.tenant_id == org.id,
-                    m.OrgMember.subject == body.email.strip(),
-                    m.OrgMember.deleted_at.is_(None),
-                )
-            )
-        ).scalar_one_or_none()
+        member = await _member_by_sign_in_address(db, tenant_id=org.id, email=body.email)
         if member is None or member.password_hash is None:
+            return generic
+
+        if await _mail_is_cooling_down(
+            db, tenant_id=org.id, member_id=member.id, purpose="password_reset"
+        ):
+            # A link is already on its way to this person. Nothing is minted,
+            # nothing is mailed, and the answer is the one every other exit
+            # gives.
+            return generic
+
+        # Everything the send needs, read while the transaction is still open
+        # and still RLS-bound -- `app.tenant_id` dies at commit, so this cannot
+        # move below the block. Resolved before the token is written so a
+        # broken credential leaves no row behind, exactly as before.
+        smtp = await resolve_smtp_config(db, tenant_id=org.id)
+        if smtp is None:
             return generic
 
         await db.execute(
@@ -1408,28 +1579,32 @@ async def forgot_password(body: ForgotPasswordRequest) -> ForgotPasswordResponse
             resource={"member_id": str(member.id), "subject": member.subject},
             reason="a reset link was requested for this address; nobody was authenticated",
         )
-        # Flushed, not committed, and sent BEFORE the block exits -- for the
-        # same reason as `PUT /auth/me/email`: `app.tenant_id` is
-        # transaction-local, so committing first would unbind RLS and
-        # `send_mail`, which reads the SMTP credential and its vaulted
-        # password through THIS session, would silently send nothing.
-        await db.flush()
-        base = get_settings().frontend_base_url.rstrip("/")
-        # Return value ignored on purpose -- see the docstring. A failed send
-        # must not change the answer, and it must not roll the token back
-        # either: the person is no worse off with an unusable row than with
-        # none, and a rollback here would be a second, timing-visible branch.
-        await send_mail(
-            db,
-            tenant_id=org.id,
-            to=member.subject,
-            subject="Reset your password",
-            body=(
-                f"Click this link to set a new password:\n"
-                f"{base}/reset-password?token={token}\n\n"
-                "This link expires in 1 hour. If you didn't request this, ignore this email."
-            ),
-        )
+        # Read here, used after the block: touching an ORM attribute once the
+        # session is closed is a lazy refresh that has neither a connection nor
+        # a bound tenant left. Mailed to the address ON THE ACCOUNT, not to the
+        # casing the caller typed.
+        to = member.subject
+    # OUTSIDE the transaction, which is the whole point of this ordering: the
+    # block above has committed and handed its DB connection back to the pool,
+    # so a relay that never answers now costs this request 40 seconds of its
+    # own time and nothing of anybody else's. Held inside, ~15 concurrent
+    # requests to this UNAUTHENTICATED route exhausted the pool for the entire
+    # process. See oc8.mail.send's module docstring.
+    base = get_settings().frontend_base_url.rstrip("/")
+    # Return value ignored on purpose -- see the docstring. A failed send must
+    # not change the answer, and it must not undo the token either: the person
+    # is no worse off with an unusable row than with none, and undoing it would
+    # be a second, timing-visible branch.
+    await deliver(
+        smtp,
+        to=to,
+        subject="Reset your password",
+        body=(
+            f"Click this link to set a new password:\n"
+            f"{base}/reset-password?token={token}\n\n"
+            "This link expires in 1 hour. If you didn't request this, ignore this email."
+        ),
+    )
     return generic
 
 

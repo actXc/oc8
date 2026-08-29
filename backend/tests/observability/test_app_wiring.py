@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 
 import pytest
@@ -33,6 +34,37 @@ async def test_app_starts_with_otel_disabled() -> None:
     app = create_app()
     async with LifespanManager(app):
         pass  # startup + shutdown run without error
+
+
+@pytest.mark.parametrize(
+    ("env", "base_url", "warned"),
+    [
+        # The case this exists for: a real deployment still on the default.
+        ("prod", "http://localhost:8080", True),
+        # ...and the two that must stay quiet. A laptop is what the default is
+        # FOR, and an instance behind a real domain has nothing to warn about.
+        ("dev", "http://localhost:8080", False),
+        ("prod", "https://oc8.example.test", False),
+    ],
+)
+async def test_a_localhost_link_base_is_warned_about_once_at_startup(
+    caplog: pytest.LogCaptureFixture, env: str, base_url: str, warned: bool
+) -> None:
+    """Every reset/confirmation mail is built off `frontend_base_url`, and
+    getting it wrong fails silently: the send succeeds, the endpoint says
+    "check your inbox", and the link in that inbox goes nowhere. This log line
+    is the only thing that connects that symptom to its cause."""
+    from oc8.config import Settings
+    from oc8.main import warn_about_unreachable_links
+
+    settings = Settings(env=env, frontend_base_url=base_url)
+    with caplog.at_level(logging.WARNING, logger="oc8.main"):
+        warn_about_unreachable_links(settings)
+
+    records = [r for r in caplog.records if r.name == "oc8.main"]
+    assert bool(records) is warned, [r.getMessage() for r in records]
+    if warned:
+        assert "OC8_FRONTEND_BASE_URL" in records[0].getMessage()
 
 
 async def test_app_starts_with_otel_console(monkeypatch: pytest.MonkeyPatch) -> None:

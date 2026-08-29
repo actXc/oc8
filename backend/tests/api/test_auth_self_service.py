@@ -37,7 +37,7 @@ import pytest
 from asgi_lifespan import LifespanManager
 from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import NullPool, select, text
+from sqlalchemy import NullPool, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from oc8 import models as m
@@ -517,7 +517,173 @@ async def test_a_mail_server_that_cannot_deliver_is_not_reported_as_sent(
             .scalars()
             .all()
         )
-    assert tokens == [], "an unsendable confirmation must not leave a token nobody can use"
+    # The row is written and committed BEFORE the socket is opened -- that is
+    # what returns the DB connection to the pool for the length of the send --
+    # so it cannot be rolled back by a failure that happens afterwards. It is
+    # spent instead, which leaves exactly the same thing behind that a rollback
+    # did: nothing anybody can use. Spending it (rather than leaving it live)
+    # is also what lets the person retry AT ONCE -- an unused row inside the
+    # cooldown window would otherwise answer their retry with "check your
+    # inbox" for mail that never left.
+    assert [t.used_at is not None for t in tokens] == [True], (
+        "an unsendable confirmation must not leave a token anybody can use"
+    )
+
+
+async def test_the_confirmation_socket_is_opened_with_no_db_connection_held(
+    app_session: AppSessionFactory,
+) -> None:
+    """See `_watch_the_pool`: a slow relay must not be able to hold a pooled DB
+    connection for the ~40 seconds `smtp_connection`'s per-operation timeouts
+    allow it."""
+    tenant = uuid.uuid4()
+    email = "ada@example.com"
+    async with app_session(tenant) as db:
+        db.add(m.Organization(id=tenant, slug=str(tenant), name="t", settings={}))
+        await db.flush()
+        db.add(_member(tenant, email))
+        await _configure_smtp(db, tenant)
+
+    with patch("oc8.credentials.smtp.smtplib.SMTP") as smtp_cls:
+        checkouts = _watch_the_pool(smtp_cls)
+        async with _http() as http:
+            r = await http.put(
+                "/api/v1/auth/me/email",
+                json={"currentPassword": OLD_PASSWORD, "newEmail": "ada@newmail.com"},
+                headers=_headers(tenant, email),
+            )
+    assert r.status_code == 200, r.text
+    assert checkouts == [0], (
+        f"the SMTP socket was opened with {checkouts} DB connection(s) checked out"
+    )
+
+
+async def test_a_second_email_change_inside_the_cooldown_does_not_mail_again(
+    app_session: AppSessionFactory,
+) -> None:
+    """Same bombing gap as forgot-password, on the other minting route: without
+    a cooldown, a held session mails the same inbox once per click."""
+    tenant = uuid.uuid4()
+    email = "ada@example.com"
+    async with app_session(tenant) as db:
+        db.add(m.Organization(id=tenant, slug=str(tenant), name="t", settings={}))
+        await db.flush()
+        db.add(_member(tenant, email))
+        await _configure_smtp(db, tenant)
+
+    body = {"currentPassword": OLD_PASSWORD, "newEmail": "ada@newmail.com"}
+    with patch("oc8.credentials.smtp.smtplib.SMTP") as smtp_cls:
+        client = MagicMock()
+        smtp_cls.return_value.__enter__.return_value = client
+        async with _http() as http:
+            first = await http.put(
+                "/api/v1/auth/me/email", json=body, headers=_headers(tenant, email)
+            )
+            second = await http.put(
+                "/api/v1/auth/me/email", json=body, headers=_headers(tenant, email)
+            )
+
+    # The caller is told the same true thing both times: there is a live link
+    # in that inbox. Nothing new was minted or mailed for the second one.
+    assert first.status_code == second.status_code == 200, second.text
+    assert first.json() == second.json()
+    assert second.json()["verificationRequired"] is True
+    assert len(_mailed_links(client)) == 1
+    async with app_session(tenant) as db:
+        assert len(await _tokens(db, tenant)) == 1
+
+
+async def test_a_different_address_is_not_held_back_by_the_cooldown(
+    app_session: AppSessionFactory,
+) -> None:
+    """The cooldown is per target address, so correcting a typo'd new address
+    is not answered with "check your inbox" pointing at the typo."""
+    tenant = uuid.uuid4()
+    email = "ada@example.com"
+    async with app_session(tenant) as db:
+        db.add(m.Organization(id=tenant, slug=str(tenant), name="t", settings={}))
+        await db.flush()
+        db.add(_member(tenant, email))
+        await _configure_smtp(db, tenant)
+
+    with patch("oc8.credentials.smtp.smtplib.SMTP") as smtp_cls:
+        client = MagicMock()
+        smtp_cls.return_value.__enter__.return_value = client
+        async with _http() as http:
+            await http.put(
+                "/api/v1/auth/me/email",
+                json={"currentPassword": OLD_PASSWORD, "newEmail": "ada@nemail.com"},
+                headers=_headers(tenant, email),
+            )
+            corrected = await http.put(
+                "/api/v1/auth/me/email",
+                json={"currentPassword": OLD_PASSWORD, "newEmail": "ada@newmail.com"},
+                headers=_headers(tenant, email),
+            )
+    assert corrected.status_code == 200, corrected.text
+    assert corrected.json()["sentTo"] == "ada@newmail.com"
+    assert len(_mailed_links(client)) == 2
+
+
+async def test_an_email_that_is_not_an_address_is_refused(
+    app_session: AppSessionFactory,
+) -> None:
+    """`org_member.subject` IS the sign-in identity, and on the no-mail-server
+    branch it is written straight through. A length-checked `str` let somebody
+    set their own login to "nonsense" and commit it."""
+    tenant = uuid.uuid4()
+    email = "ada@example.com"
+    async with app_session(tenant) as db:
+        db.add(_member(tenant, email))
+
+    async with _http() as http:
+        r = await http.put(
+            "/api/v1/auth/me/email",
+            json={"currentPassword": OLD_PASSWORD, "newEmail": "not-an-address"},
+            headers=_headers(tenant, email),
+        )
+    assert r.status_code == 422, r.text
+
+    async with app_session(tenant) as db:
+        assert (await _row(db, tenant, email)).subject == email
+
+
+async def test_a_mixed_case_address_is_stored_lowercased(
+    app_session: AppSessionFactory,
+) -> None:
+    """Casing is significant in every comparison downstream (the no-op check,
+    the uniqueness check, `subject_uuid_for`, the login lookup), so
+    `Ada@X.com` and `ada@x.com` would otherwise be two different logins for
+    one person -- and only one of them can hold the unique row."""
+    tenant = uuid.uuid4()
+    email = "ada@example.com"
+    await _sole_organization(app_session, tenant)
+    async with app_session(tenant) as db:
+        db.add(_member(tenant, email))
+
+    async with _http() as http:
+        r = await http.put(
+            "/api/v1/auth/me/email",
+            json={"currentPassword": OLD_PASSWORD, "newEmail": "Foo@Bar.com"},
+            headers=_headers(tenant, email),
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["member"]["subject"] == "foo@bar.com"
+
+        # ...and the person can sign in with it, typed either way.
+        for typed in ("foo@bar.com", "Foo@Bar.com"):
+            login = await http.post(
+                "/api/v1/auth/login", json={"email": typed, "password": OLD_PASSWORD}
+            )
+            assert login.status_code == 200, f"{typed}: {login.text}"
+            # The token must name the STORED subject -- a token carrying
+            # `Foo@Bar.com` would mint a ghost member row under that spelling
+            # on the caller's very next request.
+            assert login.json()["principal"]["subject"] == "foo@bar.com"
+
+    async with app_session(tenant) as db:
+        row = await _row(db, tenant, "foo@bar.com")
+        assert row.subject_uuid == subject_uuid_for("foo@bar.com")
 
 
 # =========================================================================
@@ -585,6 +751,59 @@ def _mailed_links(client: MagicMock) -> list[str]:
         call.args[0].get_content().split("token=")[1].split()[0]
         for call in client.send_message.call_args_list
     ]
+
+
+def _watch_the_pool(smtp_cls: MagicMock) -> list[int]:
+    """Record how many DB connections the app's pool has checked out at the
+    moment the SMTP socket is opened.
+
+    Zero is the property under test, and it is not a style point.
+    `smtp_connection` uses a 10-second timeout PER SOCKET OPERATION (connect,
+    STARTTLS, EHLO, auth, send), so a blackholed relay holds whatever it is
+    called with for up to ~40 seconds. Held INSIDE the transaction, that is a
+    pooled DB connection: the engine's default `pool_size=5, max_overflow=10`
+    means ~15 concurrent requests to the UNAUTHENTICATED forgot-password route
+    exhaust the pool for the whole process, and every other request then blocks
+    `pool_timeout=30` seconds and fails. Resolving the credential still needs
+    the open transaction (RLS binds `app.tenant_id` transaction-locally), so the
+    fix is to split resolve from deliver -- and this is how that split is
+    proved rather than asserted.
+    """
+    from sqlalchemy.pool import QueuePool
+
+    from oc8.db.engine import get_engine
+
+    checkouts: list[int] = []
+
+    def _record(*_args: object, **_kwargs: object) -> MagicMock:
+        # AsyncAdaptedQueuePool (what an async engine builds by default) is a
+        # QueuePool; only that kind counts checkouts, and only that kind is
+        # exhaustible -- which is the whole hazard being measured.
+        pool = get_engine().sync_engine.pool
+        assert isinstance(pool, QueuePool), pool
+        checkouts.append(pool.checkedout())
+        return MagicMock()
+
+    smtp_cls.side_effect = _record
+    return checkouts
+
+
+async def _age_the_tokens(
+    app_session: AppSessionFactory, tenant: uuid.UUID, *, seconds: int
+) -> None:
+    """Backdate every token's `created_at`, so the next request is outside the
+    cooldown window.
+
+    The same technique the TTL cases use (`_mint_token(expires_in=...)`):
+    this module has no injectable clock, and the one it would need here belongs
+    to PostgreSQL -- `created_at` carries a `server_default` of `now()`.
+    """
+    async with app_session(tenant) as db:
+        await db.execute(
+            update(m.AccountVerificationToken)
+            .where(m.AccountVerificationToken.tenant_id == tenant)
+            .values(created_at=dt.datetime.now(tz=dt.UTC) - dt.timedelta(seconds=seconds))
+        )
 
 
 async def _tokens(db: AsyncSession, tenant: uuid.UUID) -> list[m.AccountVerificationToken]:
@@ -861,8 +1080,9 @@ async def test_forgot_password_says_nothing_different_about_a_member_with_no_pas
 async def test_a_second_reset_request_spends_the_first_link(
     app_session: AppSessionFactory,
 ) -> None:
-    """The rate limit the design asks for, and it costs no infrastructure: a
-    burst collapses to ONE usable link instead of one per request."""
+    """Once the cooldown has passed, a repeat request collapses the flow back
+    to ONE usable link: the older one is spent as the newer one is minted, so
+    a link somebody was already mailed stops working."""
     tenant = uuid.uuid4()
     email = "ada@example.com"
     await _sole_organization(app_session, tenant)
@@ -875,6 +1095,9 @@ async def test_a_second_reset_request_spends_the_first_link(
         smtp_cls.return_value.__enter__.return_value = client
         async with _http() as http:
             await http.post("/api/v1/auth/password/forgot", json={"email": email})
+            # Past the cooldown -- a second request inside it is the subject of
+            # its own test below and deliberately mints nothing.
+            await _age_the_tokens(app_session, tenant, seconds=600)
             await http.post("/api/v1/auth/password/forgot", json={"email": email})
 
             first, second = _mailed_links(client)
@@ -896,6 +1119,157 @@ async def test_a_second_reset_request_spends_the_first_link(
     assert stored is not None
     assert verify_password("from-the-fresh-link", stored)
     assert not verify_password("from-the-stale-link", stored)
+
+
+async def test_a_second_reset_request_inside_the_cooldown_mints_nothing(
+    app_session: AppSessionFactory,
+) -> None:
+    """The cooldown §3 of the design asks for, and the gap the token-spending
+    above does NOT close: spending the old link bounds how many links are
+    USABLE (one), not how many emails are SENT. Without this, anybody who
+    knows a member's address can mail that inbox in a loop, unauthenticated,
+    for ever -- and each of those loops also costs an SMTP round trip."""
+    tenant = uuid.uuid4()
+    email = "ada@example.com"
+    await _sole_organization(app_session, tenant)
+    async with app_session(tenant) as db:
+        db.add(_member(tenant, email))
+        await _configure_smtp(db, tenant)
+
+    with patch("oc8.credentials.smtp.smtplib.SMTP") as smtp_cls:
+        client = MagicMock()
+        smtp_cls.return_value.__enter__.return_value = client
+        async with _http() as http:
+            first = await http.post("/api/v1/auth/password/forgot", json={"email": email})
+            second = await http.post("/api/v1/auth/password/forgot", json={"email": email})
+
+    # Byte-identical, like every other pair of answers this route gives: a
+    # caller must not be able to tell a throttled request from a sent one
+    # either, or the cooldown becomes the oracle the endpoint exists to deny.
+    assert first.status_code == second.status_code == 202
+    assert first.content == second.content
+    assert len(_mailed_links(client)) == 1, "the second request mailed a second link"
+    async with app_session(tenant) as db:
+        assert len(await _tokens(db, tenant)) == 1
+
+
+async def test_a_reset_request_after_the_cooldown_mints_again(
+    app_session: AppSessionFactory,
+) -> None:
+    """The other half: the cooldown is a cooldown, not a lockout. Somebody who
+    never received the first mail must be able to ask again."""
+    tenant = uuid.uuid4()
+    email = "ada@example.com"
+    await _sole_organization(app_session, tenant)
+    async with app_session(tenant) as db:
+        db.add(_member(tenant, email))
+        await _configure_smtp(db, tenant)
+
+    with patch("oc8.credentials.smtp.smtplib.SMTP") as smtp_cls:
+        client = MagicMock()
+        smtp_cls.return_value.__enter__.return_value = client
+        async with _http() as http:
+            await http.post("/api/v1/auth/password/forgot", json={"email": email})
+            await _age_the_tokens(app_session, tenant, seconds=600)
+            r = await http.post("/api/v1/auth/password/forgot", json={"email": email})
+
+    assert r.status_code == 202, r.text
+    assert len(_mailed_links(client)) == 2
+    async with app_session(tenant) as db:
+        rows = await _tokens(db, tenant)
+    assert len(rows) == 2
+    # ...and only the newest of them is still usable.
+    assert sorted(t.used_at is None for t in rows) == [False, True]
+
+
+async def test_an_unused_link_does_not_hold_back_a_request_for_ever(
+    app_session: AppSessionFactory,
+) -> None:
+    """The window is measured from when the link was MINTED, not from whether
+    it was ever spent -- an hour-old unused link must not throttle anything."""
+    tenant = uuid.uuid4()
+    email = "ada@example.com"
+    await _sole_organization(app_session, tenant)
+    async with app_session(tenant) as db:
+        member = _member(tenant, email)
+        db.add(member)
+        await _configure_smtp(db, tenant)
+        await db.flush()
+        _mint_token(db, tenant, member.id, purpose="password_reset", plaintext="older")
+    await _age_the_tokens(app_session, tenant, seconds=3600)
+
+    with patch("oc8.credentials.smtp.smtplib.SMTP") as smtp_cls:
+        client = MagicMock()
+        smtp_cls.return_value.__enter__.return_value = client
+        async with _http() as http:
+            r = await http.post("/api/v1/auth/password/forgot", json={"email": email})
+    assert r.status_code == 202, r.text
+    assert len(_mailed_links(client)) == 1
+
+
+async def test_the_reset_socket_is_opened_with_no_db_connection_held(
+    app_session: AppSessionFactory,
+) -> None:
+    """The same property as the confirmation mail, on the route where it
+    actually matters: this one is UNAUTHENTICATED, so holding a pooled DB
+    connection for the length of an SMTP dial is a one-command outage of every
+    other request the process serves. See `_watch_the_pool`."""
+    tenant = uuid.uuid4()
+    email = "ada@example.com"
+    await _sole_organization(app_session, tenant)
+    async with app_session(tenant) as db:
+        db.add(_member(tenant, email))
+        await _configure_smtp(db, tenant)
+
+    with patch("oc8.credentials.smtp.smtplib.SMTP") as smtp_cls:
+        checkouts = _watch_the_pool(smtp_cls)
+        async with _http() as http:
+            r = await http.post("/api/v1/auth/password/forgot", json={"email": email})
+    assert r.status_code == 202, r.text
+    assert checkouts == [0], (
+        f"the SMTP socket was opened with {checkouts} DB connection(s) checked out"
+    )
+
+
+async def test_forgot_password_refuses_something_that_is_not_an_address(
+    app_session: AppSessionFactory,
+) -> None:
+    """A 422 on a malformed body says nothing about who has an account -- it is
+    a fact about the request, not about the instance."""
+    tenant = uuid.uuid4()
+    await _sole_organization(app_session, tenant)
+    async with app_session(tenant) as db:
+        db.add(_member(tenant, "ada@example.com"))
+        await _configure_smtp(db, tenant)
+
+    async with _http() as http:
+        r = await http.post("/api/v1/auth/password/forgot", json={"email": "not-an-address"})
+    assert r.status_code == 422, r.text
+
+
+async def test_forgot_password_finds_the_member_whatever_the_casing(
+    app_session: AppSessionFactory,
+) -> None:
+    """The address is normalized to lowercase before it is compared, so a
+    member whose stored subject was written in another casing must still be
+    reachable -- otherwise normalizing would lock exactly those people out of
+    the only route they have left."""
+    tenant = uuid.uuid4()
+    await _sole_organization(app_session, tenant)
+    async with app_session(tenant) as db:
+        db.add(_member(tenant, "Ada@Example.com"))
+        await _configure_smtp(db, tenant)
+
+    with patch("oc8.credentials.smtp.smtplib.SMTP") as smtp_cls:
+        client = MagicMock()
+        smtp_cls.return_value.__enter__.return_value = client
+        async with _http() as http:
+            r = await http.post("/api/v1/auth/password/forgot", json={"email": "ADA@example.com"})
+    assert r.status_code == 202, r.text
+    assert len(_mailed_links(client)) == 1
+    assert client.send_message.call_args.args[0]["To"] == "Ada@Example.com", (
+        "the link must be mailed to the address on the account, not to the casing typed"
+    )
 
 
 async def test_the_reset_link_points_at_the_configured_frontend(

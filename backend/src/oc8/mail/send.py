@@ -2,9 +2,28 @@
 marked as the tenant's active SMTP server (design:
 docs/superpowers/specs/2026-08-28-account-self-service-design.md §4.2-4.3).
 Two email types only (a reset link, a confirmation link) -- plain text,
-no templates, no queue. `send_mail` never raises: a caller that must not
+no templates, no queue. Neither function here raises: a caller that must not
 leak "does this address exist" (forgot-password) returns the same response
 whether the send actually happened or not.
+
+**Sending is deliberately two calls, and the split is the whole point.**
+
+`resolve_smtp_config` reads the active credential and its vaulted fields, so
+it MUST run inside the caller's open, tenant-bound transaction: RLS binds
+`app.tenant_id` transaction-locally (`set_config(..., is_local=true)`), and a
+commit before this read would unbind it and hand back an empty credential.
+
+`deliver` opens the socket, and it takes NO database argument at all, so it
+cannot be called with a transaction open by accident. That is not tidiness:
+`smtp_connection` applies its 10-second timeout PER SOCKET OPERATION
+(connect, STARTTLS, EHLO, auth, send), so a blackholed relay holds its caller
+for up to ~40 seconds. Held inside the transaction -- which is what a single
+combined `send_mail(db, ...)` forced -- that is a pooled DB connection held
+for 40 seconds by an UNAUTHENTICATED request: with the engine's default
+`pool_size=5, max_overflow=10`, roughly 15 concurrent calls to
+`/auth/password/forgot` exhaust the pool for the entire process and every
+other request then blocks `pool_timeout=30` and fails. So the two halves are
+separate functions: resolve while bound, let the transaction close, then dial.
 
 The socket itself is opened by `oc8.credentials.smtp.smtp_connection`, the
 same helper the credential's "Test" button runs. That is on purpose: a
@@ -19,6 +38,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from dataclasses import dataclass
 from email.message import EmailMessage
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +48,27 @@ from oc8.credentials.service import CredentialFieldNotSet, resolve_credential_fi
 from oc8.credentials.smtp import smtp_connection
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class SmtpConfig:
+    """Everything one send needs, with nothing left to look up.
+
+    Frozen and plain: once this exists the database is out of the picture, which
+    is exactly what lets `deliver` run with no connection checked out. It
+    carries `tenant_id`/`credential_id` only so a failed delivery can still name
+    them in the server-side log line -- that log is the only evidence an
+    operator gets that a reset link never left the building.
+    """
+
+    tenant_id: uuid.UUID
+    credential_id: uuid.UUID
+    host: str
+    port: int
+    username: str
+    password: str
+    use_tls: bool
+    from_address: str
 
 
 async def active_smtp_credential(db: AsyncSession, *, tenant_id: uuid.UUID) -> uuid.UUID | None:
@@ -71,15 +112,24 @@ def _send(
         client.send_message(msg)
 
 
-async def send_mail(
-    db: AsyncSession, *, tenant_id: uuid.UUID, to: str, subject: str, body: str
-) -> bool:
+async def resolve_smtp_config(db: AsyncSession, *, tenant_id: uuid.UUID) -> SmtpConfig | None:
+    """The tenant's usable mail server, or `None` with the reason logged.
+
+    Runs inside the caller's OPEN, tenant-bound transaction -- see this
+    module's docstring: the credential and its vaulted password are RLS-scoped
+    reads, and `app.tenant_id` dies at commit.
+
+    `None` covers every way this can fail to produce a working configuration
+    (no pointer, dangling pointer, unset field, unparseable port, vault
+    unreachable). They all mean the same thing to a caller -- "this tenant has
+    no usable mail server" -- and the caller is deliberately told nothing more.
+    """
     credential_id = await active_smtp_credential(db, tenant_id=tenant_id)
     if credential_id is None:
         logger.warning(
             "mail not sent for tenant %s: no active SMTP credential is configured", tenant_id
         )
-        return False
+        return None
     # Blanket `except Exception` rather than an enumerated tuple, on purpose.
     # Resolving these fields reaches through `resolve_credential_field` into
     # the secret vault, whose failure modes (`SecretNotFound`,
@@ -90,7 +140,7 @@ async def send_mail(
     # function breaking its "never raises" contract inside a forgot-password
     # handler that must answer identically either way. Every one of them means
     # the same thing to a caller ("this tenant has no usable mail server"), so
-    # they get the same handling: log it server-side, return False.
+    # they get the same handling: log it server-side, return None.
     try:
         host = await resolve_credential_field(
             db, tenant_id=tenant_id, credential_id=credential_id, field_key="host"
@@ -136,10 +186,39 @@ async def send_mail(
             credential_id,
             exc_info=True,
         )
-        return False
+        return None
+    return SmtpConfig(
+        tenant_id=tenant_id,
+        credential_id=credential_id,
+        host=host,
+        port=port,
+        username=username,
+        password=password,
+        use_tls=use_tls,
+        from_address=from_address,
+    )
+
+
+async def deliver(config: SmtpConfig, *, to: str, subject: str, body: str) -> bool:
+    """Open the socket and send. NEVER raises, and takes no database session.
+
+    The missing `db` parameter is the safety property (module docstring): this
+    is the part that can block for ~40 seconds on a bad relay, and it must not
+    be able to do that while a pooled connection is checked out. Call it AFTER
+    the transaction that produced `config` has committed and closed.
+    """
     try:
         await asyncio.to_thread(
-            _send, host, port, username, password, use_tls, from_address, to, subject, body
+            _send,
+            config.host,
+            config.port,
+            config.username,
+            config.password,
+            config.use_tls,
+            config.from_address,
+            to,
+            subject,
+            body,
         )
     except Exception:
         # The whole point of this log line: a relay that rejects our
@@ -148,9 +227,9 @@ async def send_mail(
         # user or an admin can see, with no server-side evidence at all.
         logger.warning(
             "mail not sent for tenant %s: SMTP delivery to %s via credential %s failed",
-            tenant_id,
+            config.tenant_id,
             to,
-            credential_id,
+            config.credential_id,
             exc_info=True,
         )
         return False

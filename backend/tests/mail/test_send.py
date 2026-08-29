@@ -1,4 +1,4 @@
-"""`active_smtp_credential` + `send_mail`.
+"""`active_smtp_credential` + `resolve_smtp_config` + `deliver`.
 
 The socket is mocked at `oc8.credentials.smtp.smtplib` on purpose -- that
 is the ONE module allowed to open an SMTP connection, and patching there
@@ -6,6 +6,14 @@ is the ONE module allowed to open an SMTP connection, and patching there
 send path ever grows a second, private copy of the dialling logic. The
 "parity" tests below assert the send path makes the same implicit-TLS and
 certificate-verification decisions as the credential's own Test button.
+
+Sending is two calls now, not one (see `oc8.mail.send`'s docstring: the
+resolve half needs the open transaction for RLS, the deliver half must NOT
+hold a pooled DB connection while it dials a possibly-blackholed relay). The
+`_send_mail` helper below is just those two calls in a row, so every case
+here keeps testing the whole path end to end; the property that the two are
+SEPARATED at the real call sites is tested where it matters, against the
+endpoints, in tests/api/test_auth_self_service.py.
 """
 
 from __future__ import annotations
@@ -23,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from oc8 import models as m
 from oc8.credentials.service import create_credential
 from oc8.credentials.smtp import validate_smtp
-from oc8.mail.send import active_smtp_credential, send_mail
+from oc8.mail.send import active_smtp_credential, deliver, resolve_smtp_config
 from oc8.secrets.keyprovider import SecretStoreUnavailable
 from oc8.secrets.service import SecretNotFound
 from tests.conftest import AppSessionFactory
@@ -44,6 +52,22 @@ def _kek(monkeypatch: pytest.MonkeyPatch) -> None:
         base64.b64encode(bytes(range(32))).decode(),
         raising=False,
     )
+
+
+async def _send_mail(
+    db: AsyncSession, *, tenant_id: uuid.UUID, to: str, subject: str, body: str
+) -> bool:
+    """Resolve, then deliver -- the two halves back to back.
+
+    What the endpoints do, minus the commit in between (which is the part
+    tests/api/test_auth_self_service.py asserts). Keeping one entry point here
+    means every case below still exercises pointer -> credential -> vault ->
+    socket in one line, exactly as it did when this was a single function.
+    """
+    config = await resolve_smtp_config(db, tenant_id=tenant_id)
+    if config is None:
+        return False
+    return await deliver(config, to=to, subject=subject, body=body)
 
 
 def _smtp_client(smtp_cls: MagicMock) -> MagicMock:
@@ -81,7 +105,7 @@ async def test_no_active_credential_returns_false(app_session: AppSessionFactory
     async with app_session(tenant) as db:
         db.add(m.Organization(id=tenant, slug=str(tenant), name="t", settings={}))
         await db.flush()
-        result = await send_mail(db, tenant_id=tenant, to="a@b.com", subject="s", body="b")
+        result = await _send_mail(db, tenant_id=tenant, to="a@b.com", subject="s", body="b")
         assert result is False
 
 
@@ -124,7 +148,7 @@ async def test_a_non_uuid_pointer_is_treated_as_unset(app_session: AppSessionFac
         )
         await db.flush()
         assert await active_smtp_credential(db, tenant_id=tenant) is None
-        assert await send_mail(db, tenant_id=tenant, to="a@b.com", subject="s", body="b") is False
+        assert await _send_mail(db, tenant_id=tenant, to="a@b.com", subject="s", body="b") is False
 
 
 async def test_a_dangling_pointer_returns_false(app_session: AppSessionFactory) -> None:
@@ -141,7 +165,7 @@ async def test_a_dangling_pointer_returns_false(app_session: AppSessionFactory) 
             )
         )
         await db.flush()
-        assert await send_mail(db, tenant_id=tenant, to="a@b.com", subject="s", body="b") is False
+        assert await _send_mail(db, tenant_id=tenant, to="a@b.com", subject="s", body="b") is False
 
 
 # --- sending -------------------------------------------------------------
@@ -153,7 +177,7 @@ async def test_send_mail_with_a_real_credential(app_session: AppSessionFactory) 
         await _tenant_with_smtp(db, tenant)
         with patch("oc8.credentials.smtp.smtplib.SMTP") as smtp_cls:
             client = _smtp_client(smtp_cls)
-            result = await send_mail(db, tenant_id=tenant, to="x@y.com", subject="s", body="b")
+            result = await _send_mail(db, tenant_id=tenant, to="x@y.com", subject="s", body="b")
         assert result is True
         client.send_message.assert_called_once()
         smtp_cls.assert_called_once()
@@ -168,7 +192,7 @@ async def test_the_message_carries_the_credentials_from_address(
         await _tenant_with_smtp(db, tenant, from_address="noreply@corp.example")
         with patch("oc8.credentials.smtp.smtplib.SMTP") as smtp_cls:
             client = _smtp_client(smtp_cls)
-            await send_mail(db, tenant_id=tenant, to="x@y.com", subject="Reset", body="link")
+            await _send_mail(db, tenant_id=tenant, to="x@y.com", subject="Reset", body="link")
         msg = client.send_message.call_args.args[0]
         assert msg["From"] == "noreply@corp.example"
         assert msg["To"] == "x@y.com"
@@ -186,7 +210,7 @@ async def test_credentials_are_used_when_the_credential_has_them(
         await _tenant_with_smtp(db, tenant, username="mailer", password="s3cret")
         with patch("oc8.credentials.smtp.smtplib.SMTP") as smtp_cls:
             client = _smtp_client(smtp_cls)
-            assert await send_mail(db, tenant_id=tenant, to="x@y.com", subject="s", body="b")
+            assert await _send_mail(db, tenant_id=tenant, to="x@y.com", subject="s", body="b")
         client.login.assert_called_once_with("mailer", "s3cret")
 
 
@@ -196,7 +220,7 @@ async def test_use_tls_false_sends_without_starttls(app_session: AppSessionFacto
         await _tenant_with_smtp(db, tenant, port="25", use_tls="false")
         with patch("oc8.credentials.smtp.smtplib.SMTP") as smtp_cls:
             client = _smtp_client(smtp_cls)
-            assert await send_mail(db, tenant_id=tenant, to="x@y.com", subject="s", body="b")
+            assert await _send_mail(db, tenant_id=tenant, to="x@y.com", subject="s", body="b")
         client.starttls.assert_not_called()
 
 
@@ -210,7 +234,7 @@ async def test_a_send_failure_returns_false_instead_of_raising(
         await _tenant_with_smtp(db, tenant)
         with patch("oc8.credentials.smtp.smtplib.SMTP") as smtp_cls:
             smtp_cls.side_effect = OSError("connection refused")
-            result = await send_mail(db, tenant_id=tenant, to="x@y.com", subject="s", body="b")
+            result = await _send_mail(db, tenant_id=tenant, to="x@y.com", subject="s", body="b")
         assert result is False
 
 
@@ -219,7 +243,7 @@ async def test_an_unparseable_port_returns_false(app_session: AppSessionFactory)
     async with app_session(tenant) as db:
         await _tenant_with_smtp(db, tenant, port="five-eight-seven")
         with patch("oc8.credentials.smtp.smtplib.SMTP") as smtp_cls:
-            result = await send_mail(db, tenant_id=tenant, to="x@y.com", subject="s", body="b")
+            result = await _send_mail(db, tenant_id=tenant, to="x@y.com", subject="s", body="b")
         assert result is False
         smtp_cls.assert_not_called()
 
@@ -247,7 +271,7 @@ async def test_a_vault_failure_returns_false_instead_of_raising(
             patch("oc8.credentials.service.resolve_secret", side_effect=error),
             patch("oc8.credentials.smtp.smtplib.SMTP") as smtp_cls,
         ):
-            result = await send_mail(db, tenant_id=tenant, to="x@y.com", subject="s", body="b")
+            result = await _send_mail(db, tenant_id=tenant, to="x@y.com", subject="s", body="b")
         assert result is False
         smtp_cls.assert_not_called()
 
@@ -269,7 +293,7 @@ async def test_a_resolution_failure_is_logged(
             ),
         ):
             assert (
-                await send_mail(db, tenant_id=tenant, to="x@y.com", subject="s", body="b") is False
+                await _send_mail(db, tenant_id=tenant, to="x@y.com", subject="s", body="b") is False
             )
     record = next(r for r in caplog.records if r.name == "oc8.mail.send")
     assert record.levelno == logging.WARNING
@@ -293,7 +317,7 @@ async def test_a_send_failure_is_logged(
             patch("oc8.credentials.smtp.smtplib.SMTP", side_effect=OSError("connection refused")),
         ):
             assert (
-                await send_mail(db, tenant_id=tenant, to="x@y.com", subject="s", body="b") is False
+                await _send_mail(db, tenant_id=tenant, to="x@y.com", subject="s", body="b") is False
             )
     record = next(r for r in caplog.records if r.name == "oc8.mail.send")
     assert record.levelno == logging.WARNING
@@ -310,7 +334,7 @@ async def test_an_unconfigured_mail_server_is_logged(
         await db.flush()
         with caplog.at_level(logging.WARNING, logger="oc8.mail.send"):
             assert (
-                await send_mail(db, tenant_id=tenant, to="x@y.com", subject="s", body="b") is False
+                await _send_mail(db, tenant_id=tenant, to="x@y.com", subject="s", body="b") is False
             )
     record = next(r for r in caplog.records if r.name == "oc8.mail.send")
     assert "no active SMTP credential" in record.getMessage()
@@ -333,7 +357,7 @@ async def test_port_465_sends_over_implicit_tls_just_like_test_does(
             patch("oc8.credentials.smtp.smtplib.SMTP") as smtp_cls,
         ):
             client = _smtp_client(ssl_cls)
-            assert await send_mail(db, tenant_id=tenant, to="x@y.com", subject="s", body="b")
+            assert await _send_mail(db, tenant_id=tenant, to="x@y.com", subject="s", body="b")
             send_factory_calls = ssl_cls.call_count, smtp_cls.call_count
             client.starttls.assert_not_called()
             client.send_message.assert_called_once()
@@ -367,7 +391,7 @@ async def test_both_tls_paths_verify_the_servers_certificate(
         await _tenant_with_smtp(db, tenant, port=port)
         with patch(patched) as smtp_cls:
             client = _smtp_client(smtp_cls)
-            assert await send_mail(db, tenant_id=tenant, to="x@y.com", subject="s", body="b")
+            assert await _send_mail(db, tenant_id=tenant, to="x@y.com", subject="s", body="b")
         if port == "465":
             context = smtp_cls.call_args.kwargs["context"]
         else:

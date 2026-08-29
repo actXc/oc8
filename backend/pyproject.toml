@@ -60,6 +60,11 @@ dependencies = [
     "openpyxl>=3.1",
     "python-pptx>=1.0",
     "polib>=1.2",
+    # What pydantic's EmailStr needs at runtime. The two request bodies that
+    # can write org_member.subject -- the sign-in identity -- validate with it,
+    # so this is not an optional nicety: without it those models raise at
+    # import time, which is the right way for it to fail.
+    "email-validator>=2.2",
 ]
 
 [project.scripts]
