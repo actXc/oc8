@@ -35,12 +35,21 @@ from oc8.models._mixins import TenantMixin
 #: pair. Restored into another instance they would never authenticate against
 #: that instance's key, so every send would fail silently and the rows would
 #: never re-validate -- meaningless data that only looks like a live subscription.
+#:
+#: `account_verification_token` is excluded for the same class of reason as
+#: `secret`/`tenant_dek`/`push_subscription`: its rows are single-use,
+#: time-limited security tokens (password-reset / email-change confirmation,
+#: account self-service design §4.4), not portable company data. Restoring one
+#: into another instance -- or back into this one after the window it was
+#: mailed for has passed -- would only resurrect a credential that should stay
+#: dead, never anything a restored company needs.
 EXCLUDED_TABLES: frozenset[str] = frozenset(
     {
         "audit_event",
         "audit_chain_checkpoint",
         "tenant_dek",
         "secret",
+        "account_verification_token",
         "token_usage_record",
         "push_subscription",
     }

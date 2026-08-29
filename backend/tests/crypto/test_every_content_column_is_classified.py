@@ -19,6 +19,9 @@ from oc8.crypto.types import DeterministicText, EncryptedJSON, EncryptedText
 from oc8.db.base import Base
 
 EXEMPT: dict[str, str] = {
+    "account_verification_token.purpose": "structural enum-like column (status/state/kind/classification/...), CHECK-constrained to 'password_reset'/'email_change' (ck_account_verification_token_purpose), not content",
+    "account_verification_token.token_hash": "sha256(token), hex-encoded -- already a one-way hash, not raw content, same rationale as org_member.password_hash/totp_credential.backup_codes, design spec §6c",
+    "account_verification_token.new_email": "content column to encrypt as-is, not yet migrated -- the address an email-change token, once confirmed, rewrites org_member.subject to, design spec §6a",
     "activity_event.status": "structural enum-like column (status/state/kind/classification/...), CHECK-constrained, not content, design spec §6c",
     "activity_event.message": "content column to encrypt as-is, not yet migrated, design spec §6a",
     "activity_event.detail": "content column to encrypt as-is, not yet migrated, design spec §6a",
@@ -70,6 +73,7 @@ EXEMPT: dict[str, str] = {
     "capa.origin": "structural enum-like column (status/state/kind/classification/...), CHECK-constrained, not content, design spec §6c",
     "capa.trust_level": "not individually named in spec section 6; structural/config/identifier column, not customer free text -- see design spec §6",
     "capa.core_compat": "not individually named in spec section 6; structural/config/identifier column, not customer free text -- see design spec §6",
+    "channel_poll_cursor.channel": "same free-form channel id as approval_channel_binding.channel -- structural/config/identifier column, not customer free text, design spec §6",
     "chat_session.title": "content column to encrypt as-is, not yet migrated, design spec §6a",
     "chat_message.role": "structural enum-like column (status/state/kind/classification/...), CHECK-constrained, not content, design spec §6c",
     "chat_message.content": "content column to encrypt as-is, not yet migrated, design spec §6a",
