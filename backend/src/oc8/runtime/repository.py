@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import logging
 import uuid
 from typing import Any
@@ -10,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from oc8 import models as m
+from oc8.models import RunStateTransition
 from oc8.models.run import AgentRun
 from oc8.runtime.states import TERMINAL, RunState, assert_transition
 
@@ -157,6 +159,16 @@ class RunRepository:
         assert_transition(src, dst)
         run.state = dst.value
         await self._s.flush()
+        self._s.add(
+            RunStateTransition(
+                id=uuid.uuid4(),
+                tenant_id=run.tenant_id,
+                run_id=run.id,
+                from_state=src.value,
+                to_state=dst.value,
+                at=dt.datetime.now(dt.UTC),
+            )
+        )
         if dst in TERMINAL:
             # Whatever records this run was working, it is no longer working
             # them. Released HERE because this is the single funnel every run

@@ -62,6 +62,21 @@ ALLOWED: dict[str, str] = {
     "api/v1/knowledge.py": "resolves the grantee (agent or department) of a KB share",
     "api/v1/components.py": "resolves the grantee (agent or department) of a component grant",
     "agent/control_tools.py": "the agent runtime reading its own department; no human here",
+    "kpis/aggregate.py": (
+        "id-only reads (Agent.id/Agent.department_id, never content): the KPI endpoints "
+        "prove visibility with require_departmental + visible_agent/visible_department "
+        "BEFORE calling compute_kpis, so the funnel has already run by the time this does"
+    ),
+    "api/v1/kpis.py": (
+        "id-only enumeration of the tenant's own agents/departments for groupBy, behind "
+        "statistics:view (a tenant-wide permission by design); the agent- and department-"
+        "scoped routes in the same file go through visible_agent/visible_department. "
+        "Registered even though an earlier revision of this file passed the sweep by "
+        "accident -- it bound the column to a local (`id_col = m.Agent.id`) before calling "
+        "select(id_col), and the walk below only inspects a call's literal arguments, not "
+        "what a name was assigned from; the exception is meant to be a decision, not a "
+        "side effect of how the query happened to be spelled"
+    ),
     # --- Everything below is the disclosed remainder of the sweep's first
     # real run against Agent/Department: agent-runtime-internal reads, system
     # jobs, and two sweep false-positives on a substring match. None of these

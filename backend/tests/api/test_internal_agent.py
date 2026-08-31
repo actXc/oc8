@@ -694,6 +694,176 @@ async def test_a_repeated_write_does_not_reach_the_tool_server_twice(
     assert calls.count("search_records") == 2, "reads must not be replayed from cache"
 
 
+# ------------------------------------------------- tool-call timing (KPIs)
+
+
+async def _mcp_backed_run(db: Any, tenant: uuid.UUID, *, write: bool = True) -> tuple[Any, Any]:
+    """An agent + RUNNING run with an `odoo` MCP connection bound, the fixture
+    the two timing tests below share. Returns (agent_id, run_id)."""
+    from oc8 import models as m
+
+    dept = m.Department(
+        tenant_id=tenant,
+        name="Vertrieb",
+        frame={"tools": {"odoo": {"enabled": True, "read": True, "write": write}}},
+    )
+    db.add(dept)
+    await db.flush()
+    agent = m.Agent(
+        tenant_id=tenant,
+        department_id=dept.id,
+        name="Nora",
+        status="running",
+        narrowing={},
+        definition={},
+        presentation={},
+    )
+    db.add(agent)
+    await db.flush()
+    conn = m.McpConnection(
+        tenant_id=tenant,
+        department_id=dept.id,
+        name="odoo",
+        transport="stdio",
+        server_url="stdio://odoo",
+        connected=True,
+        config={"command": "x", "args": []},
+        scopes={"read": ["search_records"], "write": ["create_record"]},
+    )
+    task = m.Task(
+        tenant_id=tenant,
+        department_id=dept.id,
+        assigned_agent_id=agent.id,
+        title="Angebot",
+        state="in_progress",
+    )
+    db.add_all([conn, task])
+    await db.flush()
+    run = m.AgentRun(
+        tenant_id=tenant,
+        agent_id=agent.id,
+        task_id=task.id,
+        state="running",
+        context={"task": "x", "mcp_connection_id": str(conn.id)},
+    )
+    db.add(run)
+    await db.flush()
+    return agent.id, run.id
+
+
+@pytest.mark.asyncio
+async def test_a_dispatched_call_records_started_at_and_duration(
+    app_session: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Container-runtime parity with `agent/engine.py`'s tool-call timing.
+
+    Without this, `context->'toolCalls'` entries written by THIS endpoint carry
+    no `durationMs`, `kpis.aggregate._avg_tool_call_duration_ms` (which counts
+    only entries that have the key) sees nothing, and every agent running under
+    OC8_AGENT_ISOLATION reports `avgToolCallDurationMs: null` forever -- the
+    same "container parity is not automatic" trap the preamble and control-tool
+    seams have each hit before.
+    """
+    from oc8 import models as m
+
+    class _SlowSession:
+        tools: list[Any] = []
+
+        def __init__(self, *a: Any, **kw: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> Any:
+            return self
+
+        async def __aexit__(self, *a: Any) -> None:
+            return None
+
+        async def call(self, name: str, arguments: dict[str, Any]) -> str:
+            import asyncio
+
+            # Long enough that a truncating-to-int duration cannot be 0 by
+            # accident, so the assertion below measures real elapsed time
+            # rather than merely the presence of a key.
+            await asyncio.sleep(0.02)
+            return "created id=1"
+
+    monkeypatch.setattr("oc8.api.v1.internal_agent.McpSession", _SlowSession)
+
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:  # type: ignore[operator]
+        agent_id, run_id = await _mcp_backed_run(db, tenant)
+
+    code, body = await _post_tool(
+        tenant,
+        agent_id,
+        run_id,
+        "create_record",
+        {"model": "sale.order", "values": {"partner_id": 7}},
+    )
+    assert code == 200, body
+
+    async with app_session(tenant) as db:  # type: ignore[operator]
+        run = await db.get(m.AgentRun, run_id)
+        assert run is not None
+        entry = run.context["toolCalls"][-1]
+
+    assert entry["tool"] == "create_record"
+    assert isinstance(entry["startedAt"], str) and entry["startedAt"].endswith("+00:00")
+    assert isinstance(entry["durationMs"], int)
+    assert entry["durationMs"] >= 20, entry["durationMs"]
+
+
+@pytest.mark.asyncio
+async def test_a_denied_call_records_no_timing(
+    app_session: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other half of the same rule, mirroring engine.py: a call refused
+    before dispatch never reached a tool server, so it carries no duration --
+    otherwise every denial would push `avgToolCallDurationMs` toward zero."""
+    from oc8 import models as m
+
+    class _NeverSession:
+        tools: list[Any] = []
+
+        def __init__(self, *a: Any, **kw: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> Any:
+            return self
+
+        async def __aexit__(self, *a: Any) -> None:
+            return None
+
+        async def call(self, name: str, arguments: dict[str, Any]) -> str:
+            raise AssertionError("a denied call must never reach the tool server")
+
+    monkeypatch.setattr("oc8.api.v1.internal_agent.McpSession", _NeverSession)
+
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:  # type: ignore[operator]
+        # write=False -> the frame denies create_record outright.
+        agent_id, run_id = await _mcp_backed_run(db, tenant, write=False)
+
+    code, body = await _post_tool(
+        tenant,
+        agent_id,
+        run_id,
+        "create_record",
+        {"model": "sale.order", "values": {"partner_id": 7}},
+    )
+    assert code == 200, body
+    assert body["status"] == "denied", body
+
+    async with app_session(tenant) as db:  # type: ignore[operator]
+        run = await db.get(m.AgentRun, run_id)
+        assert run is not None
+        entry = run.context["toolCalls"][-1]
+
+    assert entry["result"].startswith("ERROR:")
+    assert "startedAt" not in entry
+    assert "durationMs" not in entry
+
+
 # ------------------------------------------------- department prompt caching
 
 
@@ -1012,16 +1182,26 @@ async def test_the_internal_endpoint_makes_a_tool_call_live(
         "arguments": {"component_key": "record_card", "props": {"title": "Acme"}},
         "result": body["output"][:300],
     }
-    assert ("run.tool_call", {"run_id": str(run_id), "call": expected_call}) in published
+    #: `startedAt`/`durationMs` ride along on a dispatched call (KPI timing, see
+    #: test_a_dispatched_call_records_started_at_and_duration below); this test
+    #: is about the call being live at all, so it compares the rest by name
+    #: rather than pinning a wall-clock value.
+    tool_call_events = [data for type_, data in published if type_ == "run.tool_call"]
+    assert len(tool_call_events) == 1
+    assert tool_call_events[0]["run_id"] == str(run_id)
+    published_call = tool_call_events[0]["call"]
+    assert {k: v for k, v in published_call.items() if k in expected_call} == expected_call
 
     async with app_session(tenant) as db:  # type: ignore[operator]
         fresh = await db.get(m.AgentRun, run_id)
         assert fresh is not None
-        assert fresh.context["toolCalls"] == [expected_call], (
+        stored = fresh.context["toolCalls"]
+        assert len(stored) == 1, (
             "a mid-run page load must already see this tool call, not just an "
             "open Live Log tab -- the same invariant Stage 1 already proved "
             "for the in-process engine"
         )
+        assert {k: v for k, v in stored[0].items() if k in expected_call} == expected_call
 
 
 @pytest.mark.asyncio

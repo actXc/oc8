@@ -3,12 +3,15 @@ import {
   ArrowLeft,
   BookOpen,
   Building2,
+  Clock,
   Code2,
   Coins,
   Crown,
   Headphones,
   Megaphone,
+  Repeat,
   Sparkles,
+  Timer,
   TrendingUp,
   UserPlus,
   UserRound,
@@ -22,14 +25,17 @@ import { PermissionsPanel } from "@/components/permissions-panel";
 import { KnowledgeAssignment } from "@/components/knowledge-assignment";
 import { ComponentGrantPanel } from "@/components/component-grant-panel";
 import { GuardrailPresetPicker, type GuardrailValue } from "@/components/guardrail-preset-picker";
+import { StatCard } from "@/components/stat-card";
 import { type PolicyMap } from "@/lib/permissions";
 import { contractsFor, type IntakeContract } from "@/lib/collaboration";
+import { formatMs } from "@/lib/format";
 import {
   useDeleteDepartment,
   useDepartment,
   useDepartmentAgents,
   useDepartmentBoard,
   useDepartmentContracts,
+  useDepartmentKpis,
   useDepartmentTools,
   useSetDepartmentTools,
   useKnowledgeBases,
@@ -390,6 +396,8 @@ function DepartmentDetail() {
 
       {tab === "overview" && (
         <>
+          <DepartmentOverviewStats departmentId={id} />
+
           {lead && members.length > 1 && (
             <TaskDistribution lead={lead} members={members.filter((m) => m.id !== lead.id)} />
           )}
@@ -617,6 +625,39 @@ function DepartmentDetail() {
       )}
 
       <NewAgentDialog open={hireOpen} onOpenChange={setHireOpen} defaultDepartmentId={dept.id} />
+    </div>
+  );
+}
+
+/** Department-scoped KPI rollup for the Overview tab (Agent KPIs & Statistics
+ * plan, Task 8) -- the same three StatCards the Agent Overview tab shows
+ * (Task 7's `OverviewTab`), backed by `useDepartmentKpis` instead of
+ * `useAgentKpis`. Its own component, rather than inline in `DepartmentDetail`,
+ * so it's reachable from a test without standing up the whole routed page's
+ * board/knowledge/collaboration machinery -- same reasoning as
+ * `DepartmentSettingsPanel`/`DepartmentToolsPanel` below and Task 7's
+ * `OverviewTab`. */
+export function DepartmentOverviewStats({ departmentId }: { departmentId: string }) {
+  const t = useT();
+  const kpis = useDepartmentKpis(departmentId);
+
+  return (
+    <div className="grid gap-4 md:grid-cols-3">
+      <StatCard
+        icon={<Repeat className="h-4 w-4" />}
+        label={t("Runs", "Runs")}
+        value={kpis.data ? String(kpis.data.runCount) : "—"}
+      />
+      <StatCard
+        icon={<Clock className="h-4 w-4" />}
+        label={t("Avg. duration", "Ø Dauer")}
+        value={formatMs(kpis.data?.totalDurationMs)}
+      />
+      <StatCard
+        icon={<Timer className="h-4 w-4" />}
+        label={t("Approval wait", "Approval-Wartezeit")}
+        value={formatMs(kpis.data?.approvalWaitMs)}
+      />
     </div>
   );
 }

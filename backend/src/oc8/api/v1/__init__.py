@@ -28,6 +28,7 @@ from oc8.api.v1 import (
     governance,
     handoffs,
     knowledge,
+    kpis,
     mcp,
     mcp_logins,
     members,
@@ -94,3 +95,4 @@ api_router.include_router(secrets.router, tags=["secrets"])
 api_router.include_router(credentials.router, tags=["credentials"])
 api_router.include_router(audit.router, tags=["audit"])
 api_router.include_router(backup.router, tags=["backup"])
+api_router.include_router(kpis.router, tags=["kpis"])

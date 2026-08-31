@@ -20,10 +20,11 @@ before any statement is built.
 
 from __future__ import annotations
 
+import datetime as dt
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, extract, func, select
 
 from oc8.models.ops import ApprovalRequest
 
@@ -86,6 +87,55 @@ async def visible_approvals(
         max(1, min(limit, MAX_LIMIT))
     )
     return list((await db.execute(stmt)).scalars().all())
+
+
+async def avg_wait_ms(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    agent_id: uuid.UUID | None = None,
+    department_id: uuid.UUID | None = None,
+    date_from: dt.datetime | None = None,
+    date_to: dt.datetime | None = None,
+) -> int | None:
+    """Average time a DECIDED approval sat waiting for a human, in milliseconds.
+
+    Not actor-scoped like `visible_approvals`/`load_for_actor` above: this is a
+    single SQL-side `AVG(decided_at - created_at)` over `tenant_id`/`agent_id`/
+    `department_id`/a date range -- no individual `ApprovalRequest` row, nor any
+    field off one, ever reaches a caller. `kpis.aggregate.compute_kpis` is the
+    one caller (its `statistics:view`-gated `GET /kpis` is deliberately
+    tenant-wide, api/v1/kpis.py's own docstring), and this function lives here
+    rather than beside it because this module is the one
+    `tests/approvals/test_reads_go_through_the_scoped_repository.py` allows to
+    load `ApprovalRequest` at all -- see that file's own docstring on why.
+
+    Scoped by `ApprovalRequest.department_id` DIRECTLY, never by a join through
+    `Agent.department_id` (spec §1.3): that column is denormalised at raise time
+    precisely so moving an agent between departments does not drag its
+    approvals into a queue nobody there was ever asked about.
+
+    Undecided requests are excluded, so a scope where nothing has been decided
+    returns `None` rather than `0`.
+    """
+    conditions: list[ColumnElement[bool]] = [
+        ApprovalRequest.tenant_id == tenant_id,
+        ApprovalRequest.decided_at.isnot(None),
+    ]
+    if agent_id is not None:
+        conditions.append(ApprovalRequest.agent_id == agent_id)
+    if department_id is not None:
+        conditions.append(ApprovalRequest.department_id == department_id)
+    if date_from is not None:
+        conditions.append(ApprovalRequest.created_at >= date_from)
+    if date_to is not None:
+        conditions.append(ApprovalRequest.created_at <= date_to)
+    wait_ms = extract("epoch", ApprovalRequest.decided_at - ApprovalRequest.created_at) * 1000
+    stmt = select(func.avg(wait_ms)).where(*conditions)
+    value = (await db.execute(stmt)).scalar_one()
+    if value is None:
+        return None
+    return round(float(value))
 
 
 async def load_for_actor(

@@ -1,6 +1,7 @@
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   Activity,
+  BarChart3,
   Bell,
   Building2,
   Check,
@@ -23,6 +24,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Sun,
+  TrendingUp,
   Users,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -423,19 +425,38 @@ export function AppShell() {
       needs: "integration:view",
     },
     { to: "/knowledge", label: t("Knowledge", "Wissen"), icon: Database, needs: "knowledge:view" },
-    { to: "/activity", label: t("Activity", "Aktivität"), icon: Activity, needs: "run:view" },
-    // Money is WATCHED, not configured. `budget:view` is one of the twenty-one
-    // rights a tenant-defined role may actually hold, so this is a screen an
-    // employee can now be given — and a report an employee may open does not
-    // belong under a heading that reads "things you are not allowed to touch".
-    // The one item of the five proposed for the section that stays out here.
-    { to: "/costs", label: t("Costs", "Kosten"), icon: Coins, needs: "budget:view" },
+    {
+      // Three screens you go to in order to WATCH work, not to change how the
+      // system behaves -- that's the same rule Settings below applies, just
+      // for reporting instead of configuration. Grouped rather than left flat
+      // now that there are three of them. Money is watched, not configured:
+      // `budget:view` is one of the twenty-one rights a tenant-defined role
+      // may actually hold, so Costs is a report an employee can be given, not
+      // an admin-only screen. `statistics:view` is its own resource (backend
+      // authz/permissions.py) because GET /kpis is the one read that can span
+      // every agent and department in the tenant at once.
+      section: "analytics",
+      label: t("Analytics", "Analyse"),
+      icon: TrendingUp,
+      children: [
+        { to: "/activity", label: t("Activity", "Aktivität"), icon: Activity, needs: "run:view" },
+        { to: "/costs", label: t("Costs", "Kosten"), icon: Coins, needs: "budget:view" },
+        {
+          to: "/statistics",
+          label: t("Statistics", "Statistiken"),
+          icon: BarChart3,
+          needs: "statistics:view",
+          strict: true,
+        },
+      ],
+    },
     {
       // Everything under here answers "how does this installation work", which
-      // is a different question from "what is happening in it". Sixteen flat
-      // items had no answer to either; the rule this section applies is that a
-      // screen you go to in order to CHANGE how the system behaves lives inside
-      // it, and a screen you go to in order to do or watch work stays above.
+      // is a different question from "what is happening in it" (Analytics,
+      // above) or "what work is there to do" (the flat items above that). The
+      // rule this section applies is that a screen you go to in order to
+      // CHANGE how the system behaves lives inside it, and a screen you go to
+      // in order to do or watch work stays above.
       section: "settings",
       label: t("Settings", "Einstellungen"),
       icon: Settings,
@@ -536,6 +557,7 @@ export function AppShell() {
     if (p.startsWith("/members")) return t("Users", "Benutzer");
     if (p.startsWith("/models")) return t("Models", "Modelle");
     if (p.startsWith("/costs")) return t("Costs", "Kosten");
+    if (p.startsWith("/statistics")) return t("Statistics", "Statistiken");
     if (p.startsWith("/settings")) return t("Settings", "Einstellungen");
     return "oc8";
   };
@@ -616,6 +638,11 @@ export function AppShell() {
       return t(
         "Token spend across agents and departments.",
         "Token-Verbrauch über Agenten und Abteilungen.",
+      );
+    if (p.startsWith("/statistics"))
+      return t(
+        "Runs, durations, and waiting time across the tenant.",
+        "Runs, Dauern und Wartezeiten über die gesamte Organisation.",
       );
     return "";
   };

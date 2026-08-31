@@ -2,7 +2,7 @@
 // existing TypeScript interfaces so screens swap mock imports for these hooks.
 
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, fetchCapaIcon, previewBackup, restoreBackup } from "@/lib/api";
+import { api, ApiError, fetchCapaIcon, previewBackup, restoreBackup } from "@/lib/api";
 import type { RuntimeOption } from "@/components/runtime-picker";
 import type { GuardrailLibraryEntry, GuardrailPreset } from "@/components/guardrail-preset-picker";
 import type {
@@ -2210,5 +2210,94 @@ export function useRejectCopilotProposal() {
     mutationFn: (proposalId: string) =>
       api.post<CopilotProposal>(`/copilot/proposals/${proposalId}/reject`),
     onSuccess: (proposal) => qc.setQueryData(["copilot", "proposal", proposal.id], proposal),
+  });
+}
+
+// ---- Agent/department/tenant KPIs (Agent KPIs & Statistics plan, Task 6) --
+// consumed by the Agent Overview tab (Task 7), the Department page (Task 8),
+// and the Statistics page (Task 9). Backend: GET /agents/{id}/kpis,
+// GET /departments/{id}/kpis, GET /kpis (Task 4,
+// backend/src/oc8/api/v1/kpis.py) -- all three return the same
+// `KPIDTO`-shaped fields (camelCase on the wire via `CamelModel`), so one
+// `KPIData` interface covers all of them. ----
+
+export interface KPIData {
+  runCount: number;
+  totalDurationMs: number | null;
+  executionDurationMs: number | null;
+  approvalWaitMs: number | null;
+  responseTimeMs: number | null;
+  avgToolCallDurationMs: number | null;
+}
+
+export interface KPIFilterParams {
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+// Small local query-string helper for the KPI endpoints' own param shapes
+// (dateFrom/dateTo, plus /kpis' extra agentId/departmentId/groupBy/status) --
+// distinct from `toQueryString`, which is specific to the `ListQueryParams`/
+// `Page<T>` search-filter-group-paginate contract these endpoints don't use.
+// Filters out `undefined` (and `null`) so an unset filter never appears on
+// the wire as the literal string "undefined".
+function buildQuery(params?: Record<string, unknown>): string {
+  if (!params) return "";
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null) q.set(k, String(v));
+  }
+  const s = q.toString();
+  return s ? `?${s}` : "";
+}
+
+export function useAgentKpis(agentId: string, params?: KPIFilterParams) {
+  return useQuery({
+    queryKey: ["agents", agentId, "kpis", params] as const,
+    queryFn: () =>
+      api.get<KPIData>(`/agents/${agentId}/kpis${buildQuery(params as Record<string, unknown>)}`),
+    enabled: !!agentId,
+  });
+}
+
+export function useDepartmentKpis(departmentId: string, params?: KPIFilterParams) {
+  return useQuery({
+    queryKey: ["departments", departmentId, "kpis", params] as const,
+    queryFn: () =>
+      api.get<KPIData>(
+        `/departments/${departmentId}/kpis${buildQuery(params as Record<string, unknown>)}`,
+      ),
+    enabled: !!departmentId,
+  });
+}
+
+export interface TenantKPIFilterParams extends KPIFilterParams {
+  agentId?: string;
+  departmentId?: string;
+  groupBy?: "agent" | "department" | "day" | "week" | "month";
+  status?: string;
+}
+
+// Ungrouped (no `groupBy`): bare `KPIData`. Grouped: `{ rows: (KPIData &
+// { groupKey: string })[] }` -- FastAPI's own `response_model` is unset on
+// `GET /kpis` for the same reason (kpis.py's `tenant_kpis` docstring), since
+// the two shapes can't be expressed as one type. Callers narrow on
+// `"rows" in data` (or by checking whether they passed a `groupBy`).
+export function useTenantKpis(params?: TenantKPIFilterParams) {
+  return useQuery({
+    queryKey: ["kpis", params] as const,
+    queryFn: () =>
+      api.get<KPIData | { rows: (KPIData & { groupKey: string })[] }>(
+        `/kpis${buildQuery(params as Record<string, unknown>)}`,
+      ),
+    // A 422 here is the backend's MAX_BUCKETS/MAX_GROUPS cap rejection --
+    // deterministic for the current filters, so retrying can only repeat the
+    // same failure while delaying the "too many results, narrow your filter"
+    // message the caller shows instead. Every other failure (network blip,
+    // 5xx) keeps the default retry-3 behavior.
+    retry: (failureCount, error) => {
+      if (error instanceof ApiError && error.status === 422) return false;
+      return failureCount < 3;
+    },
   });
 }

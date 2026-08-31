@@ -29,6 +29,7 @@ from oc8.models.knowledge import (
     MemoryRecord,
     MemoryStore,
 )
+from oc8.models.kpi import RunStateTransition
 from oc8.models.notifications import PushSubscription
 from oc8.models.oauth import OAuthConnection
 from oc8.models.ops import (
@@ -105,6 +106,7 @@ __all__ = [
     "RolePermission",
     "RunCancellation",
     "RunMessage",
+    "RunStateTransition",
     "Secret",
     "Skill",
     "SkillAssignment",

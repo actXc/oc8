@@ -22,11 +22,16 @@ def test_exported_tables_excludes_the_denylist() -> None:
     exported = exported_tables()
     assert exported.isdisjoint(EXCLUDED_TABLES)
     assert "agent_run" in exported and "run_message" in exported and "task" in exported
-    # 58 TenantMixin tables minus the 7-name denylist (channel_poll_cursor,
+    # 59 TenantMixin tables minus the 7-name denylist (channel_poll_cursor,
     # added by migration 0079, is legitimate company operational state,
     # portable like data_source.cursor; account_verification_token, added by
-    # migration 0078, joins the denylist -- see EXCLUDED_TABLES docstring).
-    assert len(exported) == 51
+    # migration 0078, joins the denylist -- see EXCLUDED_TABLES docstring;
+    # run_state_transition, added by migration 0080, stays INCLUDED -- it is a
+    # run's own state history and the only source the live KPI aggregation
+    # computes task/execution durations from, so restoring agent_run without it
+    # would silently report wrong durations for every restored run rather than
+    # no durations at all).
+    assert len(exported) == 52
 
 
 def test_table_by_name_returns_a_real_table() -> None:

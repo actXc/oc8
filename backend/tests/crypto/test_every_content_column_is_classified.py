@@ -216,6 +216,8 @@ EXEMPT: dict[str, str] = {
     "run_cancellation.cancellation_kind": "structural enum-like column (status/state/kind/classification/...), CHECK-constrained, not content, design spec §6c",
     "run_message.author": "not individually named in spec section 6; structural/config/identifier column, not customer free text -- see design spec §6",
     "run_message.body": "content column to encrypt as-is, not yet migrated, design spec §6a",
+    "run_state_transition.from_state": "structural enum-like column (status/state/kind/classification/...), same value domain as agent_run.state, not content, design spec §6c",
+    "run_state_transition.to_state": "structural enum-like column (status/state/kind/classification/...), same value domain as agent_run.state, not content, design spec §6c",
     "secret.name": "pre-existing Secret Store envelope encryption (design spec §2); out of this design's scope",
     "secret.key_version": "pre-existing Secret Store envelope encryption (design spec §2); out of this design's scope",
     "secret.kind": "pre-existing Secret Store envelope encryption (design spec §2); out of this design's scope",

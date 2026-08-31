@@ -107,6 +107,29 @@ TOOL: Final = "tool"
 #: secret values with a passphrase, and a restore DELETES every agent, run
 #: and knowledge chunk -- neither is "change a tenant-wide switch".
 BACKUP: Final = "backup"
+#: The live-computed usage/performance numbers this tenant's agents and
+#: departments produce. Its own resource rather than folded into
+#: AGENT/DEPARTMENT: the tenant-wide GET /kpis endpoint lets one request
+#: span every agent and department at once, which no single existing
+#: :view permission covers -- AGENT:VIEW and DEPARTMENT:VIEW are both
+#: enforced via require_departmental (scoped to seats/department
+#: membership), and this is deliberately NOT department-scoped in the
+#: same way. No :manage counterpart exists, mirroring AUDIT's own
+#: precedent (see AUDIT_VERIFY above) -- nobody configures a KPI, they
+#: only read it.
+#:
+#: Also mirrors AUDIT in being excluded from the default `_VIEW_EVERYTHING`
+#: sweep (see `_NOT_VIEWABLE_BY_DEFAULT` below), for the same shape of reason:
+#: the whole point of this being its own resource is that it can span every
+#: agent and department in the tenant in one request, which "no single
+#: existing :view permission covers" only means something if that span isn't
+#: ALSO handed to every `operator`/`dept_manager`/`auditor` automatically --
+#: a `dept_manager` seated in Sales holding it by default would read every
+#: OTHER department's numbers through `GET /kpis`, despite never being able
+#: to see those departments any other way. `org_admin` still gets it (via
+#: `ALL_PERMISSIONS`); everyone else needs it granted explicitly, same as
+#: `audit:view` already works.
+STATISTICS: Final = "statistics"
 
 
 def perm(resource: str, action: str) -> str:
@@ -216,6 +239,7 @@ ALL_PERMISSIONS: Final[frozenset[str]] = frozenset(
         perm(SECRET, VIEW),
         perm(SECRET, MANAGE),
         perm(AUDIT, VIEW),
+        perm(STATISTICS, VIEW),
         BACKUP_EXPORT,
         BACKUP_RESTORE,
     }
@@ -270,6 +294,15 @@ DELEGATABLE_PERMISSIONS: Final[frozenset[str]] = frozenset(
         perm(CONTRACT, VIEW),
         perm(CHANNEL, VIEW),
         perm(PLUGIN, VIEW),
+        # A read of aggregate numbers, same sensitivity class as `audit:view`
+        # above (also delegatable, also tenant-wide-only): a tenant-defined
+        # role holding it sees run counts and durations, never a transcript,
+        # a credential, or a policy decision. `GET /kpis` is gated by
+        # `require_permission` (never `require_departmental`), so a role that
+        # holds this holds it tenant-wide -- there is no per-department seat
+        # narrowing for it, which is why it is absent from `SEAT_PERMISSIONS`
+        # / `DEPARTMENT_SCOPABLE` even though it is delegatable.
+        perm(STATISTICS, VIEW),
         # Graduated out of `NOT_YET_DELEGATABLE` by the department-scoped agent
         # authority slice (migration 0048): both routes now resolve a department
         # before they answer -- `GET /agents`/`GET /agents/{id}` and
@@ -462,17 +495,25 @@ AGENT_DEFAULT: Final = "agent_default"
 #: slice exists to avoid.
 MEMBER_ROLE: Final = "member"
 
-#: Two reads are NOT included in "may look at things", and both were caught by a
-#: test rather than by foresight -- each is `org_admin`-only today, and the rule
-#: this whole change rests on is that nothing gets wider than it already is:
+#: Three reads are NOT included in "may look at things", and each was caught by
+#: a test rather than by foresight -- each is `org_admin`-only today, and the
+#: rule this whole change rests on is that nothing gets wider than it already
+#: is:
 #:
 #: * the secret store's metadata -- the list of which credentials a tenant holds
 #:   is a map of where it can reach, worth more to an attacker than most of what
 #:   it protects;
 #: * the audit trail -- who read the log is itself an audit question, and
 #:   `auditor` exists precisely so that reading it is a named, narrow grant
-#:   rather than a side effect of being able to look at anything.
-_NOT_VIEWABLE_BY_DEFAULT: Final[frozenset[str]] = frozenset({SECRET, AUDIT})
+#:   rather than a side effect of being able to look at anything;
+#: * the tenant-wide KPI span -- `GET /kpis` can name every agent and
+#:   department in the tenant in one request (see `STATISTICS`'s own
+#:   docstring, above), and the seat mechanism has no way to narrow a
+#:   `require_permission`-gated route the way it narrows a
+#:   `require_departmental` one, so a default grant here would be a default
+#:   grant to see the WHOLE company's numbers, not just the caller's own
+#:   departments.
+_NOT_VIEWABLE_BY_DEFAULT: Final[frozenset[str]] = frozenset({SECRET, AUDIT, STATISTICS})
 
 _VIEW_EVERYTHING: Final[frozenset[str]] = frozenset(
     p

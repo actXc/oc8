@@ -15,6 +15,7 @@ stateless and the container carries only the loop, never the data.
 
 from __future__ import annotations
 
+import datetime as dt
 import uuid
 from typing import Any
 
@@ -570,6 +571,18 @@ async def tool(
     # (oc8.agent.control_tools). It returns None for a connection tool, which then
     # falls through to the MCP server below.
     task = await db.get(m.Task, run.task_id) if run.task_id is not None else None
+    # Tool-call timing, at parity with the in-process engine (agent/engine.py's
+    # own `_tool_call_started_at`/`_tool_call_dispatched` pair, same key names
+    # and same millisecond unit). Without this the container/isolated runtime
+    # writes `context->'toolCalls'` entries with no `durationMs` at all, and
+    # every agent on that runtime reports `avgToolCallDurationMs: null` forever
+    # -- the "container parity is not automatic" trap, since the two runtimes
+    # rebuild this append independently.
+    started_at = dt.datetime.now(dt.UTC)
+    #: False on the branches below that refuse the call before it is dispatched
+    #: anywhere; those entries omit both timing keys rather than record a
+    #: near-zero duration for a call that never ran.
+    dispatched = True
     control = (
         await execute_control_tool(
             db,
@@ -626,8 +639,10 @@ async def tool(
             )
     elif decision.effect is Effect.DENY:
         output = f"ERROR: {decision.reason or 'denied'}"
+        dispatched = False
     elif conn is None:
         output = "ERROR: no tool server available"
+        dispatched = False
     elif (
         (target := outward_target(tc.name, tc.arguments, focus_spec, outward_tools)) is not None
         and run.task_id is not None
@@ -636,6 +651,7 @@ async def tool(
         # Checked before the call, not after: the point is that the recipient is
         # not reached twice, and a check that ran afterwards could only report it.
         output = REFUSAL.format(target=target)
+        dispatched = False
     else:
         focus = describe_focus(tc.name, tc.arguments, focus_spec)
         if focus is not None:
@@ -697,6 +713,11 @@ async def tool(
                         result=output,
                     )
 
+    # Stopped HERE, the moment the call itself returned -- not at the append
+    # site far below, which is separated from it by the transcript rewrite and
+    # a `db.flush()` whose time is this request's, not the tool's.
+    duration_ms = int((dt.datetime.now(dt.UTC) - started_at).total_seconds() * 1000)
+
     # This tool call belongs to the completion /step just cached (see its own
     # ctx["pending_cache_key"] comment) -- a real failure here means that
     # completion's first-try guess was wrong, so it must not replay verbatim
@@ -737,7 +758,14 @@ async def tool(
     # (even though the DB row itself would still be correct) -- one commit
     # at the end covers both writes atomically, in the GUC's own transaction.
     await db.flush()
-    live_call = {"tool": tc.name, "arguments": tc.arguments, "result": output[:300]}
+    live_call: dict[str, Any] = {
+        "tool": tc.name,
+        "arguments": tc.arguments,
+        "result": output[:300],
+    }
+    if dispatched:
+        live_call["startedAt"] = started_at.isoformat()
+        live_call["durationMs"] = duration_ms
     await append_tool_call(db, run, live_call)
     await db.commit()
     await publish_run_tool_call(run.tenant_id, run_id=run.id, call=live_call)

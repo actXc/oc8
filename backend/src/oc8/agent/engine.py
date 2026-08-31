@@ -8,6 +8,7 @@ breach raises a HITL approval and suspends the run.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
 import uuid
@@ -995,6 +996,16 @@ async def run_agent(
                                 rendered_components,
                             )
 
+                        _tool_call_started_at = dt.datetime.now(dt.UTC)
+                        # Whether this call is actually dispatched anywhere -- a
+                        # control tool, or the tool server. The two branches
+                        # below that refuse it before dispatch set this False so
+                        # the append site omits the timing keys entirely, the
+                        # same as the `pre_hook.blocked` short-circuit above:
+                        # `avgToolCallDurationMs` averages calls that RAN, and a
+                        # near-zero duration for one that never left the process
+                        # would silently drag every denial into that average.
+                        _tool_call_dispatched = True
                         control = await execute_control_tool(
                             db,
                             tenant_id=tenant_id,
@@ -1046,6 +1057,7 @@ async def run_agent(
                                 )
                         elif decision.effect is Effect.DENY or server is None:
                             output = f"ERROR: {decision.reason or 'no tool server available'}"
+                            _tool_call_dispatched = False
                         elif (
                             target := outward_target(
                                 tc.name, tc.arguments, focus_spec, outward_tools
@@ -1057,6 +1069,7 @@ async def run_agent(
                             # recipient is not reached twice, and a check that ran
                             # afterwards could only report it.
                             output = REFUSAL.format(target=target)
+                            _tool_call_dispatched = False
                         else:
                             # Live-log which record the agent is working on, from
                             # the connection's own focus_spec (a plugin supplies
@@ -1083,9 +1096,18 @@ async def run_agent(
                                     task_id=task.id,
                                     target=target,
                                 )
-                        tool_trace.append(
-                            {"tool": tc.name, "arguments": tc.arguments, "result": output[:300]}
-                        )
+                        _tool_call_entry: dict[str, Any] = {
+                            "tool": tc.name,
+                            "arguments": tc.arguments,
+                            "result": output[:300],
+                        }
+                        if _tool_call_dispatched:
+                            _tool_call_entry["startedAt"] = _tool_call_started_at.isoformat()
+                            _tool_call_entry["durationMs"] = int(
+                                (dt.datetime.now(dt.UTC) - _tool_call_started_at).total_seconds()
+                                * 1000
+                            )
+                        tool_trace.append(_tool_call_entry)
                         await _live_tool_call(tool_trace[-1])
                         messages.append(
                             NeutralMessage(

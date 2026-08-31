@@ -273,8 +273,7 @@ _PROSE: Final[dict[str, tuple[str, str, str, str]]] = {
         "Chattet mit dem Copilot und wendet dessen Vorschläge an -- mandantenweit, "
         "über jede Abteilung hinweg.",
         "Use the configuration Copilot",
-        "Chats with the Copilot and applies its proposals -- tenant-wide, across "
-        "every department.",
+        "Chats with the Copilot and applies its proposals -- tenant-wide, across every department.",
     ),
     "copilot:view": (
         "Copilot-Vorschläge ansehen",
@@ -365,6 +364,14 @@ _PROSE: Final[dict[str, tuple[str, str, str, str]]] = {
         "Liest die Arbeitsanweisungen der Agenten.",
         "View skills",
         "Reads the agents' working instructions.",
+    ),
+    "statistics:view": (
+        "Statistiken ansehen",
+        "Sieht die live berechneten Kennzahlen aller Agenten und Abteilungen des Mandanten "
+        "auf einmal.",
+        "View statistics",
+        "Sees the live-computed performance numbers across every agent and department "
+        "in the tenant at once.",
     ),
     "supervision:manage": (
         "Aufsicht einstellen",

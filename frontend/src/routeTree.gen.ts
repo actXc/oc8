@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as WorkspaceRouteImport } from './routes/workspace'
 import { Route as WelcomeRouteImport } from './routes/welcome'
+import { Route as StatisticsRouteImport } from './routes/statistics'
 import { Route as SkillsRouteImport } from './routes/skills'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
@@ -52,6 +53,11 @@ const WorkspaceRoute = WorkspaceRouteImport.update({
 const WelcomeRoute = WelcomeRouteImport.update({
   id: '/welcome',
   path: '/welcome',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StatisticsRoute = StatisticsRouteImport.update({
+  id: '/statistics',
+  path: '/statistics',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SkillsRoute = SkillsRouteImport.update({
@@ -242,6 +248,7 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
   '/skills': typeof SkillsRoute
+  '/statistics': typeof StatisticsRoute
   '/welcome': typeof WelcomeRoute
   '/workspace': typeof WorkspaceRoute
   '/agents/$id': typeof AgentsIdRoute
@@ -275,6 +282,7 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
   '/skills': typeof SkillsRoute
+  '/statistics': typeof StatisticsRoute
   '/welcome': typeof WelcomeRoute
   '/workspace': typeof WorkspaceRoute
   '/agents/$id': typeof AgentsIdRoute
@@ -312,6 +320,7 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
   '/skills': typeof SkillsRoute
+  '/statistics': typeof StatisticsRoute
   '/welcome': typeof WelcomeRoute
   '/workspace': typeof WorkspaceRoute
   '/agents/$id': typeof AgentsIdRoute
@@ -350,6 +359,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/settings'
     | '/skills'
+    | '/statistics'
     | '/welcome'
     | '/workspace'
     | '/agents/$id'
@@ -383,6 +393,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/settings'
     | '/skills'
+    | '/statistics'
     | '/welcome'
     | '/workspace'
     | '/agents/$id'
@@ -419,6 +430,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/settings'
     | '/skills'
+    | '/statistics'
     | '/welcome'
     | '/workspace'
     | '/agents/$id'
@@ -456,6 +468,7 @@ export interface RootRouteChildren {
   ResetPasswordRoute: typeof ResetPasswordRoute
   SettingsRoute: typeof SettingsRoute
   SkillsRoute: typeof SkillsRoute
+  StatisticsRoute: typeof StatisticsRoute
   WelcomeRoute: typeof WelcomeRoute
   WorkspaceRoute: typeof WorkspaceRoute
   KnowledgeBasesKbIdContentRoute: typeof KnowledgeBasesKbIdContentRoute
@@ -475,6 +488,13 @@ declare module '@tanstack/react-router' {
       path: '/welcome'
       fullPath: '/welcome'
       preLoaderRoute: typeof WelcomeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/statistics': {
+      id: '/statistics'
+      path: '/statistics'
+      fullPath: '/statistics'
+      preLoaderRoute: typeof StatisticsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/skills': {
@@ -770,6 +790,7 @@ const rootRouteChildren: RootRouteChildren = {
   ResetPasswordRoute: ResetPasswordRoute,
   SettingsRoute: SettingsRoute,
   SkillsRoute: SkillsRoute,
+  StatisticsRoute: StatisticsRoute,
   WelcomeRoute: WelcomeRoute,
   WorkspaceRoute: WorkspaceRoute,
   KnowledgeBasesKbIdContentRoute: KnowledgeBasesKbIdContentRoute,

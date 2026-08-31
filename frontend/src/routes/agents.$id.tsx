@@ -11,10 +11,12 @@ import {
   FileText,
   MessageSquare,
   Play,
+  Repeat,
   Save,
   Search,
   Shield,
   ShieldCheck,
+  Timer,
   Trash2,
   UserCheck,
   Sparkles,
@@ -26,8 +28,10 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { LineChart, Line, XAxis, CartesianGrid } from "recharts";
 import {
   useActivity,
+  useAgentKpis,
   useAgents,
   useAgentSupervisor,
   useAgentTriggers,
@@ -44,6 +48,7 @@ import {
   useSkills,
   useModels,
   useSwitchAgentModel,
+  useTenantKpis,
   useUpdateAgentTrigger,
   useMcpConnections,
   useMcpLogins,
@@ -53,6 +58,7 @@ import {
   type RunDTO,
   type TriggerDTO,
 } from "@/lib/hooks";
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { CredentialPicker } from "@/components/credential-picker";
 import { GuardrailPresetPicker, type GuardrailValue } from "@/components/guardrail-preset-picker";
 import { SUBSCRIPTION_PROVIDER, SubscriptionRiskBadge } from "@/routes/models";
@@ -79,6 +85,8 @@ import { ComponentGrantPanel } from "@/components/component-grant-panel";
 import { AgentInstructionsPanel } from "@/components/agent-instructions-panel";
 import { KnowledgeAssignment } from "@/components/knowledge-assignment";
 import { RUN_COMPONENT_REGISTRY } from "@/components/run-record-card";
+import { StatCard } from "@/components/stat-card";
+import { formatMs } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import { useMayManageAgent } from "@/lib/governance-hooks";
@@ -375,32 +383,7 @@ function AgentDetail() {
         ))}
       </div>
 
-      {tab === "overview" && (
-        <div className="grid gap-4 md:grid-cols-3">
-          <StatCard
-            icon={<Clock className="h-4 w-4" />}
-            label={t("Tasks today", "Aufgaben heute")}
-            value={String(agent.tasksToday)}
-          />
-          <StatCard
-            icon={<Wrench className="h-4 w-4" />}
-            label={t("Active tools", "Aktive Werkzeuge")}
-            value={String(agent.tools.length)}
-          />
-          <StatCard
-            icon={<Shield className="h-4 w-4" />}
-            label={t("Guardrails", "Guardrails")}
-            value={String(agent.guardrails.length)}
-          />
-          <Panel className="p-5 md:col-span-3">
-            <div className="mb-2 text-xs uppercase tracking-wider text-muted-foreground">
-              {t("Last action", "Letzte Aktion")}
-            </div>
-            <p className="text-sm">{agent.lastAction}</p>
-            <div className="mt-3 text-xs text-muted-foreground">{agent.lastRun}</div>
-          </Panel>
-        </div>
-      )}
+      {tab === "overview" && <OverviewTab agent={agent} />}
 
       {/* The locally started run wins -- it is the one this operator just
           asked for -- but a run started by a schedule or another operator is
@@ -504,6 +487,69 @@ function AgentDetail() {
       {tab === "skills" && (
         <AgentSkillsTab agentId={agent.id} agentName={agent.name} mayManage={mayManage} />
       )}
+    </div>
+  );
+}
+
+// Overview tab: real KPI cards (Task 6's useAgentKpis) plus a 30-day run-count
+// trend line. Its own component (rather than inline in AgentDetail) so it's
+// reachable from a test without standing up the whole routed page -- same
+// shape as AssignedModelPanel/NarrowingEditor/SupervisorPanel below.
+//
+// The trend graph calls useTenantKpis({ agentId, groupBy: "day" }) rather than
+// extending useAgentKpis with a groupBy param: Task 6's agent-scoped hook
+// signature (dateFrom/dateTo only) is already approved and consumed elsewhere,
+// and GET /kpis already supports groupBy for exactly this shape (Task 4) --
+// reusing it here needs no backend or Task-6-interface change.
+export function OverviewTab({ agent }: { agent: AgentDetailData }) {
+  const t = useT();
+  const kpis = useAgentKpis(agent.id);
+  const trend = useTenantKpis({ agentId: agent.id, groupBy: "day" });
+  const trendData =
+    trend.data && "rows" in trend.data
+      ? trend.data.rows.map((r) => ({ date: r.groupKey, runs: r.runCount }))
+      : [];
+
+  return (
+    <div className="grid gap-4 md:grid-cols-3">
+      <StatCard
+        icon={<Repeat className="h-4 w-4" />}
+        label={t("Runs", "Runs")}
+        value={kpis.data ? String(kpis.data.runCount) : "—"}
+      />
+      <StatCard
+        icon={<Clock className="h-4 w-4" />}
+        label={t("Avg. duration", "Ø Dauer")}
+        value={formatMs(kpis.data?.totalDurationMs)}
+      />
+      <StatCard
+        icon={<Timer className="h-4 w-4" />}
+        label={t("Approval wait", "Approval-Wartezeit")}
+        value={formatMs(kpis.data?.approvalWaitMs)}
+      />
+      <Panel className="p-5 md:col-span-3">
+        <div className="mb-2 text-xs uppercase tracking-wider text-muted-foreground">
+          {t("Runs, last 30 days", "Runs, letzte 30 Tage")}
+        </div>
+        <ChartContainer
+          className="aspect-auto h-48"
+          config={{ runs: { label: t("Runs", "Runs"), color: "var(--primary)" } }}
+        >
+          <LineChart data={trendData}>
+            <CartesianGrid vertical={false} />
+            <XAxis dataKey="date" tickLine={false} axisLine={false} />
+            <ChartTooltip content={<ChartTooltipContent />} />
+            <Line dataKey="runs" stroke="var(--color-runs)" strokeWidth={2} dot={false} />
+          </LineChart>
+        </ChartContainer>
+      </Panel>
+      <Panel className="p-5 md:col-span-3">
+        <div className="mb-2 text-xs uppercase tracking-wider text-muted-foreground">
+          {t("Last action", "Letzte Aktion")}
+        </div>
+        <p className="text-sm">{agent.lastAction}</p>
+        <div className="mt-3 text-xs text-muted-foreground">{agent.lastRun}</div>
+      </Panel>
     </div>
   );
 }
@@ -886,18 +932,6 @@ function AgentSkillsTab({
         </div>
       )}
     </div>
-  );
-}
-
-function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
-  return (
-    <Panel className="p-5">
-      <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
-        {icon}
-        {label}
-      </div>
-      <div className="mt-2 font-serif text-3xl">{value}</div>
-    </Panel>
   );
 }
 
