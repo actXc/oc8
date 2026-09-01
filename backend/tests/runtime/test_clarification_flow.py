@@ -94,6 +94,75 @@ async def test_waiting_run_has_open_clarification_and_pending_question(
     assert router.calls == 1  # suspended before a second model call
 
 
+class _AlwaysAsksTheSameQuestion:
+    """Every model call asks the identical question -- simulates a run whose
+    second leg re-derives and re-asks what it was already told once, the
+    exact failure mode the manual `--resume` repro traced back to (some
+    resume-mechanics/CLI-level cause outside oc8's control kept the answer
+    from landing), which is what request_clarification's repeat guard exists
+    to catch regardless of why it happens."""
+
+    QUESTION = "Which bank account?"
+
+    async def complete(self, req: Any) -> CompletionResult:
+        return CompletionResult(
+            text="",
+            tool_calls=[ToolCall(id="c1", name="ask_user", arguments={"question": self.QUESTION})],
+            usage=Usage(1, 1), stop_reason="tool_use", provider="ollama", model="m",
+        )
+
+    async def stream(self, req: Any) -> Any:
+        yield chunk_from_result(await self.complete(req))
+
+
+async def test_second_leg_repeating_the_same_question_fails_instead_of_reparking(
+    app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    router = _AlwaysAsksTheSameQuestion()
+    monkeypatch.setattr("oc8.agent.engine.get_model_router", lambda: router)
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        agent = m.Agent(tenant_id=tenant, department_id=uuid.uuid4(), name="Rep")
+        db.add(agent)
+        await db.flush()
+        run = await RunRepository(db).create(
+            tenant_id=tenant, agent_id=agent.id, context={"task": "pay the invoice"}
+        )
+        run_id = run.id
+
+    # Leg 1: parks normally, exactly like test_waiting_run_has_open_clarification.
+    await execute_run(
+        RunMessage(run_id=str(run_id), tenant_id=str(tenant), entry_id="0-0", redelivered=False),
+    )
+    async with app_session(tenant) as db:
+        run = await db.get(m.AgentRun, run_id)
+        assert run is not None
+        assert run.state == RunState.WAITING_FOR_INPUT.value
+        await resolve_clarification(db, run=run, answer="Account 42")
+        assert run.state == RunState.QUEUED.value
+
+    # Leg 2: the model asks the SAME question again -- must fail the run
+    # rather than park a second time.
+    await execute_run(
+        RunMessage(run_id=str(run_id), tenant_id=str(tenant), entry_id="0-1", redelivered=False),
+    )
+    async with app_session(tenant) as db:
+        run = await db.get(m.AgentRun, run_id)
+        assert run is not None
+        assert run.state == RunState.FAILED.value
+        assert "Which bank account?" in run.context["error"]
+
+        clars = (
+            (await db.execute(select(Clarification).where(Clarification.run_id == run_id)))
+            .scalars()
+            .all()
+        )
+        # Still only the ONE clarification from leg 1 (now answered) -- leg 2
+        # never got to create a second open row.
+        assert len(clars) == 1
+        assert clars[0].status == "answered"
+
+
 async def test_resolve_clears_pending_question(app_session: AppSessionFactory) -> None:
     tenant = uuid.uuid4()
     async with app_session(tenant) as db:

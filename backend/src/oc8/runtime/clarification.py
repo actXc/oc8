@@ -10,7 +10,41 @@ from oc8.runtime.repository import RunRepository
 from oc8.runtime.states import RunState
 
 
+class RepeatedClarification(RuntimeError):
+    """Raised instead of parking again when a run re-asks a question it has
+    already been given an answer to (verbatim) on this same run.
+
+    Every clarification the agent asks about SHOULD reach it as a fresh
+    turn on its next leg (`executor.py` appends the full Q&A history to
+    `task_text`) -- confirmed by hand against the real Claude Code CLI: given
+    that exact resumed prompt, it used the answer and moved on. So an agent
+    that asks the identical question again did not fail to receive the
+    answer through any path this system controls; something -- a runtime's
+    own resume mechanics under real timing, a non-deterministic model retry,
+    a CLI quirk -- kept it from actually being incorporated, and no amount of
+    inspecting oc8's own code changes that outcome from here.
+
+    What IS this system's job is to never let that failure mode become an
+    operator's problem: without this check, a human who answers once just
+    gets asked the same thing again, and again, each time believing they
+    are one step from unblocking a stuck agent. The first ask always parks
+    normally (an honest, non-repeating question is unaffected); the FIRST
+    verbatim repeat of it fails the run outright, loud and specific, rather
+    than parking the human a second time on a question already answered."""
+
+
 async def request_clarification(db: AsyncSession, *, run: AgentRun, question: str) -> Clarification:
+    prior_answers = [
+        c.get("answer", "")
+        for c in run.context.get("clarifications", [])
+        if c.get("question") == question
+    ]
+    if prior_answers:
+        raise RepeatedClarification(
+            "The agent asked this exact question again after already receiving an "
+            f"answer to it ({len(prior_answers)} time(s) before): {question!r}. "
+            "Stopping instead of parking a second time on the same question."
+        )
     clar = Clarification(
         tenant_id=run.tenant_id,
         run_id=run.id,
