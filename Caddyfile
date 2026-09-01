@@ -1,8 +1,16 @@
 # One origin in front of the whole stack.
-# - Plain http on :80 for IP-only testing.
-# - To get automatic HTTPS, replace `:80` with your domain (e.g. oc8.example.com)
-#   and expose 443 in the compose; Caddy provisions a Let's Encrypt cert.
-:80 {
+# - Plain http on :80 for IP-only testing (the default when OC8_DOMAIN is empty).
+# - For automatic HTTPS, set OC8_DOMAIN in your .env (e.g. oc8.example.com) --
+#   docker-compose.yml already publishes 443 and passes it into this container's
+#   environment. Caddy then provisions a Let's Encrypt cert for it on startup.
+#   DNS must already point at this host before you start the stack, or issuance
+#   fails.
+# The `:80` fallback lives in docker-compose.yml's `${OC8_DOMAIN:-:80}`, not
+# here: Caddy's own `{$VAR:default}` only substitutes the default when the
+# variable is entirely UNSET, but docker-compose's `environment:` always sets
+# it (to "" when .env leaves OC8_DOMAIN empty) -- Caddy's default would never
+# fire, leaving an empty address and a config Caddy refuses to parse.
+{$OC8_DOMAIN} {
 	# Backend: the API and the root-level liveness endpoint.
 	handle /api/* {
 		reverse_proxy backend:8099

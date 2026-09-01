@@ -315,6 +315,15 @@ services:
       - backend
     ports:
       - "${OC8_HTTP_PORT:-80}:80"
+      - "443:443"
+    environment:
+      # Read by the Caddyfile itself ({$OC8_DOMAIN}). The `:80` fallback lives
+      # HERE, not in the Caddyfile: `:-` (unlike Caddy's own env-var default)
+      # substitutes it whenever OC8_DOMAIN is unset OR empty, which is what an
+      # unfilled `OC8_DOMAIN=` line in .env actually produces. Publishing 443
+      # unconditionally below is harmless when unused (Caddy simply never
+      # binds it without a domain configured).
+      OC8_DOMAIN: "${OC8_DOMAIN:-:80}"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - oc8-caddy-data:/data
