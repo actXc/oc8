@@ -234,6 +234,14 @@ async def update_model(
         else:
             params.pop("context_window", None)
         cfg.params = params
+    if "max_tokens" in body.model_fields_set:
+        # jsonb: replaced whole, or SQLAlchemy never notices the mutation.
+        params = dict(cfg.params or {})
+        if body.max_tokens:
+            params["max_tokens"] = int(body.max_tokens)
+        else:
+            params.pop("max_tokens", None)
+        cfg.params = params
     if "used_by_copilot" in body.model_fields_set:
         await _apply_copilot_flag(db, _p.tenant_id, cfg, body.used_by_copilot)
     if "credential_id" in body.model_fields_set:

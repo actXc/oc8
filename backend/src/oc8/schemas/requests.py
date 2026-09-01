@@ -76,6 +76,13 @@ class ModelConfigWrite(CamelModel):
     #: ids and nothing else -- and without it every size question has to fall
     #: back to a conservative guess. 0 or None means "not recorded".
     context_window: int | None = None
+    #: The completion budget resolve_params falls back to for any agent on
+    #: this model that sets no per-agent override (modelrouter/sampling.py).
+    #: 0 or None means "use the framework default" (1536), not "unlimited" --
+    #: a reasoning-heavy model can spend that whole budget on hidden
+    #: reasoning tokens before writing anything visible, which reads as the
+    #: run failing outright on a large task, not as a slow one.
+    max_tokens: int | None = None
     used_by_copilot: bool | None = None
     #: A specific Credential to bind to this ModelConfig (id as string). None
     #: leaves the tenant-wide "first credential of this provider's type"

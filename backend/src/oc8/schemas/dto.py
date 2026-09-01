@@ -285,6 +285,10 @@ class ModelDTO(CamelModel):
     locality: str = "cloud"
     display_name: str | None = None
     context_window: int | None = None
+    #: The completion budget resolve_params falls back to when the agent
+    #: sets none of its own (modelrouter/sampling.py). None means "framework
+    #: default" (1536), not "unlimited".
+    max_tokens: int | None = None
     used_by_copilot: bool = False
     credential_id: str | None = None
     #: Set only when `status` is "error"/"unknown" -- the real reason from
@@ -552,6 +556,24 @@ class AgentInstructionHistoryDTO(CamelModel):
     #: Cursor for the next older page (an audit_event.seq); null once the
     #: oldest revision has been returned.
     next_before_seq: int | None = None
+
+
+class MemoryRecordDTO(CamelModel):
+    """One `memory_record` row, for the agent/department Memory tabs (§10).
+    `status` is always "approved" for the agent/department tiers this DTO
+    serves -- only company-tier writes can be "pending"/"rejected", and that
+    tier has no browsing UI yet -- carried anyway so the shape doesn't need
+    a breaking change when it does."""
+
+    id: str
+    content: str
+    status: str
+    created_at: str
+    written_by: str
+
+
+class MemoryListDTO(CamelModel):
+    records: list[MemoryRecordDTO] = []
 
 
 class PrincipalUsageDTO(CamelModel):

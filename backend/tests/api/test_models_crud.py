@@ -143,6 +143,59 @@ async def test_create_and_patch_model_config() -> None:
             assert patched["displayName"] == "Local Llama"
 
 
+async def test_patch_sets_and_clears_max_tokens() -> None:
+    tenant = uuid.UUID(str(ACME_TENANT_ID))
+    app = create_app()
+    async with LifespanManager(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            headers = {"Authorization": f"Bearer {_token(tenant)}"}
+            r = await client.post(
+                "/api/v1/models",
+                json={"provider": "ollama", "model": "llama3.1:8b", "locality": "local"},
+                headers=headers,
+            )
+            assert r.status_code == 201, r.text
+            model_id = r.json()["id"]
+            assert r.json()["maxTokens"] is None
+
+            r = await client.patch(
+                f"/api/v1/models/{model_id}",
+                json={
+                    "provider": "ollama",
+                    "model": "llama3.1:8b",
+                    "locality": "local",
+                    "maxTokens": 8192,
+                },
+                headers=headers,
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["maxTokens"] == 8192
+
+            # Omitted on a later PATCH -> preserved, not nulled.
+            r = await client.patch(
+                f"/api/v1/models/{model_id}",
+                json={"provider": "ollama", "model": "llama3.1:8b", "locality": "local"},
+                headers=headers,
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["maxTokens"] == 8192
+
+            # Explicit 0 -> cleared back to "use the framework default".
+            r = await client.patch(
+                f"/api/v1/models/{model_id}",
+                json={
+                    "provider": "ollama",
+                    "model": "llama3.1:8b",
+                    "locality": "local",
+                    "maxTokens": 0,
+                },
+                headers=headers,
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["maxTokens"] is None
+
+
 async def test_create_model_canonicalizes_provider_alias() -> None:
     tenant = uuid.UUID(str(ACME_TENANT_ID))
     app = create_app()

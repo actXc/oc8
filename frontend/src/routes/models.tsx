@@ -831,6 +831,9 @@ function ModelFormDialog({ editing, onClose }: { editing: ModelDTO | null; onClo
   const [locality, setLocality] = useState<"cloud" | "local">(editing?.locality ?? "cloud");
   const [displayName, setDisplayName] = useState(editing?.displayName ?? "");
   const [usedByCopilot, setUsedByCopilot] = useState(editing?.usedByCopilot ?? false);
+  const [maxTokens, setMaxTokens] = useState(
+    editing?.maxTokens != null ? String(editing.maxTokens) : "",
+  );
   // Create-mode only: discovery + multi-select, so adding several of a
   // provider's models doesn't mean typing each tag by hand. Manual entry
   // (the plain `modelTag` field above) stays the fallback for a provider
@@ -918,12 +921,21 @@ function ModelFormDialog({ editing, onClose }: { editing: ModelDTO | null; onClo
       );
       return;
     }
+    const parsedMaxTokens = maxTokens.trim() ? Number(maxTokens.trim()) : undefined;
+    if (
+      parsedMaxTokens !== undefined &&
+      (!Number.isFinite(parsedMaxTokens) || parsedMaxTokens < 1)
+    ) {
+      toast.error(t("Max tokens must be a positive number", "Max. Tokens muss positiv sein"));
+      return;
+    }
     const body = {
       provider: effectiveProvider,
       model: modelTag.trim(),
       locality,
       displayName: displayName.trim() || undefined,
       usedByCopilot,
+      ...(editing ? { maxTokens: parsedMaxTokens ?? 0 } : {}),
     };
     try {
       if (editing) {
@@ -1093,6 +1105,28 @@ function ModelFormDialog({ editing, onClose }: { editing: ModelDTO | null; onClo
                 />
                 {t("Use this model for the Copilot", "Dieses Modell für den Copilot nutzen")}
               </label>
+
+              {editing && (
+                <label className="block">
+                  <span className="mb-1 block text-[10px] uppercase tracking-widest text-muted-foreground">
+                    {t("Max output tokens (optional)", "Max. Output-Tokens (optional)")}
+                  </span>
+                  <input
+                    type="number"
+                    min={1}
+                    placeholder="1536"
+                    value={maxTokens}
+                    onChange={(e) => setMaxTokens(e.target.value)}
+                    className="w-full rounded-md border border-border bg-background/40 px-3 py-2 text-sm outline-none focus:border-primary/50"
+                  />
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    {t(
+                      "How much an agent on this model may write per turn, before oc8 cuts it off. Leave blank for the framework default (1536). Raise this for reasoning-heavy models on large tasks — hidden reasoning tokens count against this budget too.",
+                      "Wie viel ein Agent auf diesem Modell pro Zug schreiben darf, bevor oc8 abschneidet. Leer lassen für den Standard (1536). Bei reasoning-lastigen Modellen und großen Aufgaben höher setzen — auch unsichtbare Reasoning-Tokens zählen gegen dieses Budget.",
+                    )}
+                  </p>
+                </label>
+              )}
             </>
           )}
         </div>

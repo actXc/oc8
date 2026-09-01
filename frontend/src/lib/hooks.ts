@@ -170,6 +170,10 @@ export interface ModelDTO {
   model: string;
   locality: "cloud" | "local";
   displayName: string | null;
+  // The completion budget resolve_params falls back to for any agent on this
+  // model that sets no per-agent override. null means "framework default"
+  // (1536), not "unlimited".
+  maxTokens?: number | null;
   usedByCopilot: boolean;
   credentialId: string | null;
   healthError: string | null;
@@ -204,6 +208,7 @@ export interface ModelWriteBody {
   model: string;
   locality: string;
   displayName?: string;
+  maxTokens?: number;
   usedByCopilot?: boolean;
   credentialId?: string | null;
 }

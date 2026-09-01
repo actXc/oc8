@@ -301,6 +301,7 @@ def model_to_dto(mc: m.ModelConfig, assigned_to: list[str]) -> ModelDTO:
         locality=mc.locality,
         display_name=mc.display_name,
         context_window=_int_or_none((mc.params or {}).get("context_window")),
+        max_tokens=_int_or_none((mc.params or {}).get("max_tokens")),
         # `mapped_column(default=False)` applies at INSERT, not at construction; a
         # row built and serialized before its first flush still reads None here.
         used_by_copilot=bool(mc.used_by_copilot),
