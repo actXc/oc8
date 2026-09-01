@@ -80,4 +80,39 @@ describe("PluginSetupFields", () => {
     expect(container.querySelector('input[type="password"]')).not.toBeInTheDocument();
     expect(credentialsMock).toHaveBeenCalledWith("telegram_bot");
   });
+
+  it("renders a dropdown for a field of kind 'select' and reports the chosen option", () => {
+    const selectSetup: PluginSetupSpec = {
+      title: "Connect Telegram",
+      description: "",
+      submit_label: "Connect",
+      fields: [
+        {
+          key: "max_classification",
+          label: "Höchste erlaubte Vertraulichkeit",
+          kind: "select",
+          required: false,
+          default: "public",
+          placeholder: "",
+          options: ["public", "internal", "confidential", "restricted"],
+        },
+      ],
+      mcp: null,
+    } as unknown as PluginSetupSpec;
+
+    const onChange = vi.fn();
+    renderWithClient(<PluginSetupFields setup={selectSetup} values={{}} onChange={onChange} />);
+
+    const select = screen.getByLabelText("Höchste erlaubte Vertraulichkeit") as HTMLSelectElement;
+    expect(select.value).toBe("public");
+    expect(Array.from(select.options).map((option) => option.value)).toEqual([
+      "public",
+      "internal",
+      "confidential",
+      "restricted",
+    ]);
+
+    fireEvent.change(select, { target: { value: "internal" } });
+    expect(onChange).toHaveBeenCalledWith({ max_classification: "internal" });
+  });
 });

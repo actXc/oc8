@@ -1,27 +1,28 @@
-import { ChevronDown, Check, Send, Sparkles, X } from "lucide-react";
+import { ChevronDown, Send, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ChatMarkdown } from "@/components/chat-markdown";
+import { RUN_COMPONENT_REGISTRY } from "@/components/run-record-card";
 import { useT } from "@/lib/i18n";
 import { useCan } from "@/lib/governance-hooks";
+import type { CopilotProposal } from "@/lib/hooks";
 import {
   useApplyCopilotProposal,
-  useCopilotChat,
-  useCopilotProposal,
+  useAssistant,
+  useCopilotProposals,
   useRejectCopilotProposal,
 } from "@/lib/hooks";
+import {
+  useChatSessions,
+  useCreateChatSession,
+  useChatMessages,
+  useSendChatMessage,
+} from "@/lib/hooks-chat";
 
 // Set by DoneStep right before the full-page navigation into "/" that follows
 // onboarding — sessionStorage (not React state) because that navigation
 // remounts the whole app, so nothing in memory survives it.
 export const COPILOT_AUTO_OPEN_KEY = "oc8-copilot-auto-open";
-
-interface Msg {
-  id: string;
-  role: "user" | "copilot";
-  text: string;
-  proposalId?: string | null;
-}
 
 function greeting(de: boolean): string {
   return de
@@ -29,145 +30,270 @@ function greeting(de: boolean): string {
     : "Hi, I'm the oc8 copilot. I know your agents, departments and guardrails — ask me anything or let me configure something.";
 }
 
-function ProposalCard({ proposalId }: { proposalId: string }) {
-  const t = useT();
-  const { data: proposal } = useCopilotProposal(proposalId);
+function unavailableText(de: boolean): string {
+  return de
+    ? "Der Copilot ist gerade nicht erreichbar. Versuch es gleich noch einmal."
+    : "The copilot is unavailable right now. Try again in a moment.";
+}
+
+function proposalFailedText(de: boolean): string {
+  return de
+    ? "Der Vorschlag konnte nicht bearbeitet werden — vielleicht hat ihn jemand anderes schon beantwortet. Lade die Seite neu oder versuch es noch einmal."
+    : "That proposal could not be answered — somebody else may have answered it already. Reload or try again.";
+}
+
+// A proposal the Assistant drafted, with the two buttons that answer it.
+//
+// The Assistant's `propose_change` tool may only ever DRAFT (control_tools.py:
+// "apply_proposal is never reachable from here"), so a structural change does
+// nothing at all until somebody presses Apply here. Between the Task 6 dock
+// rewrite and this, there was no live surface that could: the mutations
+// existed and had zero call sites, so every proposal the Assistant made --
+// over the web or over Telegram -- simply sat in the database.
+function PendingProposals({ de }: { de: boolean }) {
+  const { data: proposals } = useCopilotProposals({ poll: true });
   const apply = useApplyCopilotProposal();
   const reject = useRejectCopilotProposal();
+  // Answered here-and-now, on top of what the server last said: the list is
+  // refetched after each mutation, but until that lands the card the reader
+  // just answered must not sit there looking unanswered.
+  const [answered, setAnswered] = useState<string[]>([]);
+  // The optimistic mark above is a GUESS, and a wrong guess here is the worst
+  // kind: apply/reject can be refused (409 when somebody else answered the
+  // proposal first, or any transport failure), and without this the card
+  // simply vanished while the proposal stayed `draft` — the reader is told
+  // nothing and believes a structural change went through that did not.
+  const [failed, setFailed] = useState(false);
 
-  if (!proposal) return null;
-  // Backend state machine (oc8/copilot/proposals.py): draft -> applied |
-  // rejected | expired. "draft" is the only actionable state -- there is no
-  // "pending" status.
-  const decided = proposal.status !== "draft";
+  // Same shape the chat send below uses (`sendMessage.mutate(text, { onError:
+  // ... })`): mark optimistically, undo the mark and show a notice if the
+  // server refuses.
+  function answer(id: string, run: (options: { onError: () => void }) => void) {
+    setFailed(false);
+    setAnswered((ids) => [...ids, id]);
+    run({
+      onError: () => {
+        setAnswered((ids) => ids.filter((answeredId) => answeredId !== id));
+        setFailed(true);
+      },
+    });
+  }
+
+  const pending = (proposals ?? []).filter(
+    (p: CopilotProposal) => p.status === "draft" && !answered.includes(p.id),
+  );
+  // The notice outlives the card on purpose: a 409 means the proposal really
+  // is no longer `draft`, so the refetched list drops it — and that is exactly
+  // the case where a silently disappearing card would be read as success.
+  if (pending.length === 0 && !failed) return null;
 
   return (
-    <div className="mt-1 max-w-[88%] rounded-xl border border-border bg-background/40 p-3 text-xs">
-      <div className="mb-1.5 flex items-center justify-between">
-        <span className="font-medium text-foreground">
-          {t("Proposed change", "Vorgeschlagene Änderung")}
-        </span>
-        <span
-          className={cn(
-            "rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-wide",
-            proposal.status === "applied" && "bg-[color:var(--status-running)]/15 text-[color:var(--status-running)]",
-            (proposal.status === "rejected" || proposal.status === "expired") &&
-              "bg-muted/40 text-muted-foreground",
-            proposal.status === "draft" && "bg-[color:var(--status-warning)]/15 text-[color:var(--status-warning)]",
-          )}
+    <section
+      aria-label={de ? "Offene Vorschläge" : "Pending proposals"}
+      className="border-b border-border bg-primary/5 px-4 py-3"
+    >
+      <h3 className="mb-2 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        <Sparkles className="h-3 w-3 text-primary" />
+        {de ? "Offene Vorschläge" : "Pending proposals"}
+      </h3>
+      {failed && (
+        <p
+          role="alert"
+          className="mb-2 rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-[11px] text-destructive"
         >
-          {proposal.status}
-        </span>
-      </div>
-      <ul className="space-y-1 text-muted-foreground">
-        {proposal.operations.map((op, i) => {
-          const refPairs = Object.entries(op.references);
-          return (
-            <li key={i}>
-              {op.label}
-              {refPairs.length > 0
-                ? ` — ${refPairs.map(([k, v]) => `${k}: ${v}`).join(", ")}`
-                : ""}
-            </li>
-          );
-        })}
-      </ul>
-      {!decided && (
-        <div className="mt-2 flex gap-2">
-          <button
-            type="button"
-            onClick={() => apply.mutate(proposalId)}
-            disabled={apply.isPending || reject.isPending}
-            className="inline-flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground transition hover:brightness-110 disabled:opacity-60"
-          >
-            <Check className="h-3 w-3" />
-            {t("Apply", "Übernehmen")}
-          </button>
-          <button
-            type="button"
-            onClick={() => reject.mutate(proposalId)}
-            disabled={apply.isPending || reject.isPending}
-            className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground transition hover:text-foreground disabled:opacity-60"
-          >
-            <X className="h-3 w-3" />
-            {t("Reject", "Ablehnen")}
-          </button>
-        </div>
+          {proposalFailedText(de)}
+        </p>
       )}
-    </div>
+      <ul className="space-y-2">
+        {pending.map((proposal: CopilotProposal) => (
+          <li
+            key={proposal.id}
+            className="rounded-lg border border-border bg-background/50 p-2.5 text-xs"
+          >
+            <ul className="space-y-1">
+              {proposal.operations.map((operation, index) => (
+                <li key={`${operation.label}-${index}`}>
+                  <span className="font-mono text-foreground">{operation.label}</span>
+                  {Object.entries(operation.references).map(([label, reference]) => (
+                    <span key={label} className="ml-2 text-muted-foreground">
+                      {label}: <code>{reference}</code>
+                    </span>
+                  ))}
+                </li>
+              ))}
+            </ul>
+            <div className="mt-2 flex gap-2">
+              <button
+                type="button"
+                disabled={apply.isPending || reject.isPending}
+                onClick={() => answer(proposal.id, (options) => apply.mutate(proposal.id, options))}
+                className="rounded-md bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground disabled:opacity-50"
+              >
+                {de ? "Anwenden" : "Apply"}
+              </button>
+              <button
+                type="button"
+                disabled={apply.isPending || reject.isPending}
+                onClick={() =>
+                  answer(proposal.id, (options) => reject.mutate(proposal.id, options))
+                }
+                className="rounded-md border border-border px-2.5 py-1 text-[11px] disabled:opacity-50"
+              >
+                {de ? "Ablehnen" : "Reject"}
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
+// `CopilotDock` is mounted unconditionally, once, for the whole app session
+// (app-shell.tsx) -- so the permission check has to happen here, BEFORE
+// `CopilotDockPanel` (and its chat-pipeline query hooks) ever mounts, not
+// inside it. A check at the bottom of a component that has already called
+// `useAssistant()`/`useChatSessions()` earlier in its body is too late: those
+// are plain `useQuery` calls with no `enabled` gate, so they fire on mount
+// regardless of what a later `if (!mayUseCopilot) return null` decides --
+// every signed-in user would otherwise cause a GET /assistant + GET
+// /chat/sessions (a 403 for anyone without copilot:manage) on every page
+// load, permitted or not.
 export function CopilotDock() {
-  const t = useT();
   const can = useCan();
+  // Only org_admin holds copilot:manage (a prepared proposal can name any
+  // agent in any department) — everyone else never sees the dock, and now
+  // never causes it to fire a single request either.
+  if (!can("copilot:manage")) return null;
+  return <CopilotDockPanel />;
+}
+
+// The floating oc8 Copilot dock -- a direct 1:1 chat with the tenant's
+// standing Assistant agent (GET /assistant), rendered as a compact overlay
+// instead of a full page like ChatWindow/chat-window.tsx. Reuses the exact
+// same session/message hooks and session-bootstrap logic as ChatWindow (see
+// its own doc comment) rather than a separate mechanism -- the only real
+// difference is that this dock has no "Start chat" button: the first message
+// typed here lazily creates the session itself (`pendingSend` below), so
+// typing-and-sending stays a single action the way the old single-shot
+// /copilot/chat POST used to feel, even though a session now exists
+// underneath it.
+function CopilotDockPanel() {
+  const t = useT();
   const de = t("en", "de") === "de";
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
-  const [msgs, setMsgs] = useState<Msg[]>([{ id: "m0", role: "copilot", text: greeting(de) }]);
-  const chat = useCopilotChat();
   const scroller = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const mayUseCopilot = can("copilot:manage");
+
+  const { data: assistant } = useAssistant();
+  const assistantAgentId = assistant?.agentId;
+
+  const { data: sessions } = useChatSessions(assistantAgentId);
+  const createSession = useCreateChatSession();
+  const [sessionId, setSessionId] = useState<string | null>(null);
+
+  // Default to the most recent existing session once both the Assistant's id
+  // and its sessions have loaded. Never runs again once the reader has one
+  // selected -- same shape as ChatWindow's own bootstrap effect. Gated on
+  // `assistantAgentId` too: until it resolves, `sessions` (queried with an
+  // undefined agentId) would answer for every agent's chat, not just the
+  // Assistant's, and must never be picked from.
+  useEffect(() => {
+    if (!assistantAgentId) return;
+    if (sessionId !== null) return;
+    if (sessions && sessions.length > 0) setSessionId(sessions[0].id);
+  }, [assistantAgentId, sessions, sessionId]);
+
+  const { data: messages } = useChatMessages(sessionId);
+  const sendMessage = useSendChatMessage(sessionId ?? "");
+
+  // A send that failed (session creation OR the message post itself): shown
+  // as a transcript bubble, same as the pre-rewrite dock's own
+  // "Der Copilot ist gerade nicht erreichbar..." notice, since a chat
+  // surface losing a message silently with no toast and no trace is worse
+  // here than elsewhere -- the reader has no other way to tell their message
+  // never went anywhere.
+  const [sendError, setSendError] = useState(false);
+
+  function fail(text: string) {
+    setSendError(true);
+    // Put the text back so a retry doesn't mean retyping it.
+    setInput(text);
+  }
+
+  // A message typed before any session exists yet: send() creates the
+  // session first, then this fires once `sessionId` (and therefore a
+  // `sendMessage` bound to the right session) lands on the next render.
+  const [pendingSend, setPendingSend] = useState<string | null>(null);
+  useEffect(() => {
+    if (!sessionId || pendingSend === null) return;
+    const text = pendingSend;
+    setPendingSend(null);
+    sendMessage.mutate(text, { onError: () => fail(text) });
+    // sendMessage/fail are fresh every render; only sessionId/pendingSend
+    // should re-trigger this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, pendingSend]);
 
   useEffect(() => {
-    if (!mayUseCopilot) return;
     if (window.sessionStorage.getItem(COPILOT_AUTO_OPEN_KEY) === "1") {
       window.sessionStorage.removeItem(COPILOT_AUTO_OPEN_KEY);
       setOpen(true);
     }
-  }, [mayUseCopilot]);
+  }, []);
 
   useEffect(() => {
-    scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
-  }, [msgs, chat.isPending, open]);
+    const el = scroller.current;
+    if (el && typeof el.scrollTo === "function") {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    }
+  }, [messages, open, sendError]);
 
   useEffect(() => {
     if (open) inputRef.current?.focus();
   }, [open]);
 
+  // Same "is the agent still typing" signal as ChatWindow: the transcript's
+  // own last turn.
+  const waitingOnAgent =
+    !!messages && messages.length > 0 && messages[messages.length - 1].role === "user";
+  const busy = createSession.isPending || sendMessage.isPending || waitingOnAgent;
+
   function send() {
     const text = input.trim();
-    if (!text || chat.isPending) return;
-    setMsgs((p) => [...p, { id: `u${p.length}`, role: "user", text }]);
+    if (!text || busy || !assistantAgentId) return;
+    setSendError(false);
     setInput("");
-    chat.mutate(text, {
-      onSuccess: (reply) => {
-        setMsgs((p) => [
-          ...p,
-          { id: `c${p.length}`, role: "copilot", text: reply.text, proposalId: reply.proposalId },
-        ]);
-        inputRef.current?.focus();
-      },
-      onError: () => {
-        setMsgs((p) => [
-          ...p,
-          {
-            id: `c${p.length}`,
-            role: "copilot",
-            text: de
-              ? "Der Copilot ist gerade nicht erreichbar. Versuch es gleich noch einmal."
-              : "The copilot is unavailable right now. Try again in a moment.",
-          },
-        ]);
-      },
-    });
+    if (!sessionId) {
+      createSession.mutate(assistantAgentId, {
+        onSuccess: (session) => {
+          setSessionId(session.id);
+          setPendingSend(text);
+        },
+        onError: () => fail(text),
+      });
+      return;
+    }
+    sendMessage.mutate(text, { onError: () => fail(text) });
   }
-
-  // Only org_admin holds copilot:manage (a prepared proposal can name any
-  // agent in any department) — everyone else never sees the dock at all.
-  if (!mayUseCopilot) return null;
 
   const suggestions = de
     ? ["Was wartet auf Freigabe?", "Kosten diesen Monat?", "Neuen Agenten anlegen"]
     : ["What needs approval?", "Cost this month?", "Create a new agent"];
+  const hasMessages = !!messages && messages.length > 0;
 
   return (
     <>
       {open && (
         <div className="fixed bottom-24 right-5 z-50 flex h-[min(72vh,600px)] w-[min(94vw,400px)] flex-col overflow-hidden rounded-2xl border border-border bg-panel shadow-[0_30px_80px_-30px_oklch(0_0_0/80%)]">
           <header className="flex items-center gap-2.5 border-b border-border px-4 py-3">
-            <img src="/octopus_oc8.svg" alt="" className="h-8 w-8 shrink-0 select-none" draggable={false} />
+            <img
+              src="/octopus_oc8.svg"
+              alt=""
+              className="h-8 w-8 shrink-0 select-none"
+              draggable={false}
+            />
             <div className="min-w-0 flex-1 leading-tight">
               <div className="font-serif text-base lowercase">oc8 copilot</div>
               <div className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -185,12 +311,25 @@ export function CopilotDock() {
             </button>
           </header>
 
+          <PendingProposals de={de} />
+
           <div ref={scroller} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
-            {msgs.map((m) =>
+            {!hasMessages && (
+              <div className="flex gap-2">
+                <img
+                  src="/octopus_oc8.svg"
+                  alt=""
+                  className="mt-0.5 h-6 w-6 shrink-0"
+                  draggable={false}
+                />
+                <ChatMarkdown text={greeting(de)} className="max-w-[88%]" />
+              </div>
+            )}
+            {messages?.map((m) =>
               m.role === "user" ? (
                 <div key={m.id} className="flex justify-end">
                   <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-sm text-primary-foreground">
-                    {m.text}
+                    {m.content}
                   </div>
                 </div>
               ) : (
@@ -202,17 +341,25 @@ export function CopilotDock() {
                       className="mt-0.5 h-6 w-6 shrink-0"
                       draggable={false}
                     />
-                    <ChatMarkdown text={m.text} className="max-w-[88%]" />
+                    <ChatMarkdown text={m.content} className="max-w-[88%]" />
                   </div>
-                  {m.proposalId && (
-                    <div className="ml-8">
-                      <ProposalCard proposalId={m.proposalId} />
+                  {m.renderedComponents.length > 0 && (
+                    <div className="ml-8 space-y-2">
+                      {m.renderedComponents.map((c, i) => {
+                        const Renderer = Object.prototype.hasOwnProperty.call(
+                          RUN_COMPONENT_REGISTRY,
+                          c.componentKey,
+                        )
+                          ? RUN_COMPONENT_REGISTRY[c.componentKey]
+                          : undefined;
+                        return Renderer ? <Renderer key={i} props={c.props} /> : null;
+                      })}
                     </div>
                   )}
                 </div>
               ),
             )}
-            {chat.isPending && (
+            {waitingOnAgent && (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <img src="/octopus_oc8.svg" alt="" className="h-6 w-6 shrink-0" draggable={false} />
                 <span className="inline-flex gap-1">
@@ -226,9 +373,22 @@ export function CopilotDock() {
                 </span>
               </div>
             )}
+            {sendError && (
+              <div className="flex gap-2">
+                <img
+                  src="/octopus_oc8.svg"
+                  alt=""
+                  className="mt-0.5 h-6 w-6 shrink-0"
+                  draggable={false}
+                />
+                <div className="max-w-[88%] rounded-xl border border-border bg-background/40 px-3 py-2 text-sm text-muted-foreground">
+                  {unavailableText(de)}
+                </div>
+              </div>
+            )}
           </div>
 
-          {msgs.length <= 1 && (
+          {!hasMessages && (
             <div className="flex flex-wrap gap-1.5 px-4 pb-2">
               {suggestions.map((s) => (
                 <button
@@ -265,11 +425,11 @@ export function CopilotDock() {
               <button
                 type="button"
                 onClick={send}
-                disabled={!input.trim() || chat.isPending}
+                disabled={!input.trim() || busy || !assistantAgentId}
                 aria-label={de ? "Senden" : "Send"}
                 className={cn(
                   "grid h-8 w-8 shrink-0 place-items-center rounded-lg transition",
-                  input.trim() && !chat.isPending
+                  input.trim() && !busy && assistantAgentId
                     ? "bg-primary text-primary-foreground hover:brightness-110"
                     : "bg-muted/40 text-muted-foreground",
                 )}
@@ -291,12 +451,7 @@ export function CopilotDock() {
           <X className="h-5 w-5 text-muted-foreground" />
         ) : (
           <>
-            <img
-              src="/octopus_oc8.svg"
-              alt=""
-              className="h-9 w-9 select-none"
-              draggable={false}
-            />
+            <img src="/octopus_oc8.svg" alt="" className="h-9 w-9 select-none" draggable={false} />
             <span className="absolute -right-0.5 -top-0.5 grid h-4 w-4 place-items-center rounded-full bg-primary text-primary-foreground">
               <Sparkles className="h-2.5 w-2.5" />
             </span>

@@ -18,6 +18,7 @@ from oc8.channels.notice import (
     ApprovalNotice,
     ChannelCapabilities,
     ChannelDecision,
+    ChannelFreeText,
     ChannelLink,
 )
 
@@ -69,12 +70,21 @@ class ApprovalChannel(Protocol):
         """
         ...
 
-    def parse_inbound(self, update: Mapping[str, Any]) -> ChannelDecision | ChannelLink | None:
+    def parse_inbound(
+        self, update: Mapping[str, Any]
+    ) -> ChannelDecision | ChannelLink | ChannelFreeText | None:
         """What the platform is telling us, in oc8's vocabulary, or None.
 
-        None for everything that is not one of ours -- a person typing "hallo" at
-        the bot, a delivery receipt, a platform's own housekeeping. Returning
-        None is normal and must never be an error.
+        Four answers, not three. A plain sentence a human typed at the bot is a
+        `ChannelFreeText` -- `dispatch.process_inbound` routes it to the tenant
+        Assistant (design doc 2026-08-31-unified-assistant-telegram-chat). Until
+        that slice this had to be `None`, and this signature said so; a plugin
+        still returning `None` for free text keeps working exactly as before, it
+        just never reaches the Assistant.
+
+        None for everything that is genuinely not one of ours -- a delivery
+        receipt, an edited-message event, a platform's own housekeeping.
+        Returning None is normal and must never be an error.
         """
         ...
 

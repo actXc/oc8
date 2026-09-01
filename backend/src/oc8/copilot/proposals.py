@@ -56,7 +56,10 @@ async def create_proposal(
                                  configuration=operation_data(operation),
                                  target_revision=await target_revision(db, operation)))
     await db.flush()
-    await append_event(db, tenant_id=actor.tenant_id, actor_type="operator", actor_id=None,
+    # From the actor, not hardcoded: an agent (the tenant Assistant) can create a
+    # proposal now, and an audit line that calls that an operator is simply
+    # false. `Principal.kind` is the same vocabulary actor_type already uses.
+    await append_event(db, tenant_id=actor.tenant_id, actor_type=actor.kind, actor_id=None,
                        category="copilot", action="proposal.created",
                        resource={"proposal_id": str(proposal.id), "operation_count": len(parsed)},
                        principal=actor)

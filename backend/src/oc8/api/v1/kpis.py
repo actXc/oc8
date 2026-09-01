@@ -144,8 +144,18 @@ def _group_id_query(
     """The group values a `groupBy=agent`/`department` request will produce,
     intersected with whatever `agentId`/`departmentId` narrowing the caller
     already asked for. Tenant-scoped explicitly, like every other query in this
-    module, and soft-deleted rows are excluded -- the same set
-    `agents.repo.visible_agents`/`departments.repo.visible_departments` list.
+    module; soft-deleted rows and the tenant Assistant's own agent/department
+    are excluded -- the same set `agents.repo.visible_agents` /
+    `departments.repo.visible_departments` list.
+
+    The Assistant exclusion is not cosmetic. It is filtered out of both those
+    funnels, so `GET /agents/{id}` and the per-agent KPI route already 404 for
+    it. Enumerating it HERE produced a breakdown row for an agent whose own
+    detail routes deny it exists -- a row nobody can click through. This query
+    does not go through the funnels (it selects ids, not rows, and answers for
+    a caller who has already passed the route's own scope check), so the flag
+    terms are mirrored rather than inherited; the two funnels remain the place
+    the rule is stated.
 
     `department` enumerates the DEPARTMENT table, not `Agent.department_id`.
     Deriving the list from agents dropped any department with no live agent in
@@ -158,7 +168,9 @@ def _group_id_query(
     """
     if group_by == "agent":
         stmt = select(m.Agent.id).where(
-            m.Agent.tenant_id == tenant_id, m.Agent.deleted_at.is_(None)
+            m.Agent.tenant_id == tenant_id,
+            m.Agent.deleted_at.is_(None),
+            m.Agent.is_tenant_assistant.is_(False),
         )
         if agent_id is not None:
             stmt = stmt.where(m.Agent.id == agent_id)
@@ -166,7 +178,9 @@ def _group_id_query(
             stmt = stmt.where(m.Agent.department_id == department_id)
         return stmt
     dept_stmt = select(m.Department.id).where(
-        m.Department.tenant_id == tenant_id, m.Department.deleted_at.is_(None)
+        m.Department.tenant_id == tenant_id,
+        m.Department.deleted_at.is_(None),
+        m.Department.is_assistant_department.is_(False),
     )
     if department_id is not None:
         dept_stmt = dept_stmt.where(m.Department.id == department_id)

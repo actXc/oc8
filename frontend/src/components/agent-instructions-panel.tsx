@@ -1,13 +1,22 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { Panel } from "@/components/app-shell";
 import {
   useAgentInstructionHistory,
+  useAssistant,
   useUpdateAgentInstructions,
   type AgentInstructionRevision,
 } from "@/lib/hooks";
+import {
+  useChatSessions,
+  useCreateChatSession,
+  useChatMessages,
+  useSendChatMessage,
+} from "@/lib/hooks-chat";
 import { useT } from "@/lib/i18n";
+import { useCan } from "@/lib/governance-hooks";
+import { cn } from "@/lib/utils";
 
 interface VersionRow {
   text: string;
@@ -52,6 +61,209 @@ function buildVersions(
   ];
 }
 
+/** "Draft with copilot" drawer body for AgentInstructionsPanel below. Mounted
+ * only while the drawer is open (`assistOpen && mayUseCopilot` at the call
+ * site) so its chat-pipeline hooks -- `useAssistant`, `useChatSessions`, the
+ * per-message poll -- only ever fire while someone is actually using it, not
+ * on every agent-detail-page view.
+ *
+ * Talks to the tenant's real Assistant agent over the same session/message
+ * hooks `ChatWindow` (chat-window.tsx) and the floating Copilot dock
+ * (copilot-dock.tsx) use -- no separate mechanism. There is no "Start chat"
+ * step here (unlike ChatWindow): the first Generate click lazily creates the
+ * session itself via `pendingMessage`, mirroring copilot-dock.tsx's identical
+ * create-then-send bootstrap. Because the Assistant is a single tenant-wide
+ * agent, this reuses whatever session already exists for it (e.g. one
+ * started from the floating dock) rather than starting a second, parallel
+ * conversation.
+ *
+ * A generate request is matched to its reply by run id, not by transcript
+ * position: `POST /chat/sessions/{id}/messages` (api/v1/chat.py) returns the
+ * id of the run it just enqueued for THIS specific message, in a `runId`
+ * field on the response only (never persisted on the user's own
+ * `ChatMessage` row). `awaitingRunId` holds that id, and the reply is taken
+ * once an assistant message carrying the same `runId` shows up in the
+ * transcript -- not "whichever assistant turn lands next" or "the transcript
+ * reached length N". That distinction matters specifically because the dock
+ * and this panel share one Assistant session: a message sent through the
+ * floating dock while a draft-generate request is still in flight must never
+ * be mistaken for the generated draft, and matching by content or position
+ * both could be fooled by that interleaving -- matching by run id can't be.
+ */
+function DraftWithCopilot({
+  agentName,
+  rough,
+  onRoughChange,
+  onClose,
+  onInsert,
+}: {
+  agentName: string;
+  rough: string;
+  onRoughChange: (value: string) => void;
+  onClose: () => void;
+  onInsert: (text: string) => void;
+}) {
+  const t = useT();
+  const de = t("en", "de") === "de";
+
+  const { data: assistant } = useAssistant();
+  const assistantAgentId = assistant?.agentId;
+  const { data: sessions } = useChatSessions(assistantAgentId);
+  const createSession = useCreateChatSession();
+  const [sessionId, setSessionId] = useState<string | null>(null);
+
+  // Same bootstrap as ChatWindow/copilot-dock.tsx: default to the most
+  // recent existing session once the Assistant's id and its sessions have
+  // both loaded; never runs again once one is selected.
+  useEffect(() => {
+    if (!assistantAgentId) return;
+    if (sessionId !== null) return;
+    if (sessions && sessions.length > 0) setSessionId(sessions[0].id);
+  }, [assistantAgentId, sessions, sessionId]);
+
+  const { data: messages } = useChatMessages(sessionId);
+  const sendMessage = useSendChatMessage(sessionId ?? "");
+
+  const [proposedDraft, setProposedDraft] = useState<string | null>(null);
+  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
+  // The run id `POST /chat/sessions/{id}/messages` returns for THIS specific
+  // send (api/v1/chat.py's post_message -- a same-response-only signal, not
+  // a persisted column). Correlating by run id rather than by transcript
+  // position/length matters here specifically because the dock and this
+  // panel deliberately talk to the same tenant-wide Assistant session: a
+  // message sent through the floating dock while a draft-generate request is
+  // in flight would otherwise be able to land in "our" slot and get taken as
+  // the generated draft.
+  const [awaitingRunId, setAwaitingRunId] = useState<string | null>(null);
+
+  function fail() {
+    setAwaitingRunId(null);
+    toast.error(t("Couldn't reach the copilot", "Copilot war nicht erreichbar"));
+  }
+
+  function sendAndTrack(message: string) {
+    sendMessage.mutate(message, {
+      onSuccess: (userMessage) => {
+        if (userMessage.runId) {
+          setAwaitingRunId(userMessage.runId);
+        } else {
+          // No run was enqueued for this message (e.g. the Assistant's
+          // secret-blindness gate refused it outright) -- there is nothing
+          // to wait for.
+          fail();
+        }
+      },
+      onError: fail,
+    });
+  }
+
+  // A generate request made before any session existed yet: send it as soon
+  // as `sessionId` (and therefore a `sendMessage` bound to the right
+  // session) lands on the next render.
+  useEffect(() => {
+    if (!sessionId || pendingMessage === null) return;
+    const message = pendingMessage;
+    setPendingMessage(null);
+    sendAndTrack(message);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, pendingMessage]);
+
+  useEffect(() => {
+    if (!awaitingRunId || !messages) return;
+    const reply = messages.find((m) => m.role === "assistant" && m.runId === awaitingRunId);
+    if (!reply) return;
+    setProposedDraft(reply.content);
+    setAwaitingRunId(null);
+  }, [messages, awaitingRunId]);
+
+  // `awaitingRunId` alone has a gap: it's only set inside sendAndTrack's
+  // onSuccess, so it's still null for the moment a mutation is actually in
+  // flight (session-create OR the message post itself) -- fold that in too,
+  // so Generate can't be double-clicked in that window.
+  const generating = awaitingRunId !== null || createSession.isPending || sendMessage.isPending;
+
+  function generateDraft() {
+    const desc = rough.trim();
+    if (!desc || generating) return;
+    const message = de
+      ? `Schreibe eine vollständige, klare Instruction (dauerhafter System-Prompt) für den Agenten "${agentName}". Grobe Beschreibung, was er tun soll: ${desc}\n\nGib NUR den fertigen Instruction-Text zurück -- ohne Einleitung, ohne Erklärung, ohne Anführungszeichen drumherum.`
+      : `Write a complete, clear instruction (standing system prompt) for the agent "${agentName}". Rough description of what it should do: ${desc}\n\nReturn ONLY the finished instruction text -- no preamble, no explanation, no surrounding quotes.`;
+    setProposedDraft(null);
+    if (sessionId) {
+      sendAndTrack(message);
+    } else if (assistantAgentId) {
+      createSession.mutate(assistantAgentId, {
+        onSuccess: (session) => {
+          setSessionId(session.id);
+          setPendingMessage(message);
+        },
+        onError: fail,
+      });
+    } else {
+      fail();
+    }
+  }
+
+  return (
+    <div className="mt-4 rounded-md border border-primary/30 bg-primary/5 p-3">
+      <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
+        <img src="/octopus_oc8.svg" alt="" className="h-4 w-4" draggable={false} />
+        {t("Describe roughly what this agent should do", "Beschreib grob, was der Agent tun soll")}
+      </div>
+      <textarea
+        value={rough}
+        onChange={(e) => onRoughChange(e.target.value)}
+        rows={2}
+        placeholder={t(
+          'e.g. "Handles first-level IT support tickets, replies to users, escalates hardware issues."',
+          "z. B. „Bearbeitet First-Level-IT-Support-Tickets, antwortet Anwendern, eskaliert Hardware-Probleme.“",
+        )}
+        className="mt-2 w-full resize-y rounded-md border border-border bg-background/60 px-3 py-2 text-sm outline-none focus:border-primary/50"
+      />
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={generateDraft}
+          disabled={!rough.trim() || generating}
+          className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {generating ? t("Generating…", "Wird generiert…") : t("Generate", "Generieren")}
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-xs text-muted-foreground transition hover:text-foreground"
+        >
+          {t("Close", "Schließen")}
+        </button>
+      </div>
+      {proposedDraft && (
+        <div className="mt-3 rounded-md border border-border bg-background/60 p-3">
+          <div className="max-h-48 overflow-auto whitespace-pre-wrap font-mono text-xs text-foreground/80">
+            {proposedDraft}
+          </div>
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              onClick={() => onInsert(proposedDraft)}
+              className="rounded-md bg-primary px-2.5 py-1.5 text-[11px] font-medium text-primary-foreground transition hover:brightness-110"
+            >
+              {t("Insert into editor", "In Editor einfügen")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setProposedDraft(null)}
+              className="rounded-md border border-border px-2.5 py-1.5 text-[11px] text-muted-foreground transition hover:text-foreground"
+            >
+              {t("Discard", "Verwerfen")}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Agent detail page's "Instructions" tab: the persistent, editable system
  * prompt every run sends (`Agent.mission` on the wire), laid out like
  * Impossible Cloud's IAM policy-version editor (editor pane + a numbered
@@ -70,10 +282,12 @@ function buildVersions(
  * instructions every run carries. */
 export function AgentInstructionsPanel({
   agentId,
+  agentName,
   mission,
   mayManage,
 }: {
   agentId: string;
+  agentName: string;
   mission: string;
   mayManage: boolean;
 }) {
@@ -84,6 +298,15 @@ export function AgentInstructionsPanel({
   const [draft, setDraft] = useState(mission);
   const update = useUpdateAgentInstructions();
   const history = useAgentInstructionHistory(agentId);
+
+  // Same permission the floating oc8 Copilot dock (copilot-dock.tsx) already
+  // gates on -- this reuses that dock's chat pipeline against the same
+  // tenant-wide Assistant agent, so anyone who can't see the dock can't
+  // reach it from here either.
+  const can = useCan();
+  const mayUseCopilot = can("copilot:manage");
+  const [assistOpen, setAssistOpen] = useState(false);
+  const [rough, setRough] = useState("");
 
   const dirty = draft !== mission;
   const revisions = history.data?.pages.flatMap((p) => p.revisions) ?? [];
@@ -128,16 +351,55 @@ export function AgentInstructionsPanel({
             <h3 className="mt-0.5 font-serif text-lg">{t("Instructions", "Anweisungen")}</h3>
           </div>
           {mayManage && (
-            <button
-              type="button"
-              onClick={save}
-              disabled={!dirty || update.isPending}
-              className="shrink-0 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {update.isPending ? t("Saving…", "Wird gespeichert…") : t("Save", "Speichern")}
-            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              {mayUseCopilot && (
+                <button
+                  type="button"
+                  onClick={() => setAssistOpen((o) => !o)}
+                  title={t(
+                    "Let the copilot draft this from a rough description",
+                    "Vom Copilot aus einer groben Beschreibung entwerfen lassen",
+                  )}
+                  aria-label={t("Draft with copilot", "Mit Copilot entwerfen")}
+                  className={cn(
+                    "grid h-8 w-8 place-items-center rounded-md border transition",
+                    assistOpen
+                      ? "border-primary/50 bg-primary/10"
+                      : "border-border hover:border-primary/40 hover:bg-muted/30",
+                  )}
+                >
+                  <img
+                    src="/octopus_oc8.svg"
+                    alt=""
+                    className="h-5 w-5 select-none"
+                    draggable={false}
+                  />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={save}
+                disabled={!dirty || update.isPending}
+                className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {update.isPending ? t("Saving…", "Wird gespeichert…") : t("Save", "Speichern")}
+              </button>
+            </div>
           )}
         </div>
+        {assistOpen && mayUseCopilot && (
+          <DraftWithCopilot
+            agentName={agentName}
+            rough={rough}
+            onRoughChange={setRough}
+            onClose={() => setAssistOpen(false)}
+            onInsert={(text) => {
+              setDraft(text);
+              setRough("");
+              setAssistOpen(false);
+            }}
+          />
+        )}
         <textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}

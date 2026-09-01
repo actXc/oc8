@@ -1679,7 +1679,7 @@ export interface DiscoveredCapa {
 export interface PluginSetupField {
   key: string;
   label: string;
-  kind: "text" | "url" | "password" | "department" | "credential";
+  kind: "text" | "url" | "password" | "department" | "credential" | "select";
   required: boolean;
   default: string;
   placeholder: string;
@@ -1691,6 +1691,9 @@ export interface PluginSetupField {
   // backend), not through a CamelModel, so -- like `submit_label` below --
   // it keeps the backend's snake_case key rather than being camelCased.
   credential_type?: string;
+  // Only present (and only meaningful) when kind === "select": the fixed
+  // choices, in order. Same snake_case-passthrough reasoning as above.
+  options?: string[];
 }
 
 export interface PluginSetupSpec {
@@ -2168,15 +2171,15 @@ export interface CopilotProposal {
   operations: CopilotOperationRef[];
 }
 
-export interface CopilotChatReply {
-  text: string;
-  missingFields: string[];
-  proposalId: string | null;
-}
-
-export function useCopilotChat() {
-  return useMutation({
-    mutationFn: (message: string) => api.post<CopilotChatReply>("/copilot/chat", { message }),
+// The tenant's single standing Assistant agent (GET /assistant,
+// backend/src/oc8/api/v1/chat.py -- get_or_create_assistant under the hood,
+// so this also lazily provisions it on first call). One agent id per tenant,
+// never changes under a session, so this never needs invalidating.
+export function useAssistant() {
+  return useQuery({
+    queryKey: ["assistant"],
+    queryFn: () => api.get<{ agentId: string }>("/assistant"),
+    staleTime: Infinity,
   });
 }
 
@@ -2185,6 +2188,28 @@ export function useCopilotProposal(proposalId: string | null) {
     queryKey: ["copilot", "proposal", proposalId],
     queryFn: () => api.get<CopilotProposal>(`/copilot/proposals/${proposalId}`),
     enabled: !!proposalId,
+  });
+}
+
+// Everything the Assistant has drafted and nobody has answered yet
+// (GET /copilot/proposals, backend/src/oc8/api/v1/copilot.py). "draft" is the
+// only status `create_proposal` ever writes, so it is this system's word for
+// "waiting for a human".
+//
+// Listed by status rather than correlated to a chat message on purpose: the
+// `propose_change` tool answers the model with a German sentence naming the
+// id, and a sentence is not an API. Listing also covers a proposal the
+// Assistant raised over Telegram, which no web transcript mentions at all.
+//
+// Polled on the same 2s cadence the chat transcript uses while a run is in
+// flight (hooks-chat.ts's useChatMessages), so a proposal made mid-answer
+// appears without the reader having to reload.
+export function useCopilotProposals(options?: { enabled?: boolean; poll?: boolean }) {
+  return useQuery({
+    queryKey: ["copilot", "proposals"],
+    queryFn: () => api.get<CopilotProposal[]>("/copilot/proposals"),
+    enabled: options?.enabled ?? true,
+    refetchInterval: options?.poll ? 2000 : false,
   });
 }
 
@@ -2199,6 +2224,7 @@ export function useApplyCopilotProposal() {
       // budgets or almost anything else the copilot can see — invalidating
       // the whole cache is the same call `useRestoreBackup` makes for the
       // same reason: enumerating what changed costs more than refetching.
+      // This sweep covers the pending list too.
       qc.invalidateQueries();
     },
   });
@@ -2209,7 +2235,12 @@ export function useRejectCopilotProposal() {
   return useMutation({
     mutationFn: (proposalId: string) =>
       api.post<CopilotProposal>(`/copilot/proposals/${proposalId}/reject`),
-    onSuccess: (proposal) => qc.setQueryData(["copilot", "proposal", proposal.id], proposal),
+    onSuccess: (proposal) => {
+      qc.setQueryData(["copilot", "proposal", proposal.id], proposal);
+      // Narrow, unlike apply: a rejection changes nothing but the proposal's
+      // own status, so only the pending list has to be re-read.
+      qc.invalidateQueries({ queryKey: ["copilot", "proposals"] });
+    },
   });
 }
 

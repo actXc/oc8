@@ -379,9 +379,14 @@ async def _list_tools(
         SEARCH_KNOWLEDGE,
         SEARCH_MEMORY,
         MEMORY_WRITE,
-        ASK_USER,
         RENDER_COMPONENT,
     ]
+    # Withheld from the tenant Assistant specifically, mirroring
+    # control_tools.offered_tools' own reasoning: a park only WORKS if
+    # something can answer it, and Telegram free text -- one of the
+    # Assistant's own doors -- has no reply-to-a-clarification path at all.
+    if not agent.is_tenant_assistant:
+        core.append(ASK_USER)
     if agent.is_team_lead:
         # Same argument as REQUEST_DECISION above, one step further. delegate_task
         # was withheld here as a lifecycle tool, but it is not one: it creates a
@@ -679,6 +684,7 @@ async def _call_tool(
             active_skills=active,
             mcp_conn=conn,
             originating_operator=run.context.get("originating_operator"),
+            run_id=run.id,
         )
         assert outcome is not None
         if outcome.pending_run is not None:

@@ -72,6 +72,15 @@ class Department(Base, PkMixin, TenantMixin, TimestampMixin, SoftDeleteMixin):
     # Display-only fields backing the office view (icon, okr, kpi, accent, ...).
     presentation: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     prompt_caching_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # The department the tenant's oc8 Assistant lives in -- auto-provisioned by
+    # `agent.assistant.get_or_create_assistant`, never configured by anyone.
+    # Mirrors `Agent.is_tenant_assistant`, and for the same reason: the two
+    # scoped repositories (`departments/repo.py`, `agents/repo.py`) filter this
+    # pair out of every user-facing list, and an explicit flag is cheaper and
+    # clearer than joining back through `team_lead_agent_id` on every read.
+    is_assistant_department: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
 
 class Role(Base, PkMixin, TenantMixin, TimestampMixin, SoftDeleteMixin):
@@ -258,6 +267,12 @@ class Agent(Base, PkMixin, TenantMixin, TimestampMixin, SoftDeleteMixin):
         JSONB, nullable=False, default=list
     )
     is_team_lead: Mapped[bool] = mapped_column(nullable=False, default=False)
+    # The ONE agent per tenant that is the unified oc8 Assistant (chat +
+    # Telegram entry point). Every is_tenant_assistant agent is also
+    # is_team_lead; the reverse is not -- this flag is what control_tools.py's
+    # _delegate() checks to allow CROSS-department delegation, which an
+    # ordinary team lead must never get.
+    is_tenant_assistant: Mapped[bool] = mapped_column(nullable=False, default=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="stopped")
     # Why the agent is paused, so a resume clears only the right kind (§15.4 A2):
     # "budget" (scope budget hard-stop) vs "supervision" (drift escalation). NULL
@@ -278,5 +293,18 @@ class Agent(Base, PkMixin, TenantMixin, TimestampMixin, SoftDeleteMixin):
         CheckConstraint(
             "trust_level IN ('first_party','verified','community')",
             name="ck_agent_trust",
+        ),
+        # One tenant Assistant per tenant, and the database is the one that
+        # says so: `get_or_create_assistant` is check-then-insert with five
+        # concurrent entrypoints, so without this two tabs on a fresh tenant
+        # each create an Assistant (and a department) and later lookups answer
+        # with an arbitrary one. Partial on `deleted_at IS NULL` so an archived
+        # Assistant does not block provisioning its replacement. Mirrored by
+        # migration 0082 for databases that predate it.
+        Index(
+            "uq_agent_tenant_assistant",
+            "tenant_id",
+            unique=True,
+            postgresql_where=text("is_tenant_assistant AND deleted_at IS NULL"),
         ),
     )

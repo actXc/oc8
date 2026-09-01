@@ -3,9 +3,22 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { AgentInstructionsPanel } from "@/components/agent-instructions-panel";
 
-const { getHistory, patchInstructions } = vi.hoisted(() => ({
+const {
+  getHistory,
+  patchInstructions,
+  assistantMock,
+  sessionsMock,
+  createSessionMock,
+  messagesMock,
+  sendMessageMock,
+} = vi.hoisted(() => ({
   getHistory: vi.fn((_url: string) => ({ revisions: [], totalCount: 0, nextBeforeSeq: null })),
   patchInstructions: vi.fn(),
+  assistantMock: vi.fn(),
+  sessionsMock: vi.fn(),
+  createSessionMock: vi.fn(),
+  messagesMock: vi.fn(),
+  sendMessageMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -21,9 +34,25 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
+// Only useAssistant is mocked here -- useAgentInstructionHistory and
+// useUpdateAgentInstructions keep running for real, against the @/lib/api
+// mock above, exactly as the pre-existing tests already relied on.
+vi.mock("@/lib/hooks", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/hooks")>();
+  return { ...actual, useAssistant: () => assistantMock() };
+});
+
+vi.mock("@/lib/hooks-chat", () => ({
+  useChatSessions: () => sessionsMock(),
+  useCreateChatSession: () => ({ mutate: createSessionMock, isPending: false }),
+  useChatMessages: () => messagesMock(),
+  useSendChatMessage: () => ({ mutate: sendMessageMock, isPending: false }),
+}));
+
 function renderWithClient(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  const result = render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  return { ...result, qc };
 }
 
 describe("AgentInstructionsPanel", () => {
@@ -31,6 +60,14 @@ describe("AgentInstructionsPanel", () => {
     getHistory.mockReset();
     getHistory.mockReturnValue({ revisions: [] });
     patchInstructions.mockReset();
+    assistantMock.mockReset();
+    assistantMock.mockReturnValue({ data: undefined });
+    sessionsMock.mockReset();
+    sessionsMock.mockReturnValue({ data: undefined });
+    createSessionMock.mockReset();
+    messagesMock.mockReset();
+    messagesMock.mockReturnValue({ data: undefined });
+    sendMessageMock.mockReset();
   });
 
   it("saves an edited instructions text and disables Save until something changes", async () => {
@@ -209,5 +246,308 @@ describe("AgentInstructionsPanel", () => {
     expect(screen.getByText("v1")).toBeInTheDocument();
     expect(screen.getByText(/since creation/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /load older versions/i })).not.toBeInTheDocument();
+  });
+
+  describe("Draft with copilot", () => {
+    it("with no existing Assistant session, Generate creates one and then sends the drafting request", () => {
+      assistantMock.mockReturnValue({ data: { agentId: "assistant-1" } });
+      sessionsMock.mockReturnValue({ data: [] });
+      createSessionMock.mockImplementation(
+        (agentId: string, opts?: { onSuccess?: (s: unknown) => void }) => {
+          opts?.onSuccess?.({
+            id: "new-session",
+            agentId,
+            title: "",
+            createdAt: "2026-08-27T00:00:00Z",
+            lastMessageAt: null,
+          });
+        },
+      );
+
+      renderWithClient(
+        <AgentInstructionsPanel
+          agentId="agent-1"
+          agentName="Nora"
+          mission="Old mission"
+          mayManage={true}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /draft with copilot/i }));
+      fireEvent.change(screen.getByPlaceholderText(/handles first-level it support/i), {
+        target: { value: "Answer billing questions" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /^generate$/i }));
+
+      expect(createSessionMock).toHaveBeenCalledWith("assistant-1", expect.anything());
+      expect(sendMessageMock).toHaveBeenCalledWith(
+        expect.stringContaining("Answer billing questions"),
+        expect.anything(),
+      );
+    });
+
+    it("shows the assistant's reply as a draft preview and inserts it into the editor", () => {
+      assistantMock.mockReturnValue({ data: { agentId: "assistant-1" } });
+      sessionsMock.mockReturnValue({
+        data: [
+          {
+            id: "s1",
+            agentId: "assistant-1",
+            title: "",
+            createdAt: "2026-08-27T00:00:00Z",
+            lastMessageAt: null,
+          },
+        ],
+      });
+      sendMessageMock.mockImplementation(
+        (message: string, opts?: { onSuccess?: (m: unknown) => void }) => {
+          opts?.onSuccess?.({
+            id: "u1",
+            sessionId: "s1",
+            role: "user",
+            content: message,
+            runId: "run-draft",
+            renderedComponents: [],
+            createdAt: "2026-08-27T00:00:01Z",
+          });
+        },
+      );
+      let liveMessages: unknown[] = [];
+      messagesMock.mockImplementation(() => ({ data: liveMessages }));
+
+      const { rerender, qc } = renderWithClient(
+        <AgentInstructionsPanel
+          agentId="agent-1"
+          agentName="Nora"
+          mission="Old mission"
+          mayManage={true}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /draft with copilot/i }));
+      fireEvent.change(screen.getByPlaceholderText(/handles first-level it support/i), {
+        target: { value: "Answer billing questions" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /^generate$/i }));
+
+      // No session had to be created (one already existed) -- send goes
+      // straight out, no createSession round trip.
+      expect(createSessionMock).not.toHaveBeenCalled();
+      expect(sendMessageMock).toHaveBeenCalledWith(
+        expect.stringContaining("Answer billing questions"),
+        expect.anything(),
+      );
+
+      // The transcript now "polls in" the user turn plus the assistant's
+      // reply -- re-rendering with the same client is what a real poll tick
+      // would also do (a fresh useChatMessages return value on the next
+      // render), since the hook itself is mocked out here.
+      liveMessages = [
+        {
+          id: "u1",
+          sessionId: "s1",
+          role: "user",
+          content: "generate...",
+          runId: null,
+          renderedComponents: [],
+          createdAt: "2026-08-27T00:00:01Z",
+        },
+        {
+          id: "a1",
+          sessionId: "s1",
+          role: "assistant",
+          content: "Handles billing questions end to end.",
+          runId: "run-draft",
+          renderedComponents: [],
+          createdAt: "2026-08-27T00:00:02Z",
+        },
+      ];
+      rerender(
+        <QueryClientProvider client={qc}>
+          <AgentInstructionsPanel
+            agentId="agent-1"
+            agentName="Nora"
+            mission="Old mission"
+            mayManage={true}
+          />
+        </QueryClientProvider>,
+      );
+
+      expect(screen.getByText("Handles billing questions end to end.")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: /insert into editor/i }));
+
+      const missionTextarea = screen.getByPlaceholderText(
+        /sent with every run/i,
+      ) as HTMLTextAreaElement;
+      expect(missionTextarea.value).toBe("Handles billing questions end to end.");
+      // The drawer closes and the rough description is cleared on insert.
+      expect(
+        screen.queryByPlaceholderText(/handles first-level it support/i),
+      ).not.toBeInTheDocument();
+    });
+
+    it("an interleaved reply from a different run (e.g. sent through the floating dock) is not mistaken for the draft", () => {
+      // Regression: the draft used to be matched by transcript length, so an
+      // unrelated message sent through the OTHER surface sharing this same
+      // Assistant session (the floating dock) could land in "our" slot and
+      // silently become the proposed draft. Matching by run id must not be
+      // fooled by that interleaving.
+      assistantMock.mockReturnValue({ data: { agentId: "assistant-1" } });
+      sessionsMock.mockReturnValue({
+        data: [
+          {
+            id: "s1",
+            agentId: "assistant-1",
+            title: "",
+            createdAt: "2026-08-27T00:00:00Z",
+            lastMessageAt: null,
+          },
+        ],
+      });
+      sendMessageMock.mockImplementation(
+        (message: string, opts?: { onSuccess?: (m: unknown) => void }) => {
+          opts?.onSuccess?.({
+            id: "u-draft",
+            sessionId: "s1",
+            role: "user",
+            content: message,
+            runId: "run-draft",
+            renderedComponents: [],
+            createdAt: "2026-08-27T00:00:01Z",
+          });
+        },
+      );
+      let liveMessages: unknown[] = [];
+      messagesMock.mockImplementation(() => ({ data: liveMessages }));
+
+      const { rerender, qc } = renderWithClient(
+        <AgentInstructionsPanel
+          agentId="agent-1"
+          agentName="Nora"
+          mission="Old mission"
+          mayManage={true}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /draft with copilot/i }));
+      fireEvent.change(screen.getByPlaceholderText(/handles first-level it support/i), {
+        target: { value: "Answer billing questions" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /^generate$/i }));
+
+      // An unrelated exchange -- e.g. someone using the floating dock at the
+      // same time -- lands in the shared transcript first, carrying a
+      // DIFFERENT run id than the one this Generate request is waiting on.
+      liveMessages = [
+        {
+          id: "u-other",
+          sessionId: "s1",
+          role: "user",
+          content: "What needs approval?",
+          runId: null,
+          renderedComponents: [],
+          createdAt: "2026-08-27T00:00:02Z",
+        },
+        {
+          id: "a-other",
+          sessionId: "s1",
+          role: "assistant",
+          content: "Two proposals are waiting.",
+          runId: "run-other",
+          renderedComponents: [],
+          createdAt: "2026-08-27T00:00:03Z",
+        },
+        {
+          id: "u-draft",
+          sessionId: "s1",
+          role: "user",
+          content: "generate...",
+          runId: null,
+          renderedComponents: [],
+          createdAt: "2026-08-27T00:00:04Z",
+        },
+      ];
+      rerender(
+        <QueryClientProvider client={qc}>
+          <AgentInstructionsPanel
+            agentId="agent-1"
+            agentName="Nora"
+            mission="Old mission"
+            mayManage={true}
+          />
+        </QueryClientProvider>,
+      );
+
+      // The unrelated reply must never become the proposed draft, and
+      // Generate must still read as in-flight.
+      expect(screen.queryByText("Two proposals are waiting.")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /generating/i })).toBeInTheDocument();
+
+      // The real reply lands, carrying the matching run id.
+      liveMessages = [
+        ...liveMessages,
+        {
+          id: "a-draft",
+          sessionId: "s1",
+          role: "assistant",
+          content: "Handles billing questions end to end.",
+          runId: "run-draft",
+          renderedComponents: [],
+          createdAt: "2026-08-27T00:00:05Z",
+        },
+      ];
+      rerender(
+        <QueryClientProvider client={qc}>
+          <AgentInstructionsPanel
+            agentId="agent-1"
+            agentName="Nora"
+            mission="Old mission"
+            mayManage={true}
+          />
+        </QueryClientProvider>,
+      );
+
+      expect(screen.getByText("Handles billing questions end to end.")).toBeInTheDocument();
+      expect(screen.queryByText("Two proposals are waiting.")).not.toBeInTheDocument();
+    });
+
+    it("on a failed generate request, shows an error toast and stops waiting for a reply", async () => {
+      assistantMock.mockReturnValue({ data: { agentId: "assistant-1" } });
+      sessionsMock.mockReturnValue({
+        data: [
+          {
+            id: "s1",
+            agentId: "assistant-1",
+            title: "",
+            createdAt: "2026-08-27T00:00:00Z",
+            lastMessageAt: null,
+          },
+        ],
+      });
+      sendMessageMock.mockImplementation((_message: string, opts?: { onError?: () => void }) =>
+        opts?.onError?.(),
+      );
+
+      renderWithClient(
+        <AgentInstructionsPanel
+          agentId="agent-1"
+          agentName="Nora"
+          mission="Old mission"
+          mayManage={true}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /draft with copilot/i }));
+      fireEvent.change(screen.getByPlaceholderText(/handles first-level it support/i), {
+        target: { value: "Answer billing questions" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /^generate$/i }));
+
+      // Failure clears the in-flight state -- Generate is clickable again,
+      // not stuck showing "Generating…" forever.
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /^generate$/i })).not.toBeDisabled(),
+      );
+    });
   });
 });

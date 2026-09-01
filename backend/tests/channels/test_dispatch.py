@@ -17,7 +17,14 @@ from oc8 import models as m
 from oc8.authz.scope import subject_uuid_for
 from oc8.channels import ChannelCapabilities
 from oc8.channels.binding import issue_code, redeem_code
-from oc8.channels.dispatch import announce, close_out, decision_from, notice_for
+from oc8.channels.dispatch import (
+    _CONTENT_WITHHELD,
+    announce,
+    close_out,
+    decision_from,
+    notice_for,
+    tell_sender_gated,
+)
 from oc8.channels.notice import ApprovalNotice
 from tests.conftest import AppSessionFactory
 
@@ -32,6 +39,7 @@ class FakeChannel:
     caps: ChannelCapabilities = field(default_factory=ChannelCapabilities)
     delivered: list[tuple[str, ApprovalNotice]] = field(default_factory=list)
     withdrawn: list[tuple[str, str | None, str]] = field(default_factory=list)
+    said: list[tuple[str, str]] = field(default_factory=list)
     explode_for: str | None = None
 
     def capabilities(self) -> ChannelCapabilities:
@@ -47,6 +55,9 @@ class FakeChannel:
         self, notice: ApprovalNotice, *, external_id: str, handle: str | None, outcome: str
     ) -> None:
         self.withdrawn.append((external_id, handle, outcome))
+
+    async def say(self, external_id: str, text: str) -> None:
+        self.said.append((external_id, text))
 
 
 async def _approval(db: Any, tenant: uuid.UUID, **payload: Any) -> m.ApprovalRequest:
@@ -249,3 +260,25 @@ async def test_an_approval_with_no_stated_sensitivity_is_treated_as_internal() -
         detail="d",
     )
     assert notice_for(ar).classification == "internal"
+
+
+async def test_an_assistant_reply_above_the_channels_ceiling_is_withheld() -> None:
+    """`tell_sender_gated` applies the exact same `outranks` check `announce`
+    already applies to an approval's `detail` -- an Assistant-produced reply
+    (ack, final answer, park/failure notice) is `internal`, so a channel left
+    at the real default (`max_classification="public"`) must not carry it."""
+    channel = FakeChannel(caps=ChannelCapabilities(max_classification="public"))
+    await tell_sender_gated(channel, "42", "17 offene Tickets: ...")
+    assert channel.said == [("42", _CONTENT_WITHHELD)]
+
+
+async def test_an_assistant_reply_within_the_channels_ceiling_goes_through() -> None:
+    channel = FakeChannel(caps=ChannelCapabilities(max_classification="internal"))
+    await tell_sender_gated(channel, "42", "17 offene Tickets: ...")
+    assert channel.said == [("42", "17 offene Tickets: ...")]
+
+
+async def test_a_channel_widened_past_internal_still_carries_it() -> None:
+    channel = FakeChannel(caps=ChannelCapabilities(max_classification="confidential"))
+    await tell_sender_gated(channel, "42", "17 offene Tickets: ...")
+    assert channel.said == [("42", "17 offene Tickets: ...")]

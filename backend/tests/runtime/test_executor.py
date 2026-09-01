@@ -13,6 +13,7 @@ from oc8 import models as m
 from oc8.agent.engine import RunResult
 from oc8.capas.lifecycle import enable_plugin
 from oc8.capas.service import install_plugin
+from oc8.channels.notice import ChannelCapabilities
 from oc8.constants import ACME_TENANT_ID
 from oc8.runtime.executor import execute_run
 from oc8.runtime.queue import RunMessage
@@ -713,3 +714,331 @@ async def test_append_tool_call_survives_the_executors_final_write(
         assert run is not None
         assert run.context["toolCalls"] == [live_call]
         assert run.context["output"] == "finished"
+
+
+# --- Task 8: routing a terminal chat run's reply to Telegram ---
+
+
+class _RecordingChannels:
+    """Fake `oc8.channels.registry.channels_for_tenant`: records, from a
+    BRAND NEW session opened at the moment it is called, what state the run
+    is already in -- the same technique `_VisibilityCheckingQueue` above
+    uses for `pending_runs`. `_tell_telegram` is only ever called from the
+    post-commit loop in `execute_run` (never from inside the still-open
+    `tenant_session` block), so this must always observe a terminal state,
+    never `RUNNING`/`QUEUED`. A regression that moved the Telegram send back
+    inside the transaction would show up here as a state observed before
+    the transition committed.
+
+    Deliberately does not assert inside `_channels_for_tenant` itself:
+    `_tell_telegram` wraps the `channels_for_tenant` call in a bare
+    `except Exception`, so an `AssertionError` raised from in here would be
+    silently swallowed and logged rather than failing the test. Observations
+    are recorded instead and asserted on afterwards, outside executor.py's
+    try/except entirely.
+    """
+
+    def __init__(
+        self,
+        app_session: AppSessionFactory,
+        tenant: uuid.UUID,
+        run_id: uuid.UUID,
+        *,
+        max_classification: str = "internal",
+    ) -> None:
+        self._app_session = app_session
+        self._tenant = tenant
+        self._run_id = run_id
+        self.observed_states: list[str | None] = []
+        self.said: list[tuple[str, str]] = []
+        self.raise_on_say = False
+        # Defaults to "internal", not `ChannelCapabilities`'s real "public"
+        # default: this fixture exists to test the reply-routing/timing
+        # behaviour, not the classification gate (see
+        # test_the_classification_gate_applies_to_telegram_replies_too below),
+        # so it starts cleared for the `internal` replies these tests send.
+        self._max_classification = max_classification
+
+    async def _channels_for_tenant(self, db: Any, *, tenant_id: uuid.UUID) -> dict[str, Any]:
+        async with self._app_session(self._tenant) as check:
+            run = await check.get(m.AgentRun, self._run_id)
+            self.observed_states.append(run.state if run is not None else None)
+        return {"telegram": self}
+
+    def capabilities(self) -> ChannelCapabilities:
+        return ChannelCapabilities(max_classification=self._max_classification)
+
+    async def say(self, external_id: str, text: str) -> None:
+        if self.raise_on_say:
+            raise RuntimeError("telegram is down")
+        self.said.append((external_id, text))
+
+
+async def _make_chat_run(
+    app_session: AppSessionFactory, tenant: uuid.UUID, *, telegram_external_id: str | None
+) -> tuple[uuid.UUID, uuid.UUID]:
+    """A `source="chat"` run against a real `ChatSession`, the same shape
+    `oc8.channels.dispatch.bind_from_free_text` and the ordinary web chat
+    endpoint both produce. Returns (run_id, session_id)."""
+    async with app_session(tenant) as s:
+        agent = m.Agent(tenant_id=tenant, department_id=uuid.uuid4(), name="Dev")
+        s.add(agent)
+        await s.flush()
+        session = m.ChatSession(tenant_id=tenant, agent_id=agent.id, member_id=uuid.uuid4())
+        s.add(session)
+        await s.flush()
+        session_id = session.id
+        context: dict[str, Any] = {"task": "hi", "chat_session_id": str(session_id)}
+        if telegram_external_id is not None:
+            context["telegram_external_id"] = telegram_external_id
+        repo = RunRepository(s)
+        created = await repo.create(
+            tenant_id=tenant, agent_id=agent.id, context=context, source="chat"
+        )
+        return created.id, session_id
+
+
+async def test_a_terminal_chat_run_with_telegram_context_gets_the_reply_after_commit(
+    app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tenant = uuid.UUID(str(ACME_TENANT_ID))
+    run_id, _session_id = await _make_chat_run(app_session, tenant, telegram_external_id="555")
+    fake = _RecordingChannels(app_session, tenant, run_id)
+    monkeypatch.setattr("oc8.channels.registry.channels_for_tenant", fake._channels_for_tenant)
+
+    async def fake_runner(db: Any, **kw: Any) -> RunResult:
+        return RunResult(
+            task_id=uuid.uuid4(),
+            agent_id=kw["agent"].id,
+            status="done",
+            output="Es sind 3 offen.",
+            tool_calls=[],
+            steps=1,
+        )
+
+    await execute_run(
+        RunMessage(run_id=str(run_id), tenant_id=str(tenant), entry_id="0-0", redelivered=False),
+        runtime=_FnRuntime(fake_runner),
+    )
+
+    assert fake.said == [("555", "Es sind 3 offen.")]
+    assert fake.observed_states == [RunState.DONE.value], (
+        "the reply must be sent only after the run's DONE transition is durably "
+        "committed and visible from another session, never before"
+    )
+
+
+async def test_a_terminal_chat_runs_reply_is_withheld_on_a_channel_left_at_the_default(
+    app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`_RecordingChannels` above defaults to `max_classification="internal"`
+    so the reply-routing tests aren't also classification tests. This one
+    builds it at `ChannelCapabilities`'s real default -- `"public"`, what a
+    channel actually starts at before an operator widens it -- and proves
+    `_tell_telegram` applies the same gate `bind_from_free_text`'s ack does,
+    not just a real answer's content but the whole reason this hook exists:
+    a run's output is exactly the kind of material an approval's `detail`
+    already gets held back for at this ceiling."""
+    from oc8.channels.dispatch import _CONTENT_WITHHELD
+
+    tenant = uuid.UUID(str(ACME_TENANT_ID))
+    run_id, _session_id = await _make_chat_run(app_session, tenant, telegram_external_id="555")
+    fake = _RecordingChannels(app_session, tenant, run_id, max_classification="public")
+    monkeypatch.setattr("oc8.channels.registry.channels_for_tenant", fake._channels_for_tenant)
+
+    async def fake_runner(db: Any, **kw: Any) -> RunResult:
+        return RunResult(
+            task_id=uuid.uuid4(),
+            agent_id=kw["agent"].id,
+            status="done",
+            output="Es sind 3 offen.",
+            tool_calls=[],
+            steps=1,
+        )
+
+    await execute_run(
+        RunMessage(run_id=str(run_id), tenant_id=str(tenant), entry_id="0-0", redelivered=False),
+        runtime=_FnRuntime(fake_runner),
+    )
+
+    assert fake.said == [("555", _CONTENT_WITHHELD)]
+
+
+async def test_a_telegram_send_failure_does_not_fail_the_run(
+    app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tenant = uuid.UUID(str(ACME_TENANT_ID))
+    run_id, _session_id = await _make_chat_run(app_session, tenant, telegram_external_id="555")
+    fake = _RecordingChannels(app_session, tenant, run_id)
+    fake.raise_on_say = True
+    monkeypatch.setattr("oc8.channels.registry.channels_for_tenant", fake._channels_for_tenant)
+
+    async def fake_runner(db: Any, **kw: Any) -> RunResult:
+        return RunResult(
+            task_id=uuid.uuid4(), agent_id=kw["agent"].id, status="done", output="ok",
+            tool_calls=[], steps=1,
+        )
+
+    await execute_run(
+        RunMessage(run_id=str(run_id), tenant_id=str(tenant), entry_id="0-0", redelivered=False),
+        runtime=_FnRuntime(fake_runner),
+    )
+
+    async with app_session(tenant) as s:
+        run = await s.get(m.AgentRun, run_id)
+        assert run is not None
+        assert run.state == RunState.DONE.value, "a Telegram send failure must not fail the run"
+
+
+async def test_an_ordinary_chat_run_without_telegram_context_never_touches_telegram(
+    app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tenant = uuid.UUID(str(ACME_TENANT_ID))
+    run_id, session_id = await _make_chat_run(app_session, tenant, telegram_external_id=None)
+    calls: list[uuid.UUID] = []
+
+    async def must_not_be_called(db: Any, *, tenant_id: uuid.UUID) -> dict[str, Any]:
+        calls.append(tenant_id)
+        return {}
+
+    monkeypatch.setattr("oc8.channels.registry.channels_for_tenant", must_not_be_called)
+
+    async def fake_runner(db: Any, **kw: Any) -> RunResult:
+        return RunResult(
+            task_id=uuid.uuid4(), agent_id=kw["agent"].id, status="done", output="ok web reply",
+            tool_calls=[], steps=1,
+        )
+
+    await execute_run(
+        RunMessage(run_id=str(run_id), tenant_id=str(tenant), entry_id="0-0", redelivered=False),
+        runtime=_FnRuntime(fake_runner),
+    )
+
+    assert calls == [], "no telegram_external_id in context -> channels_for_tenant must never run"
+    # The ordinary (non-Telegram) reply path is unaffected either way.
+    async with app_session(tenant) as s:
+        messages = (
+            (
+                await s.execute(
+                    select(m.ChatMessage).where(m.ChatMessage.session_id == session_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(messages) == 1
+        assert messages[0].content == "ok web reply"
+
+
+# --- a chat run that PARKS must still say something to its Telegram sender ---
+
+
+async def test_a_chat_run_that_parks_for_clarification_tells_the_telegram_sender(
+    app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The reply hook only fired on DONE/FAILED, so a run that stopped to ask
+    a question went quiet after the "Bin dran" ack: the question was written to
+    a Clarification the sender has no screen for, and nothing ever told them
+    anything was expected of them."""
+    tenant = uuid.UUID(str(ACME_TENANT_ID))
+    run_id, _session_id = await _make_chat_run(app_session, tenant, telegram_external_id="556")
+    fake = _RecordingChannels(app_session, tenant, run_id)
+    monkeypatch.setattr("oc8.channels.registry.channels_for_tenant", fake._channels_for_tenant)
+
+    async def fake_runner(db: Any, **kw: Any) -> RunResult:
+        return RunResult(
+            task_id=uuid.uuid4(),
+            agent_id=kw["agent"].id,
+            status="waiting_for_input",
+            output="Welche Rechnungsnummer?",
+            tool_calls=[],
+            steps=1,
+        )
+
+    await execute_run(
+        RunMessage(run_id=str(run_id), tenant_id=str(tenant), entry_id="0-0", redelivered=False),
+        runtime=_FnRuntime(fake_runner),
+    )
+
+    assert len(fake.said) == 1
+    external_id, text = fake.said[0]
+    assert external_id == "556"
+    assert "more information" in text
+    assert fake.observed_states == [RunState.WAITING_FOR_INPUT.value], (
+        "sent only after the park is durably committed, same rule as the terminal hook"
+    )
+
+
+async def test_a_chat_run_parked_on_an_approval_tells_the_telegram_sender(
+    app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other silent park: the run is sitting in somebody's approval queue,
+    which the sender has no way to find out about from Telegram."""
+    tenant = uuid.UUID(str(ACME_TENANT_ID))
+    run_id, _session_id = await _make_chat_run(app_session, tenant, telegram_external_id="557")
+    fake = _RecordingChannels(app_session, tenant, run_id)
+    monkeypatch.setattr("oc8.channels.registry.channels_for_tenant", fake._channels_for_tenant)
+
+    async def fake_runner(db: Any, **kw: Any) -> RunResult:
+        return RunResult(
+            task_id=uuid.uuid4(),
+            agent_id=kw["agent"].id,
+            status="waiting_for_approval",
+            output="",
+            tool_calls=[],
+            steps=1,
+        )
+
+    await execute_run(
+        RunMessage(run_id=str(run_id), tenant_id=str(tenant), entry_id="0-0", redelivered=False),
+        runtime=_FnRuntime(fake_runner),
+    )
+
+    assert len(fake.said) == 1
+    external_id, text = fake.said[0]
+    assert external_id == "557"
+    assert "approval" in text
+    assert fake.observed_states == [RunState.WAITING_FOR_APPROVAL.value]
+
+
+async def test_a_crashed_chat_run_still_records_a_reply_and_tells_telegram(
+    app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The exception path transitions straight to FAILED and never called
+    `record_assistant_reply`, so a crashed chat turn left the transcript with
+    the user's message and nothing after it -- on the web too, not only on
+    Telegram. The recorded reply is deliberately canned: `repr(exc)` is already
+    on the run's `context["error"]` for an operator, and a chat transcript is
+    the wrong place to show it."""
+    tenant = uuid.UUID(str(ACME_TENANT_ID))
+    run_id, session_id = await _make_chat_run(app_session, tenant, telegram_external_id="558")
+    fake = _RecordingChannels(app_session, tenant, run_id)
+    monkeypatch.setattr("oc8.channels.registry.channels_for_tenant", fake._channels_for_tenant)
+
+    async def fake_runner(db: Any, **kw: Any) -> RunResult:
+        raise RuntimeError("the model provider hung up")
+
+    await execute_run(
+        RunMessage(run_id=str(run_id), tenant_id=str(tenant), entry_id="0-0", redelivered=False),
+        runtime=_FnRuntime(fake_runner),
+    )
+
+    assert len(fake.said) == 1
+    assert fake.said[0][0] == "558"
+    assert fake.observed_states == [RunState.FAILED.value]
+
+    async with app_session(tenant) as s:
+        messages = (
+            (
+                await s.execute(
+                    select(m.ChatMessage).where(m.ChatMessage.session_id == session_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(messages) == 1, "a crashed chat run left the transcript empty"
+        assert "the model provider hung up" not in messages[0].content
+        run = await s.get(m.AgentRun, run_id)
+        assert run is not None
+        assert "the model provider hung up" in run.context["error"]

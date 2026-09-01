@@ -225,6 +225,18 @@ def _authorize(
         return Decision(Effect.ALLOW)
     if tc.name == "ask_user":
         return Decision(Effect.ALLOW)
+    if tc.name == "propose_change":
+        # Like ask_user: it belongs to no connection, so the department frame
+        # has nothing to decide it against -- the Assistant's chat run has no
+        # tool connection bound at all, and falling through would DENY. That
+        # DENY is not enforced (execute_control_tool dispatches control tools
+        # before the deny branch and this one never reads `decision`), it is
+        # only WRITTEN, so every successful call would be audited as a denial.
+        # Deliberate consequence: `is_tenant_assistant`, checked in the
+        # dispatch, is then the only gate on this tool -- which is what it
+        # should be for a tool that can only ever produce a draft a human has
+        # to approve before anything changes.
+        return Decision(Effect.ALLOW)
     if tc.name == "delegate_task":
         if not agent.is_team_lead:
             return Decision(Effect.DENY, "only a team lead can delegate tasks")
@@ -1017,6 +1029,7 @@ async def run_agent(
                             active_skills=active_skills,
                             mcp_conn=mcp_conn,
                             originating_operator=originating_operator,
+                            run_id=run_id,
                         )
                         if control is not None:
                             # A core-owned tool (memory/ask/delegate/skill). The

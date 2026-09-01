@@ -117,3 +117,20 @@ def test_delegate_task_is_unaffected_by_the_frame_tool_check() -> None:
     agent.is_team_lead = True
     d = _authz(_call("delegate_task", task_text="go", agent_id=str(uuid.uuid4())), agent=agent)
     assert d.effect is Effect.ALLOW
+
+
+def test_propose_change_is_allowed_on_a_connection_less_run() -> None:
+    """The Assistant's chat run has no tool connection bound, so falling
+    through to the frame check returns DENY ("no tool connection bound to this
+    run"). execute_control_tool never reads that decision for propose_change
+    and proceeds regardless -- so without this special case the audit chain
+    records `deny` for a call that in fact succeeded, on the one tool whose
+    entire purpose is an honest human-review trail."""
+    agent = _agent()
+    agent.is_tenant_assistant = True
+    d = _authz(
+        _call("propose_change", operation_type="department.create", payload={"name": "X"}),
+        key=None,
+        agent=agent,
+    )
+    assert d.effect is Effect.ALLOW

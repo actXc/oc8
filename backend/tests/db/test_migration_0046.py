@@ -44,10 +44,11 @@ def _agent(conn: sa.Connection, tenant: uuid.UUID, department: uuid.UUID) -> uui
     conn.execute(
         sa.text(
             "INSERT INTO agent (id, tenant_id, department_id, name, role_title, mission, "
-            " definition, narrowing, narrowing_overridden_keys, is_team_lead, status, "
+            " definition, narrowing, narrowing_overridden_keys, is_team_lead, "
+            " is_tenant_assistant, status, "
             " trust_level, presentation, created_at, updated_at) "
-            "VALUES (:id, :t, :d, 'A', '', '', '{}', '{}', '[]', false, 'idle', 'first_party', "
-            " '{}', now(), now())"
+            "VALUES (:id, :t, :d, 'A', '', '', '{}', '{}', '[]', false, false, 'idle', "
+            " 'first_party', '{}', now(), now())"
         ),
         {"id": agent_id, "t": str(tenant), "d": str(department)},
     )

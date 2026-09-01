@@ -48,6 +48,56 @@ async def _cancellation_kind(db: AsyncSession, run_id: uuid.UUID) -> str | None:
     ).scalar_one_or_none()
 
 
+async def _tell_telegram(*, tenant_id: uuid.UUID, external_id: str, text: str) -> None:
+    """Best-effort: a Telegram send failure must never fail the run whose
+    answer it is carrying. `say` is not part of the `ApprovalChannel`
+    Protocol (it's a duck-typed extra a channel plugin may offer) -- reuses
+    `dispatch.tell_sender_gated` rather than calling `impl.say` directly,
+    same as every other best-effort reply in `oc8.channels.dispatch` itself.
+    The `_gated` variant is deliberate: every text this function ever carries
+    -- the run's real answer, a park notice, a failure notice -- is an
+    Assistant-produced reply and gets the same classification check an
+    approval's own detail already gets against this channel's
+    `max_classification`."""
+    from oc8.channels.dispatch import tell_sender_gated
+    from oc8.channels.registry import channels_for_tenant
+
+    try:
+        async with tenant_session(tenant_id) as db:
+            channels = await channels_for_tenant(db, tenant_id=tenant_id)
+    except Exception:
+        logger.warning("could not load Telegram channel to reply", exc_info=True)
+        return
+    impl = channels.get("telegram")
+    if impl is None:
+        return
+    await tell_sender_gated(impl, external_id, text)
+
+
+#: What a Telegram sender is told when their chat run PARKS rather than
+#: finishes. Without these the ack ("Bin dran, melde mich gleich.") was the last
+#: thing they ever heard: the reply hook only fired on DONE/FAILED, so a run
+#: that stopped to ask a question or to wait for an approval simply went quiet,
+#: and the person had no way to know anything was expected of them.
+_TELEGRAM_NEEDS_INPUT = "I need more information to continue -- please answer in oc8."
+_TELEGRAM_WAITING_FOR_APPROVAL = "This needs an approval before I can continue -- see oc8."
+#: The transcript message a crashed chat run leaves behind. Deliberately NOT
+#: `repr(exc)`: the exception text is already on the run (`context["error"]`)
+#: where an operator can read it, and a chat transcript is the one place it
+#: would be shown to whoever happens to be in the conversation.
+_CHAT_RUN_FAILED = "That didn't work out -- see the run in oc8 for what happened."
+
+
+def _telegram_sender_of(run: m.AgentRun) -> str | None:
+    """The Telegram account waiting on this run, if it is a chat run started
+    from Telegram at all. None for a web chat turn and for every other source
+    -- both of which have their own surface to read the outcome on."""
+    if run.source != "chat":
+        return None
+    external_id = (run.context or {}).get("telegram_external_id")
+    return str(external_id) if external_id else None
+
+
 async def requeue_if_already_decided(db: AsyncSession, *, run: m.AgentRun) -> bool:
     """Re-queue a just-parked run whose decision has already been made.
 
@@ -168,6 +218,8 @@ async def _maybe_wake_parent(
     output: str,
     succeeded: bool,
     mcp_conn: m.McpConnection | None,
+    chat_session_id: str | None = None,
+    telegram_external_id: str | None = None,
 ) -> uuid.UUID | None:
     """Create a follow-up run for the team lead that delegated this sub-run, so
     it can react to the outcome (§7). Returns the new run's id for the caller to
@@ -228,11 +280,28 @@ async def _maybe_wake_parent(
         and not await agent_has_own_login_binding(db, parent_agent)
     ):
         context["mcp_connection_id"] = str(mcp_conn.id)
+    # A wake-up whose delegation chain traces back to a chat turn is treated
+    # as a chat turn itself: source="chat" is what the terminal-state path
+    # below reads (record_assistant_reply, and Telegram's _tell_telegram) to
+    # decide whether an outcome is user-facing at all. Without this the
+    # lead's real conclusion after a delegated sub-task -- the only part of
+    # "ask the Assistant something, it delegates, you get the answer" a
+    # human actually cares about -- was created with source="delegation" and
+    # never reached either. chat_session_id/telegram_external_id ride along
+    # unchanged from the finishing sub-run's own context (itself carried
+    # forward from delegate_task, see control_tools._delegate) rather than
+    # being re-derived here, so a delegation chain several hops deep keeps
+    # pointing at the SAME original conversation at every hop.
+    wake_source = "chat" if chat_session_id else "delegation"
+    if chat_session_id:
+        context["chat_session_id"] = chat_session_id
+        if telegram_external_id:
+            context["telegram_external_id"] = telegram_external_id
     wake = await repo.create(
         tenant_id=tenant_id,
         agent_id=parent.assigned_agent_id,
         context=context,
-        source="delegation",
+        source=wake_source,
     )
     return wake.id
 
@@ -453,6 +522,14 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
     run_id = uuid.UUID(message["run_id"])
     tenant_id = uuid.UUID(message["tenant_id"])
     pending_runs: list[uuid.UUID] = []
+    #: (tenant_id, external_id, text) for every Telegram reply this run's
+    #: terminal state earned. Collected here and sent only AFTER the
+    #: `tenant_session` block below commits -- same reason `pending_runs`
+    #: is published only after commit (see the comment at that loop): a
+    #: reply sent before the transition/record_assistant_reply write is
+    #: durable would hand the user an answer the system never recorded, and
+    #: a redelivery would then send it a second time.
+    telegram_replies: list[tuple[uuid.UUID, str, str]] = []
 
     with get_tracer().start_as_current_span("run.execute") as span:
         span.set_attribute("run_id", str(run_id))
@@ -728,6 +805,8 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
                         output=run_error,
                         succeeded=False,
                         mcp_conn=mcp_conn,
+                        chat_session_id=(run.context or {}).get("chat_session_id"),
+                        telegram_external_id=(run.context or {}).get("telegram_external_id"),
                     )
                     if wake_id is not None:
                         pending_runs.append(wake_id)
@@ -745,10 +824,28 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
                 logger.warning("run %s marked FAILED: %s", run_id, run_error)
                 logger.info("run %s finished in state %s", run_id, RunState.FAILED.value)
                 record_run_outcome(RunState.FAILED.value)
+                # This path -- an exception out of the runtime -- reached
+                # FAILED without ever calling `record_assistant_reply`, so a
+                # chat turn whose run crashed left the transcript with the
+                # user's message and nothing after it, on every surface, for
+                # ever. The generic status branch below has always recorded
+                # one; this one now does too.
+                if run.source == "chat":
+                    from oc8.chat.service import record_assistant_reply
+
+                    await record_assistant_reply(db, run=run, output=_CHAT_RUN_FAILED)
+                    failed_sender = _telegram_sender_of(run)
+                    if failed_sender is not None:
+                        telegram_replies.append(
+                            (run.tenant_id, failed_sender, _CHAT_RUN_FAILED)
+                        )
             else:
                 pending_runs.extend(result.pending_runs)
                 if result.status == "waiting_for_input":
-                    from oc8.runtime.clarification import request_clarification
+                    from oc8.runtime.clarification import (
+                        RepeatedClarification,
+                        request_clarification,
+                    )
 
                     # A clarification ask must write the open Clarification AND
                     # stash pending_question -- not just flip state -- so handle it
@@ -769,13 +866,73 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
                             "rendered_components": result.rendered_components,
                         },
                     )
-                    # Mirror the waiting_for_approval path: the run is suspended,
-                    # not finished, so the agent is NOT idled here. (Unlike
-                    # waiting_for_approval, the engine's ask_user path doesn't set
-                    # agent.status itself either -- it's simply left as "running".)
-                    await request_clarification(db, run=run, question=result.output)
-                    logger.info("run %s waiting for input", run_id)
-                    record_run_outcome(RunState.WAITING_FOR_INPUT.value)
+                    try:
+                        # Mirror the waiting_for_approval path: the run is
+                        # suspended, not finished, so the agent is NOT idled
+                        # here. (Unlike waiting_for_approval, the engine's
+                        # ask_user path doesn't set agent.status itself either
+                        # -- it's simply left as "running".)
+                        await request_clarification(db, run=run, question=result.output)
+                        logger.info("run %s waiting for input", run_id)
+                        record_run_outcome(RunState.WAITING_FOR_INPUT.value)
+                        # A park is not an outcome, so `record_assistant_reply`
+                        # is deliberately NOT called here -- the question lives
+                        # on the Clarification, and the Chat UI reads it there.
+                        # The Telegram sender has no such screen in front of
+                        # them, though, so without a word here their last
+                        # message is answered by "Bin dran" and then silence,
+                        # for ever.
+                        parked_sender = _telegram_sender_of(run)
+                        if parked_sender is not None:
+                            telegram_replies.append(
+                                (run.tenant_id, parked_sender, _TELEGRAM_NEEDS_INPUT)
+                            )
+                    except RepeatedClarification as exc:
+                        # The agent asked the identical question twice on this
+                        # run without acting on the answer in between. Parking
+                        # a THIRD time would just hand the human the same
+                        # question again -- fail loud instead, the same shape
+                        # as any other run_error, so this reads in the UI and
+                        # the audit trail exactly like one.
+                        run_error = str(exc)
+                        await merge_context(db, run, {"error": run_error})
+                        agent.status = "idle"
+                        await publish_agent_status(agent)
+                        try:
+                            wake_id = await _maybe_wake_parent(
+                                db,
+                                repo=repo,
+                                tenant_id=tenant_id,
+                                parent_task_id=parent_task_id,
+                                delegation_depth=delegation_depth,
+                                finished_agent_id=run.agent_id,
+                                sub_task_label=task_text,
+                                output=run_error,
+                                succeeded=False,
+                                mcp_conn=mcp_conn,
+                                chat_session_id=(run.context or {}).get("chat_session_id"),
+                                telegram_external_id=(run.context or {}).get(
+                                    "telegram_external_id"
+                                ),
+                            )
+                            if wake_id is not None:
+                                pending_runs.append(wake_id)
+                        except Exception:
+                            logger.exception(
+                                "run %s: failed to wake parent after sub-task failure", run_id
+                            )
+                        await repo.transition(run, RunState.FAILED)
+                        await record_activity(
+                            db,
+                            tenant_id=tenant_id,
+                            agent_id=agent.id,
+                            status="error",
+                            message=f"{agent.name} failed: {task_text[:80]}",
+                            detail=run_error[:500],
+                        )
+                        logger.warning("run %s marked FAILED: %s", run_id, run_error)
+                        logger.info("run %s finished in state %s", run_id, RunState.FAILED.value)
+                        record_run_outcome(RunState.FAILED.value)
                 else:
                     run.task_id = result.task_id
                     await merge_context(
@@ -829,6 +986,8 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
                             output=result.output,
                             succeeded=new_state is RunState.DONE,
                             mcp_conn=mcp_conn,
+                            chat_session_id=(run.context or {}).get("chat_session_id"),
+                            telegram_external_id=(run.context or {}).get("telegram_external_id"),
                         )
                         if wake_id is not None:
                             pending_runs.append(wake_id)
@@ -843,7 +1002,19 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
                         from oc8.chat.service import record_assistant_reply
 
                         await record_assistant_reply(db, run=run, output=result.output)
+                        done_sender = _telegram_sender_of(run)
+                        if done_sender is not None:
+                            telegram_replies.append((run.tenant_id, done_sender, result.output))
                     if new_state is RunState.WAITING_FOR_APPROVAL:
+                        # Same reason as the waiting_for_input park above: the
+                        # run is suspended, not finished, so nothing else tells
+                        # the Telegram sender that their request is now sitting
+                        # in somebody's approval queue.
+                        held_sender = _telegram_sender_of(run)
+                        if held_sender is not None:
+                            telegram_replies.append(
+                                (run.tenant_id, held_sender, _TELEGRAM_WAITING_FOR_APPROVAL)
+                            )
                         # Close the parking race (see requeue_if_already_decided):
                         # an operator may have decided the held call while this run
                         # was still parking. Publish only after the transition
@@ -861,6 +1032,12 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
         # every run row must be durably visible first.
         for pending_id in pending_runs:
             await publish_run(run_id=pending_id, tenant_id=tenant_id)
+
+        # Same reasoning as the publish loop above: a Telegram reply is sent
+        # only once the record_assistant_reply write it reports on is
+        # durably committed, never from inside the still-open transaction.
+        for reply_tenant_id, external_id, text in telegram_replies:
+            await _tell_telegram(tenant_id=reply_tenant_id, external_id=external_id, text=text)
 
 
 async def recover_reclaimed(message: RunMessage) -> None:

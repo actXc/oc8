@@ -20,3 +20,18 @@ credential_type = "telegram_bot"
 required = true
 help = "Von @BotFather per /newbot erhalten, Format 123456:ABC-DEF..."
 secret_ref = "telegram/bot_token"
+
+# Read by channels/registry.py's _resolved_config -> ChannelCapabilities.
+# Stays at "public" by default -- the same value ChannelCapabilities itself
+# defaults to when nothing is configured at all -- so leaving this untouched
+# (or re-saving this form without deliberately raising it) never carries more
+# than the channel was already cleared for. Raise it here once you actually
+# want this chat to carry more than a bare "something is waiting" pointer.
+[[fields]]
+key = "max_classification"
+label = "Höchste erlaubte Vertraulichkeit"
+kind = "select"
+options = ["public", "internal", "confidential", "restricted"]
+default = "public"
+required = false
+help = "Wie sensibel dürfen Nachrichten sein, die dieser Kanal tatsächlich anzeigt (Approval-Details, Assistant-Antworten)? Bei \"public\" kommt nur ein Hinweis an, dass etwas wartet -- der Inhalt selbst bleibt in oc8."

@@ -47,6 +47,44 @@ def test_setup_field_non_credential_kind_rejects_credential_type() -> None:
         )
 
 
+def test_setup_field_select_kind_requires_options() -> None:
+    with pytest.raises(Exception):  # noqa: B017 -- pydantic ValidationError
+        SetupFieldSpec.model_validate({"key": "level", "label": "Level", "kind": "select"})
+
+
+def test_setup_field_select_kind_with_options_is_valid() -> None:
+    field = SetupFieldSpec.model_validate(
+        {
+            "key": "level",
+            "label": "Level",
+            "kind": "select",
+            "options": ["public", "internal"],
+            "default": "public",
+        }
+    )
+    assert field.options == ["public", "internal"]
+
+
+def test_setup_field_non_select_kind_rejects_options() -> None:
+    with pytest.raises(Exception):  # noqa: B017 -- pydantic ValidationError
+        SetupFieldSpec.model_validate(
+            {"key": "x", "label": "X", "kind": "text", "options": ["a", "b"]}
+        )
+
+
+def test_setup_field_select_kind_rejects_a_default_outside_its_options() -> None:
+    with pytest.raises(Exception):  # noqa: B017 -- pydantic ValidationError
+        SetupFieldSpec.model_validate(
+            {
+                "key": "level",
+                "label": "Level",
+                "kind": "select",
+                "options": ["public", "internal"],
+                "default": "confidential",
+            }
+        )
+
+
 def test_credential_type_spec_rejects_a_nested_credential_field() -> None:
     with pytest.raises(Exception):  # noqa: B017 -- pydantic ValidationError
         CredentialTypeSpec.model_validate(

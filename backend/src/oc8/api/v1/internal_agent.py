@@ -595,6 +595,7 @@ async def tool(
             active_skills=active_skills,
             mcp_conn=conn,
             originating_operator=run.context.get("originating_operator"),
+            run_id=run.id,
         )
         if task is not None
         else None

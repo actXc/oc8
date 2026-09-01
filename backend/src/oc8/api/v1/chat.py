@@ -10,12 +10,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from oc8 import models as m
+from oc8.agent.assistant import get_or_create_assistant
 from oc8.agents.repo import visible_agent
-from oc8.api.deps import DbSession, require_departmental, require_permission
-from oc8.authz.authority import authority_for_principal, tenant_wide_read
-from oc8.authz.permissions import AGENT, RUN_START, VIEW, perm
+from oc8.api.deps import CurrentPrincipal, DbSession, require_departmental, require_permission
+from oc8.authz.authority import Authority, authority_for_principal, tenant_wide_read
+from oc8.authz.permissions import AGENT, COPILOT, MANAGE, RUN_START, VIEW, perm
 from oc8.authz.scope import HumanActor
 from oc8.chat.service import create_session, get_session, list_messages, list_sessions, send_message
+from oc8.schemas.base import CamelModel
 from oc8.schemas.dto import ChatMessageDTO, ChatSessionDTO
 from oc8.schemas.requests import CreateChatSessionRequest, SendChatMessageRequest
 
@@ -44,6 +46,33 @@ def _message_dto(msg: m.ChatMessage) -> ChatMessageDTO:
     )
 
 
+class AssistantDTO(CamelModel):
+    agent_id: str
+
+
+@router.get(
+    "/assistant",
+    response_model=AssistantDTO,
+    dependencies=[Depends(require_permission(perm(COPILOT, MANAGE)))],
+)
+async def get_assistant(db: DbSession, principal: CurrentPrincipal) -> AssistantDTO:
+    agent = await get_or_create_assistant(db, tenant_id=principal.tenant_id)
+    await db.commit()
+    return AssistantDTO(agent_id=str(agent.id))
+
+
+async def _assistant_visible(
+    db: DbSession, *, tenant_id: uuid.UUID, authority: Authority, agent_id: uuid.UUID
+) -> bool:
+    """The one exception to department-scoped chat visibility: the tenant's
+    singleton Assistant is reachable by anyone holding copilot:manage,
+    regardless of which department they otherwise see."""
+    if perm(COPILOT, MANAGE) not in authority.tenant_wide:
+        return False
+    assistant = await get_or_create_assistant(db, tenant_id=tenant_id)
+    return assistant.id == agent_id
+
+
 @router.get("/chat/sessions", response_model=list[ChatSessionDTO])
 async def get_sessions(
     db: DbSession,
@@ -67,9 +96,21 @@ async def create_chat_session(
     actor: Annotated[HumanActor, Depends(require_departmental(perm(AGENT, VIEW)))],
 ) -> ChatSessionDTO:
     authority = await authority_for_principal(request, db, actor.principal)
-    tenant_wide = tenant_wide_read(authority, perm(AGENT, VIEW))
+    is_assistant = await _assistant_visible(
+        db, tenant_id=actor.principal.tenant_id, authority=authority, agent_id=body.agent_id
+    )
+    tenant_wide = tenant_wide_read(authority, perm(AGENT, VIEW)) or is_assistant
     agent = await visible_agent(
-        db, scope=actor.scope, tenant_wide=tenant_wide, agent_id=body.agent_id
+        db,
+        scope=actor.scope,
+        tenant_wide=tenant_wide,
+        agent_id=body.agent_id,
+        # `visible_agents`/`visible_agent` hide the Assistant from every screen
+        # that browses agents, so this -- the one door that is deliberately
+        # ABOUT the Assistant -- has to say so. `_assistant_visible` has already
+        # established both halves: this caller holds copilot:manage, and this id
+        # is the tenant's Assistant and nothing else.
+        include_tenant_assistant=is_assistant,
     )
     if agent is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "agent not found")
@@ -85,12 +126,22 @@ async def create_chat_session(
 
 @router.get("/chat/sessions/{session_id}/messages", response_model=list[ChatMessageDTO])
 async def get_messages(
+    request: Request,
     session_id: uuid.UUID,
     db: DbSession,
     actor: Annotated[HumanActor, Depends(require_departmental(perm(AGENT, VIEW)))],
 ) -> list[ChatMessageDTO]:
     session = await get_session(db, tenant_id=actor.principal.tenant_id, session_id=session_id)
-    if session is None or session.member_id != actor.member.id:
+    owned = session is not None and session.member_id == actor.member.id
+    if session is not None and not owned:
+        authority = await authority_for_principal(request, db, actor.principal)
+        owned = await _assistant_visible(
+            db,
+            tenant_id=actor.principal.tenant_id,
+            authority=authority,
+            agent_id=session.agent_id,
+        )
+    if session is None or not owned:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "chat session not found")
     messages = await list_messages(db, tenant_id=actor.principal.tenant_id, session_id=session_id)
     return [_message_dto(msg) for msg in messages]
@@ -110,19 +161,50 @@ async def get_messages(
     dependencies=[Depends(require_permission(RUN_START))],
 )
 async def post_message(
+    request: Request,
     session_id: uuid.UUID,
     body: SendChatMessageRequest,
     db: DbSession,
     actor: Annotated[HumanActor, Depends(require_departmental(perm(AGENT, VIEW)))],
 ) -> ChatMessageDTO:
     session = await get_session(db, tenant_id=actor.principal.tenant_id, session_id=session_id)
-    if session is None or session.member_id != actor.member.id:
+    owned = session is not None and session.member_id == actor.member.id
+    if session is not None and not owned:
+        authority = await authority_for_principal(request, db, actor.principal)
+        owned = await _assistant_visible(
+            db,
+            tenant_id=actor.principal.tenant_id,
+            authority=authority,
+            agent_id=session.agent_id,
+        )
+    if session is None or not owned:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "chat session not found")
-    user_message, _run = await send_message(
+    user_message, run = await send_message(
         db,
         session=session,
         tenant_id=actor.principal.tenant_id,
         message=body.message,
         originating_operator=actor.principal.subject,
+        # The token's role claim, recorded on the run: a member with no
+        # ASSIGNED role resolves to `permissions_for(token.role)` everywhere
+        # else in this system, and the run that answers this message has no
+        # token to read it from later. See `control_tools._acting_token_role`.
+        operator_role=actor.principal.role,
     )
-    return _message_dto(user_message)
+    dto = _message_dto(user_message)
+    if run is not None:
+        # NOT persisted -- user_message.run_id stays NULL in the database,
+        # same as every other user turn (a later GET of this same message
+        # still reports runId: null). This is a same-response-only signal:
+        # the caller now learns which run was just enqueued to answer THIS
+        # specific message, without a second round trip. Frontend use:
+        # DraftWithCopilot (agent-instructions-panel.tsx) and CopilotDock
+        # (copilot-dock.tsx) both talk to the single tenant-wide Assistant
+        # session, so two concurrent requests can interleave in the same
+        # transcript -- matching "my reply" by transcript position/length
+        # is unreliable there, but the assistant's eventual ChatMessage DOES
+        # persist run_id (record_assistant_reply), so a caller that knows
+        # its own run id up front can wait for the specific message whose
+        # runId matches, regardless of what else lands in between.
+        dto = dto.model_copy(update={"run_id": str(run.id)})
+    return dto

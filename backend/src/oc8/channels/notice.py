@@ -100,6 +100,16 @@ class ChannelLink:
 
 
 @dataclass(frozen=True)
+class ChannelFreeText:
+    """Somebody sent the bot an ordinary message -- not a link code, not a
+    decision button tap. Authorization and routing happen entirely in
+    oc8.channels.dispatch; this module only describes what was received."""
+
+    text: str
+    external_id: str
+
+
+@dataclass(frozen=True)
 class ChannelCapabilities:
     """What a channel can and may do, declared by its plugin.
 

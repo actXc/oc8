@@ -5,6 +5,7 @@ session create/list, message send/list -- against a real app instance."""
 from __future__ import annotations
 
 import uuid
+from unittest.mock import patch
 
 import pytest
 from asgi_lifespan import LifespanManager
@@ -12,7 +13,12 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from oc8 import models as m
+from oc8.agent.assistant import get_or_create_assistant
+from oc8.api.v1.chat import _assistant_visible
 from oc8.auth import get_identity_provider
+from oc8.authz.authority import Authority
+from oc8.authz.permissions import COPILOT, MANAGE, perm
+from oc8.authz.scope import subject_uuid_for
 from oc8.main import create_app
 from tests.conftest import AppSessionFactory
 
@@ -108,6 +114,56 @@ async def test_send_message_creates_a_chat_source_run(
         ).scalar_one()
         assert run.context["chat_session_id"] == session_id
         assert run.context["task"] == "User: Hallo!"
+
+
+async def test_send_message_response_carries_the_run_id_it_triggered_but_does_not_persist_it(
+    app_session: AppSessionFactory, redis_url: str
+) -> None:
+    """The POST response's `runId` (api/v1/chat.py's `post_message`) is a
+    same-response-only correlation signal, NOT a persisted column value --
+    the user's own ChatMessage row stays runId: null forever, exactly as it
+    did before this field was added (every later GET of it still reports
+    null). It exists so a caller can correlate a later assistant reply to
+    THIS specific request by matching runId instead of transcript position
+    -- needed once two surfaces (the floating Copilot dock and the agent
+    Instructions panel's "Draft with copilot") can both post into the same
+    tenant-wide Assistant chat session and interleave."""
+    tenant = uuid.uuid4()
+    agent_id = await _seed_agent(app_session, tenant)
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            create_r = await c.post(
+                "/api/v1/chat/sessions",
+                json={"agentId": str(agent_id)},
+                headers=_headers(tenant),
+            )
+            session_id = create_r.json()["id"]
+
+            send_r = await c.post(
+                f"/api/v1/chat/sessions/{session_id}/messages",
+                json={"message": "Hallo!"},
+                headers=_headers(tenant),
+            )
+            assert send_r.status_code == 201, send_r.text
+            run_id_on_response = send_r.json()["runId"]
+            assert run_id_on_response is not None
+
+            list_r = await c.get(
+                f"/api/v1/chat/sessions/{session_id}/messages", headers=_headers(tenant)
+            )
+            assert list_r.status_code == 200, list_r.text
+            assert list_r.json()[0]["runId"] is None
+
+    async with app_session(tenant) as db:
+        run = (
+            await db.execute(
+                select(m.AgentRun).where(
+                    m.AgentRun.agent_id == agent_id, m.AgentRun.source == "chat"
+                )
+            )
+        ).scalar_one()
+        assert run_id_on_response == str(run.id)
 
 
 async def test_rendered_components_reach_the_wire_as_camel_case(
@@ -213,3 +269,391 @@ async def test_get_messages_returns_them_in_order(
             assert r.status_code == 200, r.text
             contents = [m["content"] for m in r.json()]
             assert contents == ["erstens", "zweitens"]
+
+
+# --- Task 4: chat visibility bypass for the tenant Assistant + GET /assistant ---
+#
+# The Assistant lives in its OWN dedicated department (`get_or_create_assistant`),
+# so the ordinary department-scoped `visible_agent` check would 404 a caller who
+# holds `copilot:manage` but no seat there. NOTE ON THIS SUITE'S ROLE CHOICE:
+# `copilot:manage` is `NEVER_DELEGATABLE` (permissions.py) and is granted to
+# exactly one built-in role -- `org_admin` -- which already holds tenant-wide
+# `agent:view` via the pre-existing token-floor bypass (`tenant_wide_read`).
+# There is today no real, non-`org_admin` caller who holds `copilot:manage`
+# without ALSO already bypassing department scope by that older mechanism, so
+# `create_chat_session`'s department-carve-out cannot be isolated end-to-end
+# through the ordinary role-assignment path -- `test_assistant_visible_...`
+# below tests that exact code path directly instead. `get_messages`/
+# `post_message`'s carve-out, by contrast, IS independently observable through
+# HTTP even for two `org_admin`s: their ownership check is per-member
+# (`session.member_id != actor.member.id`), which `org_admin`'s blanket
+# tenant-wide read has never touched.
+
+
+async def test_get_assistant_lazily_provisions_and_is_idempotent(
+    app_session: AppSessionFactory,
+) -> None:
+    tenant = uuid.uuid4()
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            first = await c.get("/api/v1/assistant", headers=_headers(tenant))
+            assert first.status_code == 200, first.text
+            agent_id = first.json()["agentId"]
+            assert agent_id
+
+            second = await c.get("/api/v1/assistant", headers=_headers(tenant))
+            assert second.status_code == 200, second.text
+            assert second.json()["agentId"] == agent_id
+
+    async with app_session(tenant) as db:
+        agent = await db.get(m.Agent, uuid.UUID(agent_id))
+        assert agent is not None
+        assert agent.is_tenant_assistant is True
+
+
+async def test_copilot_manage_holder_can_open_a_session_with_the_assistant(
+    app_session: AppSessionFactory,
+) -> None:
+    """A member who holds copilot:manage but has NO seat in the Assistant's
+    own department must still be able to create a session with it."""
+    tenant = uuid.uuid4()
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            assistant_r = await c.get("/api/v1/assistant", headers=_headers(tenant))
+            assert assistant_r.status_code == 200, assistant_r.text
+            assistant_agent_id = assistant_r.json()["agentId"]
+
+            create_r = await c.post(
+                "/api/v1/chat/sessions",
+                json={"agentId": assistant_agent_id},
+                headers=_headers(tenant),
+            )
+            assert create_r.status_code == 201, create_r.text
+
+
+async def test_create_chat_session_actually_calls_the_assistant_visible_bypass(
+    app_session: AppSessionFactory,
+) -> None:
+    """The previous test cannot, by itself, prove `create_chat_session`'s
+    `tenant_wide_read(...) or await _assistant_visible(...)` line is wired in
+    correctly -- `org_admin` (the only real copilot:manage holder in today's
+    permission catalog) already satisfies `tenant_wide_read` on its own, so
+    that `or` never even needs to evaluate its right-hand side for org_admin.
+    This test forces `tenant_wide_read` to return False, so the ONLY way the
+    request can still succeed is if `_assistant_visible` is actually being
+    called, actually being awaited, and its result actually being OR'd in --
+    catching a reverted or dropped `or` clause that the helper's own unit
+    test (`test_assistant_visible_requires_...`) cannot catch."""
+    tenant = uuid.uuid4()
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            assistant_r = await c.get("/api/v1/assistant", headers=_headers(tenant))
+            assert assistant_r.status_code == 200, assistant_r.text
+            assistant_agent_id = assistant_r.json()["agentId"]
+
+            with patch("oc8.api.v1.chat.tenant_wide_read", return_value=False):
+                create_r = await c.post(
+                    "/api/v1/chat/sessions",
+                    json={"agentId": assistant_agent_id},
+                    headers=_headers(tenant),
+                )
+            assert create_r.status_code == 201, create_r.text
+
+
+async def test_seat_only_member_without_copilot_manage_still_cannot_reach_the_assistant(
+    app_session: AppSessionFactory,
+) -> None:
+    """Quality control on the new carve-out: a caller who holds agent:view
+    only through a seat in an UNRELATED department -- and does not hold
+    copilot:manage -- must still 404 against the tenant Assistant, exactly as
+    it would against any other department's agent."""
+    tenant = uuid.uuid4()
+    subject = "seat-only-viewer"
+    async with app_session(tenant) as db:
+        assistant = await get_or_create_assistant(db, tenant_id=tenant)
+        other_dept = m.Department(tenant_id=tenant, name="Vertrieb", frame={})
+        db.add(other_dept)
+        await db.flush()
+        member = m.OrgMember(
+            tenant_id=tenant, subject=subject, subject_uuid=subject_uuid_for(subject)
+        )
+        db.add(member)
+        await db.flush()
+        db.add(
+            m.OrgMemberDepartment(
+                tenant_id=tenant,
+                member_id=member.id,
+                department_id=other_dept.id,
+                seat_role="dept_viewer",
+            )
+        )
+        await db.flush()
+        assistant_agent_id = assistant.id
+
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            token = get_identity_provider().mint(tenant_id=tenant, subject=subject, role="member")
+            r = await c.post(
+                "/api/v1/chat/sessions",
+                json={"agentId": str(assistant_agent_id)},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert r.status_code == 404, r.text
+
+
+async def test_copilot_manage_holder_can_read_and_reply_in_a_colleagues_assistant_session(
+    app_session: AppSessionFactory, redis_url: str
+) -> None:
+    """The Assistant session ownership check (`session.member_id !=
+    actor.member.id`) is per-member and untouched by department/tenant-wide
+    scope -- so even a second org_admin (a real copilot:manage holder) would
+    404 on a colleague's Assistant session without this bypass. Regression
+    for the get_messages/post_message carve-out specifically."""
+    tenant = uuid.uuid4()
+    app = create_app()
+    other_token = get_identity_provider().mint(
+        tenant_id=tenant, subject="other-operator", role="org_admin"
+    )
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            assistant_r = await c.get("/api/v1/assistant", headers=_headers(tenant))
+            assistant_agent_id = assistant_r.json()["agentId"]
+
+            create_r = await c.post(
+                "/api/v1/chat/sessions",
+                json={"agentId": assistant_agent_id},
+                headers=_headers(tenant),
+            )
+            session_id = create_r.json()["id"]
+
+            get_r = await c.get(
+                f"/api/v1/chat/sessions/{session_id}/messages",
+                headers={"Authorization": f"Bearer {other_token}"},
+            )
+            assert get_r.status_code == 200, get_r.text
+
+            post_r = await c.post(
+                f"/api/v1/chat/sessions/{session_id}/messages",
+                json={"message": "Hallo!"},
+                headers={"Authorization": f"Bearer {other_token}"},
+            )
+            assert post_r.status_code == 201, post_r.text
+
+
+async def test_a_foreign_seat_only_member_without_copilot_manage_still_cannot_read_a_session(
+    app_session: AppSessionFactory,
+) -> None:
+    """The negative control for the previous test: a foreign member with a
+    seat elsewhere, but no copilot:manage, still 404s on someone else's
+    Assistant session."""
+    tenant = uuid.uuid4()
+    subject = "seat-only-viewer"
+    async with app_session(tenant) as db:
+        other_dept = m.Department(tenant_id=tenant, name="Vertrieb", frame={})
+        db.add(other_dept)
+        await db.flush()
+        member = m.OrgMember(
+            tenant_id=tenant, subject=subject, subject_uuid=subject_uuid_for(subject)
+        )
+        db.add(member)
+        await db.flush()
+        db.add(
+            m.OrgMemberDepartment(
+                tenant_id=tenant,
+                member_id=member.id,
+                department_id=other_dept.id,
+                seat_role="dept_viewer",
+            )
+        )
+        await db.flush()
+
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            assistant_r = await c.get("/api/v1/assistant", headers=_headers(tenant))
+            assistant_agent_id = assistant_r.json()["agentId"]
+            create_r = await c.post(
+                "/api/v1/chat/sessions",
+                json={"agentId": assistant_agent_id},
+                headers=_headers(tenant),
+            )
+            session_id = create_r.json()["id"]
+
+            token = get_identity_provider().mint(tenant_id=tenant, subject=subject, role="member")
+            r = await c.get(
+                f"/api/v1/chat/sessions/{session_id}/messages",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert r.status_code == 404, r.text
+
+
+async def test_assistant_visible_requires_copilot_manage_and_the_assistants_own_agent_id(
+    app_session: AppSessionFactory,
+) -> None:
+    """Direct test of `_assistant_visible`: copilot:manage alone is necessary
+    but not sufficient -- it must also name the tenant's actual Assistant
+    agent, never any other agent, even one the same caller could otherwise
+    see."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant = await get_or_create_assistant(db, tenant_id=tenant)
+        other_dept = m.Department(tenant_id=tenant, name="Helpdesk", frame={})
+        db.add(other_dept)
+        await db.flush()
+        other_agent = m.Agent(tenant_id=tenant, department_id=other_dept.id, name="Lennart")
+        db.add(other_agent)
+        await db.flush()
+
+        no_grant = Authority(tenant_wide=frozenset(), unrestricted=False, decides_everywhere=False)
+        assert (
+            await _assistant_visible(
+                db, tenant_id=tenant, authority=no_grant, agent_id=assistant.id
+            )
+            is False
+        )
+
+        with_grant = Authority(
+            tenant_wide=frozenset({perm(COPILOT, MANAGE)}),
+            unrestricted=False,
+            decides_everywhere=False,
+        )
+        assert (
+            await _assistant_visible(
+                db, tenant_id=tenant, authority=with_grant, agent_id=assistant.id
+            )
+            is True
+        )
+        assert (
+            await _assistant_visible(
+                db, tenant_id=tenant, authority=with_grant, agent_id=other_agent.id
+            )
+            is False
+        )
+
+
+async def test_the_first_turn_of_a_new_session_already_carries_its_task(
+    app_session: AppSessionFactory, redis_url: str
+) -> None:
+    """`ChatSession.task_id` used to be written only by `record_assistant_reply`,
+    which runs AFTER a run reaches a terminal state -- so for the whole of turn
+    one the session had no task_id at all.
+
+    That is not cosmetic: `control_tools._member_may_reach_department` resolves
+    the human behind a run by looking the ChatSession up BY `task_id`, finds
+    nothing, and fails closed. The Assistant's very first cross-department
+    `delegate_task` in every new session was therefore refused with "the person
+    you are acting for does not have access to that department" -- which was
+    never true.
+
+    Driven through the REAL pipeline (HTTP POST -> send_message -> enqueue_run),
+    not a hand-built `ChatSession(task_id=task.id)`: the hand-built one is
+    exactly the state this bug meant never existed on turn one.
+    """
+    from oc8.agent.control_tools import _member_may_reach_department
+
+    tenant = uuid.uuid4()
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            assistant_id = (await c.get("/api/v1/assistant", headers=_headers(tenant))).json()[
+                "agentId"
+            ]
+            create_r = await c.post(
+                "/api/v1/chat/sessions",
+                json={"agentId": assistant_id},
+                headers=_headers(tenant),
+            )
+            assert create_r.status_code == 201, create_r.text
+            session_id = create_r.json()["id"]
+
+            async with app_session(tenant) as db:
+                fresh = await db.get(m.ChatSession, uuid.UUID(session_id))
+                assert fresh is not None
+                assert fresh.task_id is None, "no task before the first message"
+
+            send_r = await c.post(
+                f"/api/v1/chat/sessions/{session_id}/messages",
+                json={"message": "Bitte ein Ticket bearbeiten lassen"},
+                headers=_headers(tenant),
+            )
+            assert send_r.status_code == 201, send_r.text
+            run_id = send_r.json()["runId"]
+
+    async with app_session(tenant) as db:
+        session = await db.get(m.ChatSession, uuid.UUID(session_id))
+        assert session is not None
+        assert session.task_id is not None, "turn one left the session task-less"
+
+        run = await db.get(m.AgentRun, uuid.UUID(run_id))
+        assert run is not None
+        assert run.task_id == session.task_id, (
+            "the run must carry the task the session owns, not open a second one"
+        )
+        # The token's role claim travels with the run so the guard can still
+        # resolve the acting human's reach mid-run, with no request in sight.
+        assert run.context["operator_role"] == "org_admin"
+
+        task = await db.get(m.Task, session.task_id)
+        assert task is not None
+
+        # The exact question `_delegate` asks mid-run, on turn one. Before the
+        # fix this was False for everybody, always.
+        other = m.Department(tenant_id=tenant, name="Buchhaltung", frame={})
+        db.add(other)
+        await db.flush()
+        assert (
+            await _member_may_reach_department(
+                db, tenant_id=tenant, task=task, department_id=other.id, run_id=run.id
+            )
+            is True
+        )
+
+
+async def test_a_second_turn_reuses_the_task_the_first_one_opened(
+    app_session: AppSessionFactory, redis_url: str
+) -> None:
+    """One chat session is one item on the department board, not one per
+    message -- the property `send_message` opening the task up front must not
+    break."""
+    tenant = uuid.uuid4()
+    agent_id = await _seed_agent(app_session, tenant)
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            session_id = (
+                await c.post(
+                    "/api/v1/chat/sessions",
+                    json={"agentId": str(agent_id)},
+                    headers=_headers(tenant),
+                )
+            ).json()["id"]
+            for text in ("Erste Frage", "Zweite Frage"):
+                r = await c.post(
+                    f"/api/v1/chat/sessions/{session_id}/messages",
+                    json={"message": text},
+                    headers=_headers(tenant),
+                )
+                assert r.status_code == 201, r.text
+
+    async with app_session(tenant) as db:
+        runs = (
+            (
+                await db.execute(
+                    select(m.AgentRun).where(
+                        m.AgentRun.tenant_id == tenant, m.AgentRun.source == "chat"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(runs) == 2
+        assert len({r.task_id for r in runs}) == 1, "both turns share one Task"
+        tasks = (
+            (await db.execute(select(m.Task).where(m.Task.tenant_id == tenant))).scalars().all()
+        )
+        assert len(tasks) == 1

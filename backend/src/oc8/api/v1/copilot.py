@@ -11,7 +11,6 @@ from sqlalchemy import select
 from oc8.api.deps import CurrentPrincipal, DbSession, require_permission
 from oc8.authz.permissions import COPILOT, MANAGE, VIEW, perm
 from oc8.copilot.capabilities import InvalidOperation, operation_references
-from oc8.copilot.chat import respond_to_copilot_message
 from oc8.copilot.models import CopilotOperation, CopilotProposal
 from oc8.copilot.proposals import (
     ProposalNotRejectable,
@@ -62,32 +61,34 @@ async def propose(request: Request, db: DbSession, principal: CurrentPrincipal) 
     return await _response(db, proposal)
 
 
-@router.post(
-    "/copilot/chat",
-    dependencies=[Depends(require_permission(perm(COPILOT, MANAGE)))],
-)
-async def chat(request: Request, db: DbSession, principal: CurrentPrincipal) -> dict[str, Any]:
-    try:
-        body = await request.json()
-        if (
-            not isinstance(body, dict)
-            or set(body) != {"message"}
-            or not isinstance(body["message"], str)
-        ):
-            raise ValueError()
-    except (TypeError, ValueError):
-        raise _safe_invalid() from None
-    try:
-        reply = await respond_to_copilot_message(db, principal, body["message"])
-    except Exception:
-        # Provider/parser errors can contain upstream request fragments. The API
-        # boundary emits no raw exception text and deliberately cannot apply.
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "copilot is unavailable") from None
-    return {
-        "text": reply.text,
-        "missingFields": reply.missing_fields,
-        "proposalId": str(reply.proposal_id) if reply.proposal_id else None,
-    }
+@router.get("/copilot/proposals",
+            dependencies=[Depends(require_permission(perm(COPILOT, VIEW)))])
+async def list_proposals(
+    db: DbSession, principal: CurrentPrincipal, status_filter: str = "draft"
+) -> list[dict[str, Any]]:
+    """Every proposal in this tenant with a given status, newest first.
+
+    Exists so the Copilot dock can show what is waiting without parsing a
+    proposal id out of a free-text chat message: `propose_change` answers the
+    model with a sentence, and the sentence is not an API. Listing by status
+    also covers proposals raised over Telegram, which no web transcript
+    mentions at all.
+
+    `draft` by default -- that is the only status `create_proposal` ever writes
+    (see `control_tools.py`'s propose_change branch: it may DRAFT and nothing
+    else), so "draft" is this system's word for "waiting for a human".
+    """
+    rows = (
+        await db.execute(
+            select(CopilotProposal)
+            .where(
+                CopilotProposal.tenant_id == principal.tenant_id,
+                CopilotProposal.status == status_filter,
+            )
+            .order_by(CopilotProposal.created_at.desc())
+        )
+    ).scalars().all()
+    return [await _response(db, row) for row in rows]
 
 
 @router.get("/copilot/proposals/{proposal_id}",

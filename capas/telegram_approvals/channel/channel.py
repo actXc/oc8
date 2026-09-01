@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hmac
 import logging
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -30,6 +31,7 @@ from oc8.channels.notice import (
     ApprovalNotice,
     ChannelCapabilities,
     ChannelDecision,
+    ChannelFreeText,
     ChannelLink,
 )
 
@@ -54,6 +56,26 @@ def _escape(text: str) -> str:
     """Telegram's HTML parse mode. Only these three, per its documentation --
     escaping more would show entities to the reader."""
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+_BOLD = re.compile(r"\*\*(.+?)\*\*")
+
+
+def _to_telegram_html(text: str) -> str:
+    """The Assistant's free-text replies (say()'s payload) come back
+    Markdown-flavoured -- `**bold**`, `- ` bullets -- because that is what the
+    model was trained to write, not because anything asked for Telegram's
+    markup. Sent raw, the reader sees literal asterisks and dashes instead of
+    the emphasis they were meant to convey. Escapes HTML first (so nothing in
+    the model's own text is mistaken for markup), THEN promotes the one
+    construct the model reliably uses to a real `<b>` tag, and normalises a
+    leading list dash to a bullet. Deliberately narrow: single-asterisk
+    italics and underscores are left alone -- snake_case, multiplication, and
+    stray underscores are more common accidental matches than intentional
+    italic markup in a data-summary reply."""
+    escaped = _escape(text)
+    bolded = _BOLD.sub(r"<b>\1</b>", escaped)
+    return "\n".join(re.sub(r"^[-*]\s+", "• ", line) for line in bolded.splitlines())
 
 
 def render(notice: ApprovalNotice) -> str:
@@ -211,7 +233,9 @@ class TelegramChannel:
         )
         return hmac.compare_digest(sent, self._webhook_secret)
 
-    def parse_inbound(self, update: Mapping[str, Any]) -> ChannelDecision | ChannelLink | None:
+    def parse_inbound(
+        self, update: Mapping[str, Any]
+    ) -> ChannelDecision | ChannelLink | ChannelFreeText | None:
         pressed = decision_from_update(dict(update))
         if pressed is not None:
             decision, _callback_id = pressed
@@ -220,7 +244,14 @@ class TelegramChannel:
         if linked is not None:
             code, sender = linked
             return ChannelLink(code=code, external_id=sender)
-        return None
+        message = dict(update).get("message")
+        if not isinstance(message, dict):
+            return None
+        text = str(message.get("text") or "").strip()
+        sender = _sender_id(message)
+        if not text or sender is None:
+            return None
+        return ChannelFreeText(text=text, external_id=str(sender))
 
     def capabilities(self) -> ChannelCapabilities:
         # `unsolicited=True`: unlike WhatsApp, Telegram lets a bot write to
@@ -313,9 +344,16 @@ class TelegramChannel:
             logger.warning("could not acknowledge a Telegram callback", exc_info=True)
 
     async def say(self, external_id: str, text: str) -> None:
-        """A plain reply — used to confirm a binding, or to refuse one."""
+        """A reply — used to confirm a binding, refuse one, or carry the
+        Assistant's own free-text answer for a chat-originated run. HTML parse
+        mode via `_to_telegram_html`, same as `deliver`/`withdraw`: the static
+        strings this also carries (binding confirm/refuse, park/failure
+        notices) have no markup to convert and pass through unchanged."""
         try:
-            await self._post("sendMessage", {"chat_id": external_id, "text": text})
+            await self._post(
+                "sendMessage",
+                {"chat_id": external_id, "text": _to_telegram_html(text), "parse_mode": "HTML"},
+            )
         except Exception:
             logger.warning("could not send a Telegram reply", exc_info=True)
 

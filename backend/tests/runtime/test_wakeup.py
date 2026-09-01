@@ -39,7 +39,11 @@ def _msg(run_id: uuid.UUID, tenant: uuid.UUID) -> RunMessage:
 
 
 async def _delegated_setup(
-    app_session: AppSessionFactory, tenant: uuid.UUID
+    app_session: AppSessionFactory,
+    tenant: uuid.UUID,
+    *,
+    chat_session_id: str | None = None,
+    telegram_external_id: str | None = None,
 ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
     """A team lead with a task, and a worker with a sub-task parented to it.
     Returns (lead agent id, sub-task id, sub-run id)."""
@@ -73,14 +77,20 @@ async def _delegated_setup(
         s.add(sub_task)
         await s.flush()
 
+        sub_run_context: dict[str, Any] = {
+            "task": "the sub work",
+            "parent_task_id": str(lead_task.id),
+            "delegation_depth": 1,
+        }
+        if chat_session_id is not None:
+            sub_run_context["chat_session_id"] = chat_session_id
+        if telegram_external_id is not None:
+            sub_run_context["telegram_external_id"] = telegram_external_id
+
         sub_run = await RunRepository(s).create(
             tenant_id=tenant,
             agent_id=worker.id,
-            context={
-                "task": "the sub work",
-                "parent_task_id": str(lead_task.id),
-                "delegation_depth": 1,
-            },
+            context=sub_run_context,
         )
         return lead.id, sub_task.id, sub_run.id
 
@@ -194,6 +204,81 @@ async def test_a_sub_task_that_raises_still_wakes_the_team_lead(
         assert "failed" in wake.context["task"]
         assert "model router exhausted" in wake.context["task"]
         assert wake.context["delegation_depth"] == 1
+
+
+@pytest.mark.parametrize(
+    ("status", "expected_outcome"), [("done", "completed"), ("failed", "failed")]
+)
+async def test_a_chat_originated_sub_task_wakes_the_lead_with_source_chat(
+    app_session: AppSessionFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    status: str,
+    expected_outcome: str,
+) -> None:
+    """A wake-up whose delegation chain traces back to a chat turn must itself
+    carry source="chat" and the same chat_session_id/telegram_external_id --
+    that is what record_assistant_reply/_tell_telegram key off of to ever
+    surface the lead's real conclusion back to the human. Without this a
+    chat-originated delegation's final answer was created with
+    source="delegation" and never reached the user on any channel."""
+    tenant = uuid.UUID(str(ACME_TENANT_ID))
+    lead_id, sub_task_id, sub_run_id = await _delegated_setup(
+        app_session,
+        tenant,
+        chat_session_id="11111111-1111-1111-1111-111111111111",
+        telegram_external_id="tg-42",
+    )
+    queue = _RecordingQueue()
+    monkeypatch.setattr("oc8.runtime.intake.get_run_queue", lambda: queue)
+
+    async def runner(db: Any, **kw: Any) -> RunResult:
+        return RunResult(
+            task_id=sub_task_id,
+            agent_id=kw["agent"].id,
+            status=status,
+            output="the report is attached",
+            tool_calls=[],
+            steps=1,
+        )
+
+    await execute_run(_msg(sub_run_id, tenant), runtime=_FnRuntime(runner))
+
+    assert len(queue.enqueued) == 1
+    async with app_session(tenant) as s:
+        wake = await s.get(m.AgentRun, queue.enqueued[0])
+        assert wake is not None
+        assert wake.agent_id == lead_id
+        assert wake.source == "chat"
+        assert wake.context["chat_session_id"] == "11111111-1111-1111-1111-111111111111"
+        assert wake.context["telegram_external_id"] == "tg-42"
+        assert expected_outcome in wake.context["task"]
+
+
+async def test_a_chat_originated_sub_task_that_raises_still_wakes_with_source_chat(
+    app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The exception path (run_agent raises rather than returning
+    status='failed') must propagate the chat origin too -- it is a separate
+    code path from the normal terminal-state one above."""
+    tenant = uuid.UUID(str(ACME_TENANT_ID))
+    lead_id, _sub_task_id, sub_run_id = await _delegated_setup(
+        app_session, tenant, chat_session_id="22222222-2222-2222-2222-222222222222"
+    )
+    queue = _RecordingQueue()
+    monkeypatch.setattr("oc8.runtime.intake.get_run_queue", lambda: queue)
+
+    async def boom(db: Any, **kw: Any) -> RunResult:
+        raise RuntimeError("model router exhausted")
+
+    await execute_run(_msg(sub_run_id, tenant), runtime=_FnRuntime(boom))
+
+    assert len(queue.enqueued) == 1
+    async with app_session(tenant) as s:
+        wake = await s.get(m.AgentRun, queue.enqueued[0])
+        assert wake is not None
+        assert wake.agent_id == lead_id
+        assert wake.source == "chat"
+        assert wake.context["chat_session_id"] == "22222222-2222-2222-2222-222222222222"
 
 
 async def test_a_team_leads_own_wake_up_task_does_not_wake_it_again(

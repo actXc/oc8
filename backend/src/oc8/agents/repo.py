@@ -62,11 +62,19 @@ async def visible_agents(
     is empty is the natural way to write this, and it fails OPEN (every agent
     in the tenant) if written that way. The early return is what keeps it
     failing CLOSED instead.
+
+    The tenant Assistant is never listed. It is auto-provisioned, has no
+    configurable anything, and is reached through its own door (`GET /assistant`,
+    which looks it up by the flag and not through here) -- so on every screen a
+    person browses agents on it is one more row they cannot act on and are
+    invited to try. Filtered here rather than on each screen because this
+    function is the single funnel every one of those screens goes through
+    (`tests/agents/test_reads_go_through_the_scoped_repository.py`).
     """
     if not tenant_wide and not scope.viewable:
         return [], 0
 
-    stmt = select(Agent)
+    stmt = select(Agent).where(Agent.is_tenant_assistant.is_(False))
     if not include_archived:
         stmt = stmt.where(Agent.deleted_at.is_(None))
     if not tenant_wide:
@@ -100,6 +108,7 @@ async def visible_agent(
     scope: DepartmentScope,
     tenant_wide: bool,
     agent_id: uuid.UUID,
+    include_tenant_assistant: bool = False,
 ) -> Agent | None:
     """One agent, or `None` for BOTH "no such row" and "exists outside scope".
 
@@ -112,13 +121,21 @@ async def visible_agent(
     module gives: this load is a security boundary, and `Session.get` can return
     an already-loaded instance out of the identity map without issuing SQL at
     all -- the one thing a boundary check must never skip.
+
+    `include_tenant_assistant` is off by default, matching `visible_agents`: the
+    Assistant is not something a person manages, so every agent screen 404s on
+    it. Exactly one caller passes True -- `POST /chat/sessions`
+    (`api/v1/chat.py`), which has ALREADY established through
+    `_assistant_visible` that this caller holds `copilot:manage` and that this
+    id is the tenant's Assistant. It is a parameter and not a second function
+    so the sweep in `tests/agents/test_reads_go_through_the_scoped_repository.py`
+    keeps covering the one door that can see it.
     """
+    stmt = select(Agent).where(Agent.id == agent_id, Agent.deleted_at.is_(None))
+    if not include_tenant_assistant:
+        stmt = stmt.where(Agent.is_tenant_assistant.is_(False))
     row = (
-        await db.execute(
-            select(Agent)
-            .where(Agent.id == agent_id, Agent.deleted_at.is_(None))
-            .execution_options(populate_existing=True)
-        )
+        await db.execute(stmt.execution_options(populate_existing=True))
     ).scalar_one_or_none()
     if row is None:
         return None

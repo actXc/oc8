@@ -274,7 +274,7 @@ class SetupFieldSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
     key: str
     label: str
-    kind: Literal["text", "url", "password", "department", "credential"] = "text"
+    kind: Literal["text", "url", "password", "department", "credential", "select"] = "text"
     required: bool = True
     default: str = ""
     placeholder: str = ""
@@ -291,6 +291,11 @@ class SetupFieldSpec(BaseModel):
     # configure_plugin then treats the submitted value as a credential id,
     # not a plaintext value (unified credentials framework design, §7).
     credential_type: str = ""
+    # Only meaningful when kind == "select": the fixed choices rendered as a
+    # <select>, in order. The submitted value is one of these verbatim --
+    # there is no separate value/label pair, so a plugin that wants a
+    # human-friendly label puts it in `help` rather than here.
+    options: list[str] = []
 
     @model_validator(mode="after")
     def _credential_kind_needs_a_type(self) -> SetupFieldSpec:
@@ -303,6 +308,25 @@ class SetupFieldSpec(BaseModel):
             raise ValueError(
                 f"field {self.key!r} sets credential_type but kind is {self.kind!r}, "
                 "not 'credential' -- credential_type is only read for kind='credential'"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _select_kind_needs_options(self) -> SetupFieldSpec:
+        if self.kind == "select" and not self.options:
+            raise ValueError(
+                f"field {self.key!r} has kind='select' but no options -- "
+                "name the choices it must render"
+            )
+        if self.kind != "select" and self.options:
+            raise ValueError(
+                f"field {self.key!r} sets options but kind is {self.kind!r}, "
+                "not 'select' -- options is only read for kind='select'"
+            )
+        if self.kind == "select" and self.default and self.default not in self.options:
+            raise ValueError(
+                f"field {self.key!r} defaults to {self.default!r}, which is not one of "
+                f"its own options {self.options!r}"
             )
         return self
 

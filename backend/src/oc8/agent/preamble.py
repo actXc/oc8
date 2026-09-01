@@ -81,7 +81,41 @@ async def roster_block(db: AsyncSession, *, agent: m.Agent) -> str | None:
     was offered delegate_task and could not name one colleague, while the same
     lead in-process could. Observed live: an accepted handoff told Sina to
     delegate, and her instructions never mentioned that Jan exists.
+
+    The tenant Assistant is a special case: it sits alone in its own
+    single-agent department (`get_or_create_assistant`), so a department-scoped
+    roster is always empty for it -- yet `_member_may_reach_department` lets it
+    delegate to ANY department the acting human can reach. Offered `delegate_task`
+    with genuinely no names, it correctly has nothing to call: observed live, it
+    fell back to asking the human "does your tenant have someone for this?" on
+    every turn instead of ever delegating. It gets the full tenant roster
+    (grouped by department) instead of its own department's -- naming the same
+    agents its own delegation guard would actually let it reach.
     """
+    if agent.is_tenant_assistant:
+        rows = (
+            await db.execute(
+                select(m.Agent, m.Department.name)
+                .join(m.Department, m.Department.id == m.Agent.department_id)
+                .where(
+                    m.Agent.tenant_id == agent.tenant_id,
+                    m.Agent.id != agent.id,
+                    m.Agent.status != "pending_approval",
+                    m.Agent.deleted_at.is_(None),
+                    m.Agent.is_tenant_assistant.is_(False),
+                )
+                .order_by(m.Department.name, m.Agent.name)
+            )
+        ).all()
+        if not rows:
+            return None
+        lines = [
+            f"- {a.id}: {a.name} ({dept}" + (f", {a.role_title})" if a.role_title else ")")
+            for a, dept in rows
+        ]
+        return "Every agent in this tenant, by department -- delegate_task may reach any " \
+            "of them if the person you are acting for can:\n" + "\n".join(lines)
+
     mates = (
         (
             await db.execute(

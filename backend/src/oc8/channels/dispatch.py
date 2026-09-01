@@ -26,6 +26,7 @@ from oc8.channels.binding import BindingError, redeem_code
 from oc8.channels.notice import (
     ApprovalNotice,
     ChannelDecision,
+    ChannelFreeText,
     ChannelLink,
     NoticeOption,
     outranks,
@@ -292,6 +293,31 @@ async def tell_sender(impl: Any, external_id: str, text: str) -> None:
         logger.warning("could not reply on an approval channel", exc_info=True)
 
 
+#: Sent instead of an Assistant-produced reply when the channel's own
+#: max_classification is below what that reply is treated as. Deliberately
+#: still sent, same reasoning as ApprovalNotice.redacted(): that an answer is
+#: waiting is worth saying even when the answer itself is not.
+_CONTENT_WITHHELD = "I have a reply, but this channel isn't cleared for it -- check oc8."
+
+
+async def tell_sender_gated(impl: Any, external_id: str, text: str) -> None:
+    """Like `tell_sender`, but for content that carries the same weight as an
+    approval's `detail` -- gated by the channel's own `max_classification`,
+    the identical check `announce()` applies to approvals (`outranks`,
+    `notice.py`). Every Assistant-produced reply sent through this door --
+    the ack, the final answer, a park or failure notice -- is treated as
+    `internal`: the same value an approval carries when nothing says
+    otherwise (`_classification_of`'s fallback), since nothing here can yet
+    say more precisely what a given reply actually contains. A fresh channel
+    (`max_classification` defaults to `public`) therefore carries none of it
+    until an operator explicitly widens it -- the same friction `announce()`
+    already applies, now applied consistently to this door too."""
+    caps = impl.capabilities()
+    if outranks("internal", caps.max_classification):
+        text = _CONTENT_WITHHELD
+    await tell_sender(impl, external_id, text)
+
+
 async def bind_from_link(
     db: AsyncSession, impl: Any, *, tenant_id: uuid.UUID, channel: str, link: ChannelLink
 ) -> None:
@@ -366,6 +392,106 @@ async def apply_decision(
     await tell_sender(impl, decision.external_id, f"Recorded: {result.approval.status}.")
 
 
+async def _member_has_permission(
+    db: AsyncSession, *, member: m.OrgMember, permission: str
+) -> bool:
+    """Whether a channel-bound member (no token, no Principal -- see
+    decision_from's own comment on why a ChannelActor holds no tenant-wide
+    permission today) holds a given ASSIGNED-ROLE permission directly.
+
+    Deliberately does not fall back to a token-derived default the way
+    authz.authority._authority_of_member does for an authenticated operator:
+    there is no token here to derive one from, so a member with no role_id
+    gets nothing (fail closed) rather than inheriting some default role's
+    grants.
+    """
+    if member.role_id is None:
+        return False
+    from oc8.authz.authority import _role_and_permissions
+
+    _role, granted = await _role_and_permissions(db, member.role_id)
+    return permission in granted
+
+
+async def bind_from_free_text(
+    db: AsyncSession, impl: Any, *, tenant_id: uuid.UUID, channel: str, text: ChannelFreeText
+) -> None:
+    """A free-text message to the bot: authorize the sender, then post it
+    into their shared ChatSession with the tenant's Assistant agent.
+
+    Silent for an account with no binding row at all. Before this door existed,
+    unrecognised text parsed to `None` and `process_inbound` dropped it without
+    a word ("Somebody typing at the bot... Normal, and not an error"), so a
+    Telegram account with zero relationship to the tenant got no response
+    whatsoever. Replying `REFUSED` to any account that finds the bot's address
+    made it an unauthenticated outbound-message amplifier -- anybody could make
+    it send messages, and could keep doing it.
+
+    The non-oracle property is untouched: a sender who KNOWS a chat is bound
+    still cannot tell "linked but lacks copilot:manage" from "linked and
+    refused" from "revoked", because all of those still get the identical
+    `REFUSED` sentence. What changes is only that a total stranger is not
+    answered at all.
+    """
+    from oc8.agent.assistant import get_or_create_assistant
+    from oc8.authz.permissions import COPILOT, MANAGE, perm
+    from oc8.chat.service import _SECRET_REFUSAL, create_session, list_sessions, send_message
+
+    bound = await binding.resolve(
+        db, tenant_id=tenant_id, channel=channel, external_id=text.external_id
+    )
+    if bound is None or bound.member_id is None:
+        if not await binding.has_ever_been_bound(
+            db, tenant_id=tenant_id, channel=channel, external_id=text.external_id
+        ):
+            logger.info(
+                "dropping free text on %s from an account with no binding in tenant %s",
+                channel,
+                tenant_id,
+            )
+            return
+        await tell_sender(impl, text.external_id, REFUSED)
+        return
+    member = await db.get(m.OrgMember, bound.member_id)
+    if member is None or not await _member_has_permission(
+        db, member=member, permission=perm(COPILOT, MANAGE)
+    ):
+        await tell_sender(impl, text.external_id, REFUSED)
+        return
+
+    assistant = await get_or_create_assistant(db, tenant_id=tenant_id)
+    sessions = await list_sessions(
+        db, tenant_id=tenant_id, member_id=member.id, agent_id=assistant.id
+    )
+    session = (
+        sessions[0]
+        if sessions
+        else await create_session(
+            db, tenant_id=tenant_id, agent_id=assistant.id, member_id=member.id
+        )
+    )
+    _msg, run = await send_message(
+        db,
+        session=session,
+        tenant_id=tenant_id,
+        message=text.text,
+        originating_operator=None,
+        telegram_external_id=text.external_id,
+    )
+    # send_message() committed via enqueue_run -- re-fetch nothing further needed here.
+    if run is None:
+        # The Assistant's secret-blindness gate refused this message outright
+        # (see send_message's docstring): no run was ever enqueued, so
+        # executor.py's terminal-state hook -- the only other place this door
+        # sends a Telegram reply -- will never fire for it. Without this
+        # branch the sender is told "Bin dran..." and then simply never
+        # hears anything again, even though the refusal WAS correctly
+        # written to the chat transcript.
+        await tell_sender(impl, text.external_id, _SECRET_REFUSAL)
+        return
+    await tell_sender_gated(impl, text.external_id, "Bin dran, melde mich gleich.")
+
+
 async def process_inbound(
     db: AsyncSession,
     impl: ApprovalChannel,
@@ -387,3 +513,5 @@ async def process_inbound(
         await bind_from_link(db, impl, tenant_id=tenant_id, channel=channel, link=parsed)
     elif isinstance(parsed, ChannelDecision):
         await apply_decision(db, impl, tenant_id=tenant_id, channel=channel, decision=parsed)
+    elif isinstance(parsed, ChannelFreeText):
+        await bind_from_free_text(db, impl, tenant_id=tenant_id, channel=channel, text=parsed)

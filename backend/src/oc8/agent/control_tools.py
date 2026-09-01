@@ -72,16 +72,19 @@ ASK_USER = NeutralTool(
 DELEGATE_TASK = NeutralTool(
     name="delegate_task",
     description=(
-        "Delegate a piece of work to another agent in your department. Use "
-        "this to break a large task into focused sub-tasks. The agent runs "
-        "independently and you will be notified when it finishes."
+        "Delegate a piece of work to another agent -- normally one in your own "
+        "department, but the tenant Assistant may reach any department the "
+        "person it is acting for can. Use this to break a large task into "
+        "focused sub-tasks, or to hand off work that belongs to a different "
+        "specialty than your own. The agent runs independently and you will be "
+        "notified when it finishes."
     ),
     parameters={
         "type": "object",
         "properties": {
             "agent_id": {
                 "type": "string",
-                "description": "The target agent's id, from your department roster.",
+                "description": "The target agent's id, from the roster you were given.",
             },
             "task_text": {
                 "type": "string",
@@ -223,6 +226,65 @@ RENDER_COMPONENT = NeutralTool(
     },
 )
 
+PROPOSE_CHANGE = NeutralTool(
+    name="propose_change",
+    description=(
+        "Propose a structural change to the system for a human to review -- "
+        "you NEVER apply one yourself. Use this for anything that changes how "
+        "oc8 itself is set up: a new department, a new agent, changing an "
+        "agent's mission, enabling a plugin, or preparing an integration. "
+        "The only supported operation_type values are: agent.mission.set, "
+        "trigger.create, plugin.enable, integration.prepare, "
+        "department.create, agent.create. `payload` must contain only that "
+        "operation's own fields, listed under `payload` below -- any other "
+        "key is rejected."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "operation_type": {
+                "type": "string",
+                "enum": [
+                    "agent.mission.set",
+                    "trigger.create",
+                    "plugin.enable",
+                    "integration.prepare",
+                    "department.create",
+                    "agent.create",
+                ],
+            },
+            "payload": {
+                "type": "object",
+                # The field names are schema, not tenant data, so naming them
+                # here leaks nothing -- and without them the model cannot
+                # learn them anywhere: the failure path is deliberately
+                # value-free, so a wrong payload would only ever retry-loop.
+                "description": (
+                    "That operation type's own fields, and nothing else "
+                    "(never a `type` key -- it is added for you). Required "
+                    "fields per operation_type, optional ones in brackets: "
+                    "agent.mission.set: agentId (uuid), mission (text). "
+                    "trigger.create: agentId (uuid), kind ('cron' or "
+                    "'event'), taskText (text), [cronExpression, "
+                    "eventSource, eventType]. "
+                    "plugin.enable: pluginId (uuid), [grantedPermissions "
+                    "(list of strings)]. "
+                    "integration.prepare: integrationId (uuid), "
+                    "[configurationRef (uuid)]. "
+                    "department.create: name (text), [goal (text), icon "
+                    "(text)]. "
+                    "agent.create: departmentId (uuid), name (text), "
+                    "[roleTitle (text), mission (text)]. "
+                    "Every id must be one you actually saw in your context -- "
+                    "never invent a uuid, the proposal is refused if it "
+                    "refers to nothing."
+                ),
+            },
+        },
+        "required": ["operation_type", "payload"],
+    },
+)
+
 CONTROL_TOOL_SCHEMAS: dict[str, NeutralTool] = {
     MEMORY_WRITE.name: MEMORY_WRITE,
     ASK_USER.name: ASK_USER,
@@ -231,6 +293,7 @@ CONTROL_TOOL_SCHEMAS: dict[str, NeutralTool] = {
     SEARCH_KNOWLEDGE.name: SEARCH_KNOWLEDGE,
     SEARCH_MEMORY.name: SEARCH_MEMORY,
     RENDER_COMPONENT.name: RENDER_COMPONENT,
+    PROPOSE_CHANGE.name: PROPOSE_CHANGE,
 }
 CONTROL_TOOL_NAMES: frozenset[str] = frozenset(CONTROL_TOOL_SCHEMAS)
 
@@ -268,9 +331,32 @@ def offered_tools(
     # execute_control_tool. Withdrawing the tool the moment it activates would
     # strand a model that re-checks its own tool list mid-task with an unknown
     # tool name instead of a harmless "already active" response.
-    offered = [MEMORY_WRITE, ASK_USER, RENDER_COMPONENT]
+    offered = [MEMORY_WRITE, RENDER_COMPONENT]
+    # ASK_USER parks the run and waits for an answer through the SAME door the
+    # question arrived on. That holds for every other agent, whose only doors
+    # are the web Chat tab and internal handoffs -- both can answer a park.
+    # The tenant Assistant has a door neither of those has: Telegram free
+    # text, which has no reply-to-a-clarification path at all (§Component 2's
+    # own scope; see channels/dispatch.py's bind_from_free_text). Offered
+    # ASK_USER anyway, it reliably reached for it on an ambiguous message and
+    # parked a run a Telegram sender could never unstick -- observed live: the
+    # same "does your tenant have someone for this?" question repeated on
+    # every subsequent turn instead of ever calling delegate_task. Withheld
+    # here (also matches this file's own "Read-only + delegate_task +
+    # propose_change ONLY" scope, in assistant.py's module docstring), the
+    # Assistant must answer with what it knows, delegate, or say plainly that
+    # it cannot help -- never leave a human of ANY door waiting on a question
+    # that door cannot answer.
+    if not agent.is_tenant_assistant:
+        offered.append(ASK_USER)
     if agent.is_team_lead:
         offered.append(DELEGATE_TASK)
+    if agent.is_tenant_assistant:
+        # Only the Assistant is the one that talks to a human about how oc8
+        # itself is set up, so only it has anything to propose. The dispatch
+        # refuses the call for anyone else regardless -- this just keeps the
+        # tool out of a list where it could never succeed.
+        offered.append(PROPOSE_CHANGE)
     if has_knowledge:
         offered.append(SEARCH_KNOWLEDGE)
     offered.extend(skill_tool_schemas(assigned_skills))
@@ -314,6 +400,96 @@ class ControlOutcome:
     rendered_component: dict[str, Any] | None = None
 
 
+async def _member_may_reach_department(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    task: m.Task,
+    department_id: uuid.UUID,
+    run_id: uuid.UUID | None,
+) -> bool:
+    """Whether the human behind this chat-driven task could reach
+    `department_id` themselves -- the same rule channels/binding.py's
+    recipients() already applies for who gets told about an approval.
+
+    This is what stops the tenant Assistant from becoming a privilege
+    escalation: it is the one agent allowed out of its own department, so
+    without this the person it acts for could start work anywhere in the
+    tenant just by asking it nicely.
+
+    Returns False (fail closed) when the task has no chat session at all,
+    e.g. a delegated or scheduled run with nobody behind it. "Nobody to
+    check" is not "anybody may".
+
+    The answer comes from `authz.scope.scope_for_member` -- the same
+    `DepartmentScope` every HTTP route and the messenger door already resolve --
+    rather than from a fourth hand-rolled reading of the seat tables. The
+    hand-rolled one asked "all_departments, or a live seat here?", which is the
+    ROW term alone: `_upsert_member` mints a member with NEITHER, so on a fresh
+    tenant this refused everybody, including the administrator whose reach comes
+    entirely from their role. It only ever worked in the dev tenant because that
+    one member happened to carry `all_departments=True`.
+    """
+    session = await db.scalar(
+        select(m.ChatSession).where(
+            m.ChatSession.tenant_id == tenant_id, m.ChatSession.task_id == task.id
+        )
+    )
+    if session is None:
+        return False
+    member = await db.get(m.OrgMember, session.member_id)
+    if member is None:
+        return False
+    from oc8.authz.scope import scope_for_member
+
+    scope = await scope_for_member(
+        db, member, token_role=await _acting_token_role(db, tenant_id=tenant_id, run_id=run_id)
+    )
+    return scope.may_view(department_id)
+
+
+async def _acting_token_role(
+    db: AsyncSession, *, tenant_id: uuid.UUID, run_id: uuid.UUID | None
+) -> str | None:
+    """The role claim of the token that started this chat, if there was one.
+
+    A member with no ASSIGNED role resolves to `permissions_for(token.role)`
+    everywhere else in the system (`authz.authority._authority_of_member`), and
+    that is the whole of most people's authority -- but a token exists only for
+    the length of an HTTP request, and this runs inside a run, later. So the
+    chat API records the claim on the run it enqueues (`chat/service.send_message`)
+    and this reads it back.
+
+    None for every other origin: a Telegram sender has no token at all (that
+    door's authority is the binding row, exactly as `scope_for_binding`
+    documents), and neither does a scheduled or delegated run. None means the
+    row terms decide alone, which is the fail-closed direction. Same for
+    `run_id is None`: a direct `run_agent` call with no run row behind it has
+    no claim to read, and inventing one is the fail-open shape.
+
+    Keyed on the id of the run EXECUTING this tool call, deliberately, and not
+    on the task. Every turn of one member's Assistant conversation -- web and
+    Telegram alike -- shares one `ChatSession` and therefore one `Task`
+    (`channels/dispatch.bind_from_free_text` reuses the existing session for a
+    repeat sender), so several chat runs sit on the same task. This used to
+    take "the newest chat run on the task", which meant a second message
+    arriving while an earlier run was mid-delegation supplied the claim that
+    the IN-FLIGHT run's guard then read -- one run's role claim deciding
+    another run's authorisation check. The claim belongs to the run that
+    carries it, so it is read off that run and no other.
+    """
+    if run_id is None:
+        return None
+    run = await db.get(m.AgentRun, run_id)
+    # Tenant and origin still checked, not assumed from the id: the claim is
+    # only ever written by `chat/service.send_message`, and a run from another
+    # tenant or another door has no business supplying one.
+    if run is None or run.tenant_id != tenant_id or run.source != "chat":
+        return None
+    role = (run.context or {}).get("operator_role")
+    return str(role) if isinstance(role, str) and role else None
+
+
 async def _delegate(
     db: AsyncSession,
     *,
@@ -322,8 +498,13 @@ async def _delegate(
     task: m.Task,
     tc: ToolCall,
     mcp_conn: m.McpConnection | None,
+    run_id: uuid.UUID | None,
 ) -> tuple[str, uuid.UUID | None]:
     """Create the target agent's queued run for a delegated sub-task (§7).
+
+    `run_id` is the run EXECUTING this call, not the sub-run this creates. It
+    is what ties the acting human's role claim to the right run; see
+    `_acting_token_role`.
 
     Returns (tool output for the model, new run id or None on rejection). It
     neither commits nor publishes: the in-process caller's transaction carries a
@@ -338,13 +519,46 @@ async def _delegate(
     if target is None or target.deleted_at is not None:
         return "ERROR: no such agent in your department", None
     if target.department_id != agent.department_id:
-        return "ERROR: you can only delegate to agents in your own department", None
+        # The tenant Assistant is the ONE agent that may leave its own
+        # department -- it is the single front door for a whole tenant, so a
+        # same-department rule would make it useless. Every other lead keeps
+        # the original restriction unchanged.
+        if not agent.is_tenant_assistant:
+            return "ERROR: you can only delegate to agents in your own department", None
+        if not await _member_may_reach_department(
+            db,
+            tenant_id=tenant_id,
+            task=task,
+            department_id=target.department_id,
+            run_id=run_id,
+        ):
+            return (
+                "ERROR: the person you are acting for does not have access to that department",
+                None,
+            )
 
     context: dict[str, Any] = {
         "task": str(tc.arguments["task_text"]),
         "parent_task_id": str(task.id),
         "delegation_depth": task.delegation_depth + 1,
     }
+    # Carried from the executing run so a wake-up all the way back at the top
+    # of the delegation chain can be recognised as a CHAT continuation
+    # (executor._maybe_wake_parent reads it off the finishing sub-run's own
+    # context, one hop at a time). Without this a chat-originated delegation's
+    # eventual answer was created with source="delegation" and never reached
+    # record_assistant_reply's `if run.source == "chat"` gate at all -- the
+    # lead's real conclusion sat in the run row forever, unseen on web or
+    # Telegram, while the human was told only "I've delegated this."
+    if run_id is not None:
+        executing_run = await db.get(m.AgentRun, run_id)
+        if executing_run is not None and executing_run.context:
+            chat_session_id = executing_run.context.get("chat_session_id")
+            if chat_session_id:
+                context["chat_session_id"] = chat_session_id
+                telegram_external_id = executing_run.context.get("telegram_external_id")
+                if telegram_external_id:
+                    context["telegram_external_id"] = telegram_external_id
     # Deferred import: oc8.runtime.executor reaches oc8.runtime.adapter, which
     # imports this module's own importer (oc8.agent.engine) at module level, so
     # importing it at the top would be a cycle. Resolved once, at first call.
@@ -422,12 +636,20 @@ async def execute_control_tool(
     active_skills: Sequence[LoadedSkill],
     mcp_conn: m.McpConnection | None,
     originating_operator: str | None,
+    run_id: uuid.UUID | None = None,
 ) -> ControlOutcome | None:
     """Run one core-owned tool call, or return None if it isn't one.
 
     None means "not mine" -- the caller must route the call to the connection's
     MCP server. Returning an error string instead would silently swallow every
     connection tool.
+
+    `run_id` is the run this call executes under. Every real runtime has one in
+    hand already (the engine's own `run_id`, the two gateways' `run.id`) and
+    must pass it: `delegate_task` reads the acting human's role claim off THAT
+    run, and several runs share one task, so it cannot be re-derived from the
+    task afterwards. It defaults to None only so a direct call with no run
+    behind it (tests) stays valid -- and None fails closed, dropping the claim.
     """
     skill_by_tool = {s.tool_name: s for s in assigned_skills}
 
@@ -685,9 +907,60 @@ async def execute_control_tool(
                 )
             return ControlOutcome(output=f"ERROR: {decision.reason or 'delegation denied'}")
         output, sub_run_id = await _delegate(
-            db, tenant_id=tenant_id, agent=agent, task=task, tc=tc, mcp_conn=mcp_conn
+            db,
+            tenant_id=tenant_id,
+            agent=agent,
+            task=task,
+            tc=tc,
+            mcp_conn=mcp_conn,
+            run_id=run_id,
         )
         return ControlOutcome(output=output, pending_run=sub_run_id)
+
+    if tc.name == PROPOSE_CHANGE.name:
+        # The security boundary of this whole tool: it may only ever DRAFT.
+        # `create_proposal` writes a proposal in status "draft" and nothing
+        # else -- `apply_proposal` is never reachable from here, so a
+        # structural change always waits for a human in the Copilot review UI.
+        if not agent.is_tenant_assistant:
+            return ControlOutcome(output="ERROR: only the oc8 Assistant can propose changes")
+        operation_type = str(tc.arguments.get("operation_type", "")).strip()
+        payload = tc.arguments.get("payload")
+        if not operation_type or not isinstance(payload, dict):
+            return ControlOutcome(
+                output="ERROR: propose_change requires operation_type and payload"
+            )
+        from oc8.auth.principal import Principal
+        from oc8.copilot.capabilities import InvalidOperation
+        from oc8.copilot.proposals import create_proposal
+
+        actor = Principal(
+            subject=str(agent.id),
+            tenant_id=tenant_id,
+            role="agent",
+            kind="agent",
+        )
+        try:
+            # A savepoint, because create_proposal flushes the proposal and its
+            # operations BEFORE target_revision checks the referenced row
+            # exists -- and a model inventing an agentId is the ordinary
+            # failure. Without it the refused attempt survives the exception
+            # and commits with the run as an operation-less draft: something a
+            # human is asked to approve that could never be applied.
+            async with db.begin_nested():
+                proposal = await create_proposal(db, actor, [{**payload, "type": operation_type}])
+        except InvalidOperation:
+            # Value-free by design (see InvalidOperation): the model is told
+            # which operation it got wrong, never what the registry rejected.
+            return ControlOutcome(
+                output=f"ERROR: invalid {operation_type} payload -- check the required fields"
+            )
+        return ControlOutcome(
+            output=(
+                f"Vorschlag erstellt (Proposal {proposal.id}). Ein Mensch muss ihn "
+                "in oc8 bestätigen, bevor er wirksam wird."
+            )
+        )
 
     if tc.name == RENDER_COMPONENT.name:
         component_key = str(tc.arguments.get("component_key", "")).strip()

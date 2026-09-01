@@ -188,6 +188,37 @@ async def resolve(
     ).scalar_one_or_none()
 
 
+async def has_ever_been_bound(
+    db: AsyncSession, *, tenant_id: uuid.UUID, channel: str, external_id: str
+) -> bool:
+    """Whether this messenger account has ANY binding row here at all --
+    revoked ones and member-less ones included.
+
+    Deliberately wider than `resolve`, and used for exactly one thing: deciding
+    whether the bot may open its mouth at all. An account that has been through
+    the link-code flow at least once already has a relationship with this
+    tenant, so a refusal aimed at it discloses nothing it could not already
+    infer. An account with NO row whatsoever is a stranger who merely found the
+    bot's address, and answering one of those turns the bot into an
+    unauthenticated outbound-message amplifier.
+
+    It is NOT an authorization check and must never be used as one: every
+    caller that acts on a message still goes through `resolve` (live, unrevoked,
+    with a member behind it) first, and every refusal is still the same
+    sentence.
+    """
+    count = await db.scalar(
+        select(func.count())
+        .select_from(m.ApprovalChannelBinding)
+        .where(
+            m.ApprovalChannelBinding.tenant_id == tenant_id,
+            m.ApprovalChannelBinding.channel == channel,
+            m.ApprovalChannelBinding.external_id == external_id,
+        )
+    )
+    return bool(count)
+
+
 async def recipients(
     db: AsyncSession, *, tenant_id: uuid.UUID, channel: str, department_id: uuid.UUID | None
 ) -> list[m.ApprovalChannelBinding]:

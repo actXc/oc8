@@ -458,6 +458,7 @@ async def test_delegation_does_not_hand_a_lead_login_to_the_sub_agent(
                 arguments={"agent_id": str(sub.id), "task_text": "do the thing"},
             ),
             mcp_conn=lead_conn,
+            run_id=None,
         )
         assert sub_run_id is not None
         sub_run = await db.get(m.AgentRun, sub_run_id)
@@ -514,6 +515,7 @@ async def test_delegation_to_an_unpinned_sub_agent_fails_loudly_not_silently(
                 arguments={"agent_id": str(sub.id), "task_text": "do the thing"},
             ),
             mcp_conn=lead_conn,
+            run_id=None,
         )
         assert sub_run_id is not None
         sub_run = await db.get(m.AgentRun, sub_run_id)
@@ -564,6 +566,7 @@ async def test_delegation_still_inherits_a_shared_department_connection(
                 arguments={"agent_id": str(sub.id), "task_text": "do the thing"},
             ),
             mcp_conn=shared,
+            run_id=None,
         )
         assert sub_run_id is not None
         sub_run = await db.get(m.AgentRun, sub_run_id)
@@ -679,6 +682,7 @@ async def test_delegation_still_inherits_a_department_connection_the_sub_agent_o
                 arguments={"agent_id": str(sub.id), "task_text": "do the thing"},
             ),
             mcp_conn=shared,
+            run_id=None,
         )
         assert sub_run_id is not None
         sub_run = await db.get(m.AgentRun, sub_run_id)
@@ -731,6 +735,7 @@ async def test_delegation_withholds_a_department_connection_from_a_login_owed_su
                 arguments={"agent_id": str(sub.id), "task_text": "do the thing"},
             ),
             mcp_conn=shared,
+            run_id=None,
         )
         assert sub_run_id is not None
         sub_run = await db.get(m.AgentRun, sub_run_id)

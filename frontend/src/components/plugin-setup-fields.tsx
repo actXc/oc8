@@ -44,6 +44,18 @@ export function PluginSetupFields({
                 </option>
               ))}
             </select>
+          ) : field.kind === "select" ? (
+            <select
+              value={values[field.key] ?? field.default ?? ""}
+              onChange={(event) => onChange({ ...values, [field.key]: event.target.value })}
+              className="mt-1 w-full rounded-md border border-border bg-background/40 px-3 py-2 text-sm text-foreground"
+            >
+              {(field.options ?? []).map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
           ) : field.kind === "credential" ? (
             <div className="mt-1">
               <CredentialPicker

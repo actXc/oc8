@@ -1,4 +1,12 @@
-"""One-way redaction used before every Copilot model or persistence boundary."""
+"""One-way credential redaction.
+
+Originally written for the raw-completion Copilot chat path (retired in
+Task 5 of the unified-assistant plan); `is_secret_request` is now the
+tenant Assistant's pre-model secret gate in `oc8.chat.service.send_message`,
+its one remaining caller. `redact_text`/`redact_value` are kept as
+general-purpose helpers for any future caller that needs to strip
+credential-shaped values before they reach a model or a durable store.
+"""
 
 from __future__ import annotations
 
@@ -35,5 +43,5 @@ def redact_value(value: Any) -> Any:
 
 
 def is_secret_request(message: str) -> bool:
-    """Copilot never solicits, accepts, or forwards credential values."""
+    """The tenant Assistant never solicits, accepts, or forwards credential values."""
     return bool(_SENSITIVE_KEY.search(message))

@@ -127,6 +127,70 @@ async def test_a_plain_agent_gets_no_roster_and_no_delegation_context(
     assert pre.has_knowledge is False
 
 
+async def test_the_tenant_assistant_gets_every_departments_agents_not_just_its_own(
+    app_session: AppSessionFactory,
+) -> None:
+    """The Assistant sits alone in its own single-agent department
+    (get_or_create_assistant), so a department-scoped roster is always empty
+    for it -- yet its delegation guard lets it reach any department the
+    acting human can. Observed live: offered delegate_task with no roster at
+    all, it never once named a real agent_id, and instead asked the human
+    whether their tenant had anyone for the job, on every turn."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant_dept = m.Department(tenant_id=tenant, name="oc8 Assistant", frame={})
+        helpdesk = m.Department(tenant_id=tenant, name="Helpdesk", frame={})
+        db.add_all([assistant_dept, helpdesk])
+        await db.flush()
+        assistant = m.Agent(
+            tenant_id=tenant, department_id=assistant_dept.id, name="oc8 Assistant",
+            status="idle", definition={}, presentation={},
+            is_team_lead=True, is_tenant_assistant=True,
+        )
+        lennart = m.Agent(
+            tenant_id=tenant, department_id=helpdesk.id, name="Lennart",
+            role_title="First Level IT Support", status="idle",
+            definition={}, presentation={},
+        )
+        db.add_all([assistant, lennart])
+        await db.flush()
+
+        pre = await build_run_preamble(
+            db, agent=assistant, tenant_id=tenant, task_text="Wie viele Tickets sind offen?",
+            frame={}, model_locality="eu",
+        )
+
+    joined = "\n".join(msg.content for msg in pre.messages)
+    assert str(lennart.id) in joined, "the tenant-wide roster must name a real agent_id"
+    assert "Lennart" in joined
+    assert "Helpdesk" in joined, "the department a candidate belongs to should be legible too"
+
+
+async def test_the_tenant_assistant_is_excluded_from_its_own_roster(
+    app_session: AppSessionFactory,
+) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        dept = m.Department(tenant_id=tenant, name="oc8 Assistant", frame={})
+        db.add(dept)
+        await db.flush()
+        assistant = m.Agent(
+            tenant_id=tenant, department_id=dept.id, name="oc8 Assistant",
+            status="idle", definition={}, presentation={},
+            is_team_lead=True, is_tenant_assistant=True,
+        )
+        db.add(assistant)
+        await db.flush()
+
+        pre = await build_run_preamble(
+            db, agent=assistant, tenant_id=tenant, task_text="Hallo",
+            frame={}, model_locality="eu",
+        )
+
+    joined = "\n".join(msg.content for msg in pre.messages)
+    assert str(assistant.id) not in joined, "the Assistant is not a delegation target for itself"
+
+
 async def test_has_knowledge_is_true_once_a_kb_is_granted_to_the_department(
     app_session: AppSessionFactory,
 ) -> None:

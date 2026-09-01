@@ -56,23 +56,6 @@ async def test_copilot_proposal_creation_requires_manage_permission() -> None:
     assert response.status_code == 403
 
 
-async def test_copilot_chat_returns_only_safe_reply_shape_and_never_echoes_bad_input() -> None:
-    """Returning parser details would echo an operator-submitted credential."""
-    secret = "SENTINEL-CHAT-INPUT"
-    tenant = uuid.UUID(str(ACME_TENANT_ID))
-    token = get_identity_provider().mint(tenant_id=tenant, subject="admin", role="org_admin")
-    app = create_app()
-    async with LifespanManager(app):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
-            response = await client.post(
-                "/api/v1/copilot/chat",
-                headers={"Authorization": f"Bearer {token}"},
-                json={"message": {"secret": secret}},
-            )
-    assert response.status_code == 422
-    assert secret not in response.text
-
-
 async def test_copilot_reject_transitions_draft_without_applying(
     app_session: AppSessionFactory, acme_tenant: uuid.UUID
 ) -> None:

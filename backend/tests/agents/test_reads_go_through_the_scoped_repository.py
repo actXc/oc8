@@ -81,6 +81,11 @@ ALLOWED: dict[str, str] = {
     # real run against Agent/Department: agent-runtime-internal reads, system
     # jobs, and two sweep false-positives on a substring match. None of these
     # are a human departmental browse -- each is checked individually below.
+    "agent/assistant.py": (
+        "get_or_create_assistant looks up the tenant's single is_tenant_assistant-"
+        "flagged agent by that flag, provisioning it if missing -- a system "
+        "provisioning helper with no human caller in the path, not a departmental browse"
+    ),
     "agent/claims.py": "the runtime resolving a record-claim holder's display name",
     "agent/engine.py": "the agent runtime loading its OWN department's tool frame",
     "agents/hire.py": "hire_agent effect resolution acts on the approval's own bound agent",
@@ -93,9 +98,11 @@ ALLOWED: dict[str, str] = {
         "gated by copilot:manage (NEVER_DELEGATABLE, org_admin only); an admin "
         "already sees every department, so this is not a departmental browse"
     ),
-    "copilot/chat.py": (
-        "configuration_snapshot is the tenant-wide context copilot:manage is "
-        "scoped to grant; gated the same as capabilities.py, org_admin only"
+    "chat/service.py": (
+        "send_message loads only the ChatSession's own session.agent_id, to check "
+        "is_tenant_assistant for the Assistant-only secret gate -- not a departmental "
+        "browse; that agent's visibility is already established by the caller "
+        "(api/v1/chat.py's ownership/_assistant_visible check) before send_message runs"
     ),
     "collab/emit.py": "handoff department-name resolution, same rationale as api/v1/handoffs.py",
     "collab/intake.py": "handoff department-name and team-lead resolution, no human in this path",

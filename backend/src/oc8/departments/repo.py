@@ -45,11 +45,16 @@ async def visible_departments(
     though `group_fields` is empty -- Department has no obvious groupable
     field beyond name/id, so a caller that passes one gets `ValueError`. Don't
     expose a group-by dropdown for Departments in the frontend config.
+
+    The tenant Assistant's own department is never listed, for the same reason
+    `visible_agents` never lists the Assistant itself: it is auto-provisioned to
+    give that agent somewhere to stand, holds nothing anybody configures, and on
+    the Office floor it reads as a department somebody forgot to fill in.
     """
     if not tenant_wide and not scope.viewable:
         return [], 0
 
-    stmt = select(Department)
+    stmt = select(Department).where(Department.is_assistant_department.is_(False))
     if not include_archived:
         stmt = stmt.where(Department.deleted_at.is_(None))
     if not tenant_wide:
@@ -78,11 +83,21 @@ async def visible_department(
 ) -> Department | None:
     """One department, or `None` for BOTH "no such row" and "exists outside
     scope" -- see `agents.repo.visible_agent` for the full reasoning; the same
-    oracle guard applies here."""
+    oracle guard applies here.
+
+    The Assistant's department 404s like anything else nobody may see. Unlike
+    `visible_agent` there is no opt-in: nothing in the Assistant's own machinery
+    loads its department through this funnel (`get_or_create_assistant` holds
+    the row it just made, and `_assistant_visible` asks about the agent), so a
+    bypass here would have no caller."""
     row = (
         await db.execute(
             select(Department)
-            .where(Department.id == department_id, Department.deleted_at.is_(None))
+            .where(
+                Department.id == department_id,
+                Department.deleted_at.is_(None),
+                Department.is_assistant_department.is_(False),
+            )
             .execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()

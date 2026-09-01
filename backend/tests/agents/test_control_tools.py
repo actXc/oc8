@@ -7,14 +7,17 @@ engine.py's run loop, so the isolated runtime offered none of them.
 
 from __future__ import annotations
 
+import datetime as dt
 import uuid
 from typing import Any
 
 import pytest
+from sqlalchemy import select
 
 from oc8 import models as m
 from oc8.agent.control_tools import (
     CONTROL_TOOL_NAMES,
+    ControlOutcome,
     execute_control_tool,
     offered_tools,
 )
@@ -30,7 +33,7 @@ MCP_TOOLS = [
 ]
 
 
-def _agent(*, is_team_lead: bool = False) -> m.Agent:
+def _agent(*, is_team_lead: bool = False, is_tenant_assistant: bool = False) -> m.Agent:
     return m.Agent(
         id=uuid.uuid4(),
         tenant_id=uuid.uuid4(),
@@ -40,6 +43,7 @@ def _agent(*, is_team_lead: bool = False) -> m.Agent:
         definition={},
         presentation={},
         is_team_lead=is_team_lead,
+        is_tenant_assistant=is_tenant_assistant,
     )
 
 
@@ -87,6 +91,38 @@ def test_only_a_team_lead_is_offered_delegation() -> None:
     ]
     assert "delegate_task" not in plain
     assert "delegate_task" in lead
+
+
+def test_the_tenant_assistant_is_never_offered_ask_user() -> None:
+    """ask_user parks a run waiting for an answer through the door the
+    question arrived on -- a door the Assistant's Telegram side has no way to
+    answer through at all. Withheld here so it can only ever answer, delegate,
+    or say plainly it cannot help, never leave a human on any door waiting on
+    a question that door cannot answer."""
+    names = [
+        t.name
+        for t in offered_tools(
+            _agent(is_team_lead=True, is_tenant_assistant=True),
+            assigned_skills=[],
+            active_skills=[],
+            mcp_tools=MCP_TOOLS,
+        )
+    ]
+    assert "ask_user" not in names
+    assert "delegate_task" in names
+    assert "propose_change" in names
+
+
+def test_an_ordinary_team_lead_still_gets_ask_user() -> None:
+    """The withholding above is Assistant-specific -- an ordinary lead's own
+    doors (web Chat, internal handoffs) can all answer a park."""
+    names = [
+        t.name
+        for t in offered_tools(
+            _agent(is_team_lead=True), assigned_skills=[], active_skills=[], mcp_tools=MCP_TOOLS
+        )
+    ]
+    assert "ask_user" in names
 
 
 def test_an_active_skill_narrows_the_connection_tools() -> None:
@@ -149,6 +185,7 @@ def test_control_tool_names_matches_the_schemas() -> None:
         "search_knowledge",
         "search_memory",
         "render_component",
+        "propose_change",
     }
 
 
@@ -372,6 +409,101 @@ async def test_delegate_task_creates_a_sub_run_the_caller_must_publish(app_sessi
 
 
 @pytest.mark.asyncio
+async def test_delegate_task_carries_the_chat_origin_onto_the_sub_run(app_session: Any) -> None:
+    """A wake-up all the way back at the top of a delegation chain can only be
+    recognised as a CHAT continuation (executor._maybe_wake_parent) if every
+    hop in between carried the origin forward. Without this a chat-originated
+    delegation's eventual answer never reached the user on any channel."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        lead, task = await _dept_agent_task(db, tenant, is_team_lead=True)
+        mate = m.Agent(
+            tenant_id=tenant,
+            department_id=lead.department_id,
+            name="Rico",
+            status="idle",
+            definition={},
+            presentation={},
+        )
+        db.add(mate)
+        executing_run = m.AgentRun(
+            tenant_id=tenant,
+            agent_id=lead.id,
+            source="chat",
+            context={"chat_session_id": "aaaa-bbbb", "telegram_external_id": "tg-7"},
+        )
+        db.add(executing_run)
+        await db.flush()
+        outcome = await execute_control_tool(
+            db,
+            tenant_id=tenant,
+            agent=lead,
+            task=task,
+            tc=ToolCall(
+                id="c1",
+                name="delegate_task",
+                arguments={"agent_id": str(mate.id), "task_text": "Ruf den Kunden an"},
+            ),
+            decision=Decision(Effect.ALLOW),
+            assigned_skills=[],
+            active_skills=[],
+            mcp_conn=None,
+            originating_operator=None,
+            run_id=executing_run.id,
+        )
+        assert outcome is not None
+        assert outcome.pending_run is not None
+        sub = await db.get(m.AgentRun, outcome.pending_run)
+        assert sub is not None
+        assert sub.context["chat_session_id"] == "aaaa-bbbb"
+        assert sub.context["telegram_external_id"] == "tg-7"
+
+
+@pytest.mark.asyncio
+async def test_delegate_task_without_a_chat_origin_carries_nothing(app_session: Any) -> None:
+    """A plain, non-chat run (cron, manual, webhook, ...) must not spuriously
+    stamp chat context onto a sub-run it never had."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        lead, task = await _dept_agent_task(db, tenant, is_team_lead=True)
+        mate = m.Agent(
+            tenant_id=tenant,
+            department_id=lead.department_id,
+            name="Rico",
+            status="idle",
+            definition={},
+            presentation={},
+        )
+        db.add(mate)
+        executing_run = m.AgentRun(tenant_id=tenant, agent_id=lead.id, source="cron", context={})
+        db.add(executing_run)
+        await db.flush()
+        outcome = await execute_control_tool(
+            db,
+            tenant_id=tenant,
+            agent=lead,
+            task=task,
+            tc=ToolCall(
+                id="c1",
+                name="delegate_task",
+                arguments={"agent_id": str(mate.id), "task_text": "Ruf den Kunden an"},
+            ),
+            decision=Decision(Effect.ALLOW),
+            assigned_skills=[],
+            active_skills=[],
+            mcp_conn=None,
+            originating_operator=None,
+            run_id=executing_run.id,
+        )
+        assert outcome is not None
+        assert outcome.pending_run is not None
+        sub = await db.get(m.AgentRun, outcome.pending_run)
+        assert sub is not None
+        assert "chat_session_id" not in sub.context
+        assert "telegram_external_id" not in sub.context
+
+
+@pytest.mark.asyncio
 async def test_delegation_to_another_department_is_refused(app_session: Any) -> None:
     tenant = uuid.uuid4()
     async with app_session(tenant) as db:
@@ -406,6 +538,393 @@ async def test_delegation_to_another_department_is_refused(app_session: Any) -> 
             originating_operator=None,
         )
         assert outcome is not None
+        assert outcome.pending_run is None
+        assert "your own department" in outcome.output
+
+
+# --------------------------------------- the Assistant's cross-department seam
+
+
+async def _lead_and_stranger(
+    db: Any, tenant: uuid.UUID, *, is_tenant_assistant: bool
+) -> tuple[m.Agent, m.Task, m.Agent]:
+    """A team lead with an open task, plus an agent in a DIFFERENT department."""
+    lead, task = await _dept_agent_task(db, tenant, is_team_lead=True)
+    lead.is_tenant_assistant = is_tenant_assistant
+    other = m.Department(tenant_id=tenant, name="Buchhaltung", frame={})
+    db.add(other)
+    await db.flush()
+    stranger = m.Agent(
+        tenant_id=tenant,
+        department_id=other.id,
+        name="Fremd",
+        status="idle",
+        definition={},
+        presentation={},
+    )
+    db.add(stranger)
+    await db.flush()
+    return lead, task, stranger
+
+
+async def _human_behind(
+    db: Any,
+    tenant: uuid.UUID,
+    task: m.Task,
+    *,
+    all_departments: bool = False,
+    seat_in: uuid.UUID | None = None,
+    seat_revoked: bool = False,
+) -> m.OrgMember:
+    """The person whose chat session opened `task` -- which is the ONLY way the
+    guard can learn whose access to measure the delegation against."""
+    member = m.OrgMember(
+        tenant_id=tenant,
+        subject=f"sub-{uuid.uuid4()}",
+        subject_uuid=uuid.uuid4(),
+        all_departments=all_departments,
+    )
+    db.add(member)
+    await db.flush()
+    if seat_in is not None:
+        db.add(
+            m.OrgMemberDepartment(
+                tenant_id=tenant,
+                member_id=member.id,
+                department_id=seat_in,
+                seat_role="dept_approver",
+                revoked_at=dt.datetime.now(dt.UTC) if seat_revoked else None,
+            )
+        )
+    db.add(
+        m.ChatSession(
+            tenant_id=tenant,
+            agent_id=task.assigned_agent_id,
+            member_id=member.id,
+            task_id=task.id,
+        )
+    )
+    await db.flush()
+    return member
+
+
+async def _try_delegate(
+    db: Any,
+    tenant: uuid.UUID,
+    lead: m.Agent,
+    task: m.Task,
+    target: m.Agent,
+    run_id: uuid.UUID | None = None,
+) -> ControlOutcome:
+    """`run_id` is the run this delegation executes UNDER -- the one whose
+    context carries the acting token's role claim. Several chat runs share one
+    task, so passing the task alone is not enough to say whose claim applies.
+    """
+    outcome = await execute_control_tool(
+        db,
+        tenant_id=tenant,
+        agent=lead,
+        task=task,
+        tc=ToolCall(
+            id="c1",
+            name="delegate_task",
+            arguments={"agent_id": str(target.id), "task_text": "Tickets abarbeiten"},
+        ),
+        decision=Decision(Effect.ALLOW),
+        assigned_skills=[],
+        active_skills=[],
+        mcp_conn=None,
+        originating_operator=None,
+        run_id=run_id,
+    )
+    assert outcome is not None
+    return outcome
+
+
+@pytest.mark.asyncio
+async def test_assistant_may_delegate_cross_department_when_member_has_access(
+    app_session: Any,
+) -> None:
+    """The Assistant is the one agent allowed out of its own department -- and
+    only as far as the human behind the chat could have gone themselves."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        lead, task, stranger = await _lead_and_stranger(db, tenant, is_tenant_assistant=True)
+        await _human_behind(db, tenant, task, all_departments=True)
+        outcome = await _try_delegate(db, tenant, lead, task, stranger)
+        assert outcome.pending_run is not None
+        assert "delegated to Fremd" in outcome.output
+
+
+@pytest.mark.asyncio
+async def test_a_live_seat_in_the_target_department_is_enough(app_session: Any) -> None:
+    """all_departments is not the only key: a live seat in THAT department is
+    the same standing the approval fan-out already honours."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        lead, task, stranger = await _lead_and_stranger(db, tenant, is_tenant_assistant=True)
+        await _human_behind(db, tenant, task, seat_in=stranger.department_id)
+        outcome = await _try_delegate(db, tenant, lead, task, stranger)
+        assert outcome.pending_run is not None
+
+
+@pytest.mark.asyncio
+async def test_a_revoked_seat_does_not_let_the_assistant_cross(app_session: Any) -> None:
+    """A revoked seat is history, not access -- the row still exists, so a
+    membership check that forgot `revoked_at` would read as access."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        lead, task, stranger = await _lead_and_stranger(db, tenant, is_tenant_assistant=True)
+        await _human_behind(db, tenant, task, seat_in=stranger.department_id, seat_revoked=True)
+        outcome = await _try_delegate(db, tenant, lead, task, stranger)
+        assert outcome.pending_run is None
+        # Refused on the HUMAN's access, not on the blanket same-department
+        # rule -- the Assistant is past that one, so only this can be refusing.
+        assert "does not have access" in outcome.output
+
+
+@pytest.mark.asyncio
+async def test_assistant_may_not_delegate_where_the_member_has_no_access(
+    app_session: Any,
+) -> None:
+    """The escalation this guard exists to stop: somebody who may only see
+    Vertrieb asking the Assistant to start work in Buchhaltung."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        lead, task, stranger = await _lead_and_stranger(db, tenant, is_tenant_assistant=True)
+        # A seat, but in the WRONG department -- so the member exists and is
+        # live, and only the department predicate can refuse this.
+        await _human_behind(db, tenant, task, seat_in=lead.department_id)
+        outcome = await _try_delegate(db, tenant, lead, task, stranger)
+        assert outcome.pending_run is None
+        # Refused on the HUMAN's access, not on the blanket same-department
+        # rule -- the Assistant is past that one, so only this can be refusing.
+        assert "does not have access" in outcome.output
+
+
+@pytest.mark.asyncio
+async def test_the_assistant_is_refused_when_nobody_is_behind_the_run(app_session: Any) -> None:
+    """Fail closed: a delegated or scheduled run has no chat session, so there
+    is no human whose access could authorise leaving the department. Opening
+    that up 'because there is nobody to check' is the fail-open shape."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        lead, task, stranger = await _lead_and_stranger(db, tenant, is_tenant_assistant=True)
+        outcome = await _try_delegate(db, tenant, lead, task, stranger)
+        assert outcome.pending_run is None
+        # Refused on the HUMAN's access, not on the blanket same-department
+        # rule -- the Assistant is past that one, so only this can be refusing.
+        assert "does not have access" in outcome.output
+
+
+async def _builtin_role(db: Any, tenant: uuid.UUID, name: str) -> m.Role:
+    """A builtin role row, the only way the code table actually grants a
+    tenant-wide permission (`_role_and_permissions` reads a builtin's grants
+    from `BUILTIN_ROLE_PERMISSIONS`, and `approval:decide_any` is not
+    delegatable, so hand-written RolePermission rows would be intersected
+    away). Same shape as `tests/authz/test_authority.py`'s own `_role` helper.
+    """
+    role = m.Role(tenant_id=tenant, name=name, builtin=True, kind="human")
+    db.add(role)
+    await db.flush()
+    return role
+
+
+@pytest.mark.asyncio
+async def test_role_derived_tenant_wide_reach_lets_the_assistant_cross(app_session: Any) -> None:
+    """A member with NEITHER `all_departments` NOR a seat -- which is exactly
+    what `authz.scope._upsert_member` mints on first sight -- but who holds a
+    role carrying `approval:decide_any`.
+
+    The guard used to read the seat tables by hand and know only about the row
+    terms, so on a fresh tenant it refused everybody: nobody could
+    cross-department-delegate at all, and it only appeared to work in the dev
+    tenant because that one member happened to carry `all_departments=True`.
+    """
+    from oc8.authz.permissions import ORG_ADMIN
+
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        lead, task, stranger = await _lead_and_stranger(db, tenant, is_tenant_assistant=True)
+        member = await _human_behind(db, tenant, task)
+        assert member.all_departments is False
+        member.role_id = (await _builtin_role(db, tenant, ORG_ADMIN)).id
+        await db.flush()
+        outcome = await _try_delegate(db, tenant, lead, task, stranger)
+        assert outcome.pending_run is not None, outcome.output
+
+
+@pytest.mark.asyncio
+async def test_a_narrow_role_still_cannot_reach_an_out_of_scope_department(
+    app_session: Any,
+) -> None:
+    """The other half: a REAL role with REAL permissions (`operator` holds
+    `run:start`, `run:control`, `approval:decide`, a pile of `:view`s) that
+    simply is not tenant-wide. A guard that read "has a role" as "may reach
+    anything" would pass this one too."""
+    from oc8.authz.permissions import OPERATOR
+
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        lead, task, stranger = await _lead_and_stranger(db, tenant, is_tenant_assistant=True)
+        member = await _human_behind(db, tenant, task, seat_in=lead.department_id)
+        member.role_id = (await _builtin_role(db, tenant, OPERATOR)).id
+        await db.flush()
+        outcome = await _try_delegate(db, tenant, lead, task, stranger)
+        assert outcome.pending_run is None
+        assert "does not have access" in outcome.output
+
+
+@pytest.mark.asyncio
+async def test_the_acting_tokens_role_carries_reach_for_a_member_with_no_assigned_role(
+    app_session: Any,
+) -> None:
+    """`role_id IS NULL` does not mean "no permissions" -- everywhere else in
+    this system it means "the token decides" (`authz.authority`'s FLOOR). A run
+    has no token, so `chat/service.send_message` records the claim on the run
+    and `_acting_token_role` reads it back. Without that, an administrator on a
+    fresh tenant -- who has no assigned role and no seats, because nothing has
+    ever written either -- could not cross-department-delegate."""
+    from oc8.authz.permissions import ORG_ADMIN
+
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        lead, task, stranger = await _lead_and_stranger(db, tenant, is_tenant_assistant=True)
+        member = await _human_behind(db, tenant, task)
+        assert member.role_id is None
+        run = m.AgentRun(
+            tenant_id=tenant,
+            agent_id=lead.id,
+            task_id=task.id,
+            source="chat",
+            state="running",
+            context={"operator_role": ORG_ADMIN},
+        )
+        db.add(run)
+        await db.flush()
+        outcome = await _try_delegate(db, tenant, lead, task, stranger, run_id=run.id)
+        assert outcome.pending_run is not None, outcome.output
+
+
+@pytest.mark.asyncio
+async def test_a_narrow_acting_token_role_is_still_refused(app_session: Any) -> None:
+    """The same run-context term, read the other way: an `operator` token is
+    not tenant-wide, so recording it must not become a way in."""
+    from oc8.authz.permissions import OPERATOR
+
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        lead, task, stranger = await _lead_and_stranger(db, tenant, is_tenant_assistant=True)
+        await _human_behind(db, tenant, task)
+        run = m.AgentRun(
+            tenant_id=tenant,
+            agent_id=lead.id,
+            task_id=task.id,
+            source="chat",
+            state="running",
+            context={"operator_role": OPERATOR},
+        )
+        db.add(run)
+        await db.flush()
+        outcome = await _try_delegate(db, tenant, lead, task, stranger, run_id=run.id)
+        assert outcome.pending_run is None
+        assert "does not have access" in outcome.output
+
+
+@pytest.mark.asyncio
+async def test_the_claim_read_is_the_running_runs_own_not_the_newest_on_the_task(
+    app_session: Any,
+) -> None:
+    """Every turn of one member's Assistant conversation -- web and Telegram
+    alike -- shares one ChatSession and therefore one Task, so several chat
+    runs sit on the same task at once.
+
+    This used to resolve the role claim with "newest chat run on this task",
+    which meant a LATER message could hand its claim to an EARLIER run that was
+    still mid-delegation: one run's claim deciding another run's authorisation
+    check. Here the in-flight run carries `operator` (no tenant-wide reach) and
+    a newer run on the same task carries `org_admin`. The in-flight run must be
+    refused on its OWN claim.
+    """
+    from oc8.authz.permissions import OPERATOR, ORG_ADMIN
+
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        lead, task, stranger = await _lead_and_stranger(db, tenant, is_tenant_assistant=True)
+        await _human_behind(db, tenant, task)
+        in_flight = m.AgentRun(
+            tenant_id=tenant,
+            agent_id=lead.id,
+            task_id=task.id,
+            source="chat",
+            state="running",
+            context={"operator_role": OPERATOR},
+            created_at=dt.datetime(2026, 1, 1, 10, 0, tzinfo=dt.UTC),
+        )
+        newer = m.AgentRun(
+            tenant_id=tenant,
+            agent_id=lead.id,
+            task_id=task.id,
+            source="chat",
+            state="queued",
+            context={"operator_role": ORG_ADMIN},
+            created_at=dt.datetime(2026, 1, 1, 10, 5, tzinfo=dt.UTC),
+        )
+        db.add_all([in_flight, newer])
+        await db.flush()
+
+        outcome = await _try_delegate(db, tenant, lead, task, stranger, run_id=in_flight.id)
+        assert outcome.pending_run is None, (
+            "the older, currently-executing run borrowed the newer run's claim"
+        )
+        assert "does not have access" in outcome.output
+
+        # The other direction, so this cannot pass by simply always refusing:
+        # the run that really does carry org_admin is still let through.
+        allowed = await _try_delegate(db, tenant, lead, task, stranger, run_id=newer.id)
+        assert allowed.pending_run is not None, allowed.output
+
+
+@pytest.mark.asyncio
+async def test_a_claim_on_a_run_of_another_tenant_is_ignored(app_session: Any) -> None:
+    """The run id decides which claim is read, so the tenant is checked on the
+    row rather than assumed from the id."""
+    from oc8.authz.permissions import ORG_ADMIN
+
+    tenant = uuid.uuid4()
+    other_tenant = uuid.uuid4()
+    async with app_session(other_tenant) as other_db:
+        foreign = m.AgentRun(
+            tenant_id=other_tenant,
+            agent_id=uuid.uuid4(),
+            source="chat",
+            state="running",
+            context={"operator_role": ORG_ADMIN},
+        )
+        other_db.add(foreign)
+        await other_db.flush()
+        foreign_id = foreign.id
+        await other_db.commit()
+
+    async with app_session(tenant) as db:
+        lead, task, stranger = await _lead_and_stranger(db, tenant, is_tenant_assistant=True)
+        await _human_behind(db, tenant, task)
+        outcome = await _try_delegate(db, tenant, lead, task, stranger, run_id=foreign_id)
+        assert outcome.pending_run is None
+        assert "does not have access" in outcome.output
+
+
+@pytest.mark.asyncio
+async def test_an_ordinary_team_lead_still_cannot_cross_departments(app_session: Any) -> None:
+    """Regression: is_tenant_assistant=False (the default) is completely
+    unaffected. Even with an unrestricted human behind the chat -- the exact
+    setup that lets the Assistant through -- an ordinary lead never reaches the
+    member check at all."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        lead, task, stranger = await _lead_and_stranger(db, tenant, is_tenant_assistant=False)
+        await _human_behind(db, tenant, task, all_departments=True)
+        outcome = await _try_delegate(db, tenant, lead, task, stranger)
         assert outcome.pending_run is None
         assert "your own department" in outcome.output
 
@@ -1048,3 +1567,178 @@ async def test_a_direct_and_a_department_grant_can_coexist(app_session: Any) -> 
         )
         assert outcome is not None
     assert not outcome.output.startswith("ERROR")
+
+
+# ------------------------------------------ the Assistant's propose_change seam
+
+
+async def _assistant_and_task(db: Any, tenant: uuid.UUID) -> tuple[m.Agent, m.Task]:
+    """The tenant Assistant with an open chat task."""
+    assistant, task = await _dept_agent_task(db, tenant, is_team_lead=True)
+    assistant.is_tenant_assistant = True
+    await db.flush()
+    return assistant, task
+
+
+async def _propose(
+    db: Any, tenant: uuid.UUID, agent: m.Agent, task: m.Task, arguments: dict[str, Any]
+) -> ControlOutcome:
+    outcome = await execute_control_tool(
+        db,
+        tenant_id=tenant,
+        agent=agent,
+        task=task,
+        tc=ToolCall(id="c1", name="propose_change", arguments=arguments),
+        decision=Decision(Effect.ALLOW),
+        assigned_skills=[],
+        active_skills=[],
+        mcp_conn=None,
+        originating_operator=None,
+    )
+    assert outcome is not None
+    return outcome
+
+
+def test_propose_change_is_offered_only_to_the_assistant() -> None:
+    """The tool IS the human-review boundary, so an ordinary agent must not
+    even see it -- and the dispatch refuses it anyway if it calls it."""
+    lead = _agent(is_team_lead=True)
+    lead.is_tenant_assistant = False
+    assert "propose_change" not in [
+        t.name
+        for t in offered_tools(lead, assigned_skills=[], active_skills=[], mcp_tools=MCP_TOOLS)
+    ]
+    lead.is_tenant_assistant = True
+    assert "propose_change" in [
+        t.name
+        for t in offered_tools(lead, assigned_skills=[], active_skills=[], mcp_tools=MCP_TOOLS)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_propose_change_creates_a_draft_proposal_not_an_applied_one(
+    app_session: Any,
+) -> None:
+    """The whole point: the Assistant may draft a structural change, never
+    enact one. A proposal that came back already `applied` would mean the
+    Assistant had restructured the tenant on its own say-so."""
+    from oc8.copilot.models import CopilotProposal
+
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        outcome = await _propose(
+            db,
+            tenant,
+            assistant,
+            task,
+            {
+                "operation_type": "department.create",
+                "payload": {"name": "Support EU", "goal": "", "icon": "building"},
+            },
+        )
+        assert "proposal" in outcome.output.lower()
+        proposal = (
+            await db.execute(select(CopilotProposal).where(CopilotProposal.tenant_id == tenant))
+        ).scalar_one()
+        assert proposal.status == "draft"  # never applied automatically
+
+
+@pytest.mark.asyncio
+async def test_propose_change_rejects_an_unknown_operation_type(app_session: Any) -> None:
+    """The capability registry is closed. A type outside it is refused as a
+    model error rather than persisted as an unreviewable draft."""
+    from oc8.copilot.models import CopilotProposal
+
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        outcome = await _propose(
+            db, tenant, assistant, task, {"operation_type": "user.delete", "payload": {}}
+        )
+        assert outcome.output.startswith("ERROR")
+        proposals = (
+            (await db.execute(select(CopilotProposal).where(CopilotProposal.tenant_id == tenant)))
+            .scalars()
+            .all()
+        )
+        assert proposals == []
+
+
+@pytest.mark.asyncio
+async def test_propose_change_is_refused_for_a_non_assistant_agent(app_session: Any) -> None:
+    """Withholding the tool from the offer list only hides it -- the dispatch
+    has to refuse it too, or any agent that guesses the name can draft one."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        agent, task = await _dept_agent_task(db, tenant, is_team_lead=True)
+        outcome = await _propose(
+            db,
+            tenant,
+            agent,
+            task,
+            {
+                "operation_type": "department.create",
+                "payload": {"name": "Support EU"},
+            },
+        )
+        assert outcome.output.startswith("ERROR")
+        assert "Assistant" in outcome.output
+
+
+@pytest.mark.asyncio
+async def test_propose_change_needs_an_operation_type_and_a_payload(app_session: Any) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        assert (await _propose(db, tenant, assistant, task, {"payload": {}})).output.startswith(
+            "ERROR"
+        )
+        assert (
+            await _propose(db, tenant, assistant, task, {"operation_type": "department.create"})
+        ).output.startswith("ERROR")
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_proposal_leaves_no_orphan_draft_behind(app_session: Any) -> None:
+    """`create_proposal` flushes the proposal and its operations BEFORE
+    `target_revision` checks the referenced row exists -- and a model inventing
+    an agent id is the ordinary failure, not an exotic one. Without a savepoint
+    the failed attempt survives as an operation-less draft in the human review
+    queue: something a person is asked to approve that can never be applied.
+    Different from the unknown-type case, which is refused before any db.add."""
+    from oc8.copilot.models import CopilotOperation, CopilotProposal
+
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        outcome = await _propose(
+            db,
+            tenant,
+            assistant,
+            task,
+            {
+                "operation_type": "agent.mission.set",
+                # Syntactically valid, refers to nothing -- so parse_operations
+                # passes and target_revision is the one that refuses.
+                "payload": {"agentId": str(uuid.uuid4()), "mission": "x"},
+            },
+        )
+        assert outcome.output.startswith("ERROR")
+        assert (
+            await db.execute(select(CopilotProposal).where(CopilotProposal.tenant_id == tenant))
+        ).scalars().all() == []
+        assert (
+            await db.execute(select(CopilotOperation).where(CopilotOperation.tenant_id == tenant))
+        ).scalars().all() == []
+        # The session must still be usable afterwards: a rolled-back savepoint
+        # is the point, a poisoned transaction would end the whole run.
+        assert (
+            await _propose(
+                db,
+                tenant,
+                assistant,
+                task,
+                {"operation_type": "department.create", "payload": {"name": "Support EU"}},
+            )
+        ).output.startswith("Vorschlag")

@@ -1087,6 +1087,32 @@ async def test_ask_user_is_offered_through_the_gateway(
     assert "ask_user" in [t["name"] for t in listed["result"]["tools"]]
 
 
+async def test_ask_user_is_withheld_from_the_tenant_assistant_through_the_gateway(
+    app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """This gateway's tool list is a SEPARATE hand-built list from
+    control_tools.offered_tools -- a container-driven run of the Assistant
+    (dormant today, no runtime_ref is ever set, but not impossible) must not
+    regain ask_user just because it took the other runtime path. Same
+    reasoning as offered_tools: Telegram free text has no way to answer a
+    park at all."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        agent_id, run_id, _t = await _seed(db, tenant)
+        agent = await db.get(m.Agent, agent_id)
+        assert agent is not None
+        agent.is_tenant_assistant = True
+        agent.is_team_lead = True
+        await db.flush()
+    monkeypatch.setattr("oc8.agent.mcp_pool.McpSession", _FakeMcp)
+    tok = _token(tenant, agent_id, run_id)
+
+    _c, listed = await _rpc(tok, "tools/list")
+    names = [t["name"] for t in listed["result"]["tools"]]
+    assert "ask_user" not in names
+    assert "delegate_task" in names, "the withholding must be scoped to ask_user only"
+
+
 async def test_search_knowledge_is_offered_through_the_gateway(
     app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -41,7 +41,7 @@ from typing import TYPE_CHECKING, Final
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from oc8.authz.authority import granted_for_member
+from oc8.authz.authority import _role_and_permissions, granted_for_member
 from oc8.authz.permissions import (
     APPROVAL,
     APPROVAL_DECIDE,
@@ -52,6 +52,7 @@ from oc8.authz.permissions import (
     SEAT_VIEWER,
     VIEW,
     perm,
+    permissions_for,
     seat_permissions_for,
 )
 from oc8.db.base import uuid7
@@ -637,4 +638,56 @@ async def scope_for_binding(
         member,
         unrestricted=member.all_departments,
         decide_everywhere=member.all_departments,
+    )
+
+
+async def scope_for_member(
+    db: AsyncSession, member: OrgMember, *, token_role: str | None = None
+) -> DepartmentScope:
+    """Where a person stands, resolved OFF-REQUEST -- from a stored member row
+    rather than from a live token.
+
+    The third door onto the same question. `scope_for_principal` answers it for
+    an HTTP caller and `scope_for_binding` for a messenger sender; this one
+    answers it for code holding nothing but an `org_member.id` -- an agent run
+    asking, mid-run, what the human who started it could have reached
+    (`agent/control_tools.py`'s `_member_may_reach_department`). That guard used
+    to hand-roll its own answer as "`all_departments`, or a live seat in exactly
+    this department", which is the ROW term only: on a fresh tenant `_upsert_member`
+    mints members with neither, so the honest answer there was "nobody may reach
+    anything", and cross-department delegation was dead for everyone whose
+    authority came from a role.
+
+    Three terms, in the same order and with the same meaning as
+    `scope_for_principal`:
+
+    * an ASSIGNED role's `approval:view_any` / `approval:decide_any`, read out
+      of the role table rather than off a token, because that is the term an
+      administrator can grant and revoke;
+    * `all_departments` on the row;
+    * live seats.
+
+    `token_role` is the one term that CANNOT be recovered from storage -- for a
+    member with no assigned role the resolved answer is `permissions_for(token.role)`,
+    and there is no token here. A caller that captured it at an authenticated
+    moment (the chat API writes it into the run's context) may pass it; a caller
+    that has none passes nothing and gets the row terms alone, which is the
+    fail-closed direction and exactly what `scope_for_binding` already does at
+    the messenger door.
+    """
+    if member.deleted_at is not None:
+        # An offboarded person's stored rows must not keep authorising anything
+        # -- the same predicate `channels/binding.recipients()` applies before
+        # telling somebody about an approval.
+        return _EMPTY
+    if member.role_id is not None:
+        _role, granted = await _role_and_permissions(db, member.role_id)
+    elif token_role is not None:
+        granted = permissions_for(token_role)
+    else:
+        granted = frozenset()
+    decide_everywhere = APPROVAL_DECIDE_ANY in granted or member.all_departments
+    unrestricted = APPROVAL_VIEW_ANY in granted or decide_everywhere
+    return await _scope_from_seats(
+        db, member, unrestricted=unrestricted, decide_everywhere=decide_everywhere
     )

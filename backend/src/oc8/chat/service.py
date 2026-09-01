@@ -9,11 +9,11 @@ pauses in "My work" exactly like one from an autonomous run, because as far
 as the executor is concerned it IS one.
 
 All turns in one `ChatSession` share a single `Task` (`ChatSession.task_id`,
-set from the first run's resolved `task_id` and passed back into every later
-`enqueue_run` call) -- see `engine.open_run_task`'s `resume_task_id`
-handling, which is what makes passing an already-set `AgentRun.task_id`
-reuse that task instead of opening a new one. One chat session is one item
-on the department board, not one per message.
+opened by `send_message` itself on turn one and passed into every
+`enqueue_run` call, that one included) -- see `engine.open_run_task`'s
+`resume_task_id` handling, which is what makes passing an already-set
+`AgentRun.task_id` reuse that task instead of opening a new one. One chat
+session is one item on the department board, not one per message.
 
 `record_assistant_reply` is called from `oc8.runtime.executor` the moment a
 `source="chat"` run reaches a terminal state -- it is the one place a run's
@@ -29,12 +29,20 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from oc8 import models as m
+from oc8.copilot.redaction import is_secret_request, redact_text
 from oc8.runtime.intake import enqueue_run
 
 #: How many prior turns to fold into the next run's `task` text. A chat is
 #: interactive, not a long autonomous investigation -- this keeps the prompt
 #: bounded without needing a separate summarization step for v1.
 _TRANSCRIPT_TURNS = 20
+
+#: Matches the retired `oc8.copilot.chat._SECRET_REFUSAL` text -- carried over
+#: rather than imported so this module has no dependency on the module Task 5
+#: deletes.
+_SECRET_REFUSAL = (
+    "I cannot accept, request, or use credential values. Use the normal secret setup flow."
+)
 
 
 async def create_session(
@@ -106,11 +114,24 @@ async def send_message(
     tenant_id: uuid.UUID,
     message: str,
     originating_operator: str | None,
-) -> tuple[m.ChatMessage, m.AgentRun]:
+    operator_role: str | None = None,
+    telegram_external_id: str | None = None,
+) -> tuple[m.ChatMessage, m.AgentRun | None]:
     """Record the user's turn and enqueue the run that answers it.
 
-    COMMITS `db` (via `enqueue_run`) -- callers must not issue further
-    queries on it afterwards, same contract `enqueue_run` itself documents.
+    `operator_role` is the acting token's `role` claim, recorded on the run so
+    that code running LATER -- inside the run, with no request and no token --
+    can still resolve what the human behind this chat could reach. See
+    `control_tools._acting_token_role`. None for a Telegram sender: that door
+    carries no token, and its authority is the binding row.
+
+    Returns `(user_message, None)` without enqueueing a run when the tenant's
+    Assistant refuses the message outright (see the secret-blindness gate
+    below) -- callers must not assume a run was always started.
+
+    COMMITS `db` (via `enqueue_run`, or directly on the refusal path) --
+    callers must not issue further queries on it afterwards, same contract
+    `enqueue_run` itself documents.
     """
     history = await list_messages(db, tenant_id=tenant_id, session_id=session.id)
     user_message = m.ChatMessage(
@@ -119,12 +140,71 @@ async def send_message(
     db.add(user_message)
     await db.flush()
 
+    # The tenant's unified Assistant is secret-blind by design (carried over
+    # from the retired raw-completion Copilot path, oc8.copilot.redaction):
+    # it never solicits, accepts, or forwards a credential value, checked
+    # BEFORE the model ever sees the message -- not a system-prompt request
+    # the model could ignore. Scoped to the Assistant only; an ordinary
+    # agent's chat is unaffected -- this is a property of the Assistant's
+    # structural-change surface, not a general chat restriction.
+    agent = await db.get(m.Agent, session.agent_id)
+    if agent is not None and agent.is_tenant_assistant and is_secret_request(message):
+        # The already-flushed user turn carries the raw message -- redact it
+        # in place before the durable commit below, same as the retired
+        # copilot/chat.py redacted before every persistence boundary. Without
+        # this, the credential the Assistant just refused would still land in
+        # the transcript verbatim.
+        user_message.content = redact_text(message)
+        await db.flush()
+        db.add(
+            m.ChatMessage(
+                tenant_id=tenant_id,
+                session_id=session.id,
+                role="assistant",
+                content=_SECRET_REFUSAL,
+            )
+        )
+        session.last_message_at = dt.datetime.now(tz=dt.UTC)
+        await db.commit()
+        return user_message, None
+
+    task_text = _build_task_text(history, message)
     context: dict[str, object] = {
-        "task": _build_task_text(history, message),
+        "task": task_text,
         "chat_session_id": str(session.id),
     }
     if originating_operator is not None:
         context["originating_operator"] = originating_operator
+    if operator_role is not None:
+        context["operator_role"] = operator_role
+    if telegram_external_id is not None:
+        context["telegram_external_id"] = telegram_external_id
+
+    # Open the session's Task HERE, on turn one, rather than letting the engine
+    # open one implicitly when the run starts.
+    #
+    # `record_assistant_reply` used to be the only writer of `session.task_id`,
+    # and it runs after a run reaches a terminal state -- so for the whole of
+    # turn one the session had no task_id, and anything asking "who is the human
+    # behind this task?" by looking the session up BY task_id found nothing.
+    # `control_tools._member_may_reach_department` does exactly that and fails
+    # closed, so the Assistant's very first cross-department `delegate_task` of
+    # every new session was refused with "the person you are acting for does not
+    # have access to that department" -- which was never true; the row simply
+    # had not been backfilled yet.
+    #
+    # `enqueue_run`'s docstring already prescribes this for callers that own the
+    # task ("must pass it here rather than setting it afterwards"): a worker can
+    # claim the run in between and open a second task for the same work.
+    if session.task_id is None and agent is not None:
+        # Deferred: `oc8.agent.engine` reaches the runtime, which imports this
+        # module. Resolved once, at first call -- same shape as the deferred
+        # imports in `control_tools.py`.
+        from oc8.agent.engine import open_run_task
+
+        task = await open_run_task(db, agent=agent, task_text=task_text, tenant_id=tenant_id)
+        session.task_id = task.id
+        await db.flush()
 
     run, _published = await enqueue_run(
         db,
@@ -151,6 +231,10 @@ async def record_assistant_reply(db: AsyncSession, *, run: m.AgentRun, output: s
     )
     if session is None:
         return
+    # Redundant since `send_message` opens the task up front, and kept: a run
+    # that reached here without one (a session row written before that change,
+    # or a caller that enqueued a chat run some other way) still gets its
+    # session linked rather than staying task-less for ever.
     if session.task_id is None and run.task_id is not None:
         session.task_id = run.task_id
     rendered_components = (run.context or {}).get("rendered_components", [])
