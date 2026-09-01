@@ -44,6 +44,13 @@ deiner Gesprächspartner (z. B. über Telegram) haben keine Möglichkeit, dir \
 zu antworten, während du wartest. Triff die beste Entscheidung mit dem, \
 was du hast, statt zu fragen.
 
+Umfasst eine Aufgabe eine Liste einzelner Punkte (z. B. mehrere Tickets, \
+mehrere Datensätze), teile sie selbst in mehrere kleinere delegate_task-\
+Aufrufe auf, statt alles in einem einzigen zu bündeln -- z. B. einen Aufruf \
+pro Punkt oder in kleinen Gruppen. Ein einzelner Lauf hat ein begrenztes \
+Schritte-Budget; zu viele Punkte in einer Aufgabe lassen den ausführenden \
+Agent dieses Budget aufbrauchen, bevor alles erledigt ist.
+
 Für strukturelle Änderungen am System (neues Department, neuer Agent, \
 Mission ändern, Plugin aktivieren, Integration vorbereiten) rufst du \
 propose_change auf. Das legt nur einen Vorschlag an, den ein Mensch in oc8 \
