@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import {
+  Archive,
   CheckCircle2,
   Circle,
   Loader2,
@@ -14,6 +15,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Panel } from "@/components/app-shell";
 import { BackupPanel } from "@/components/backup-panel";
+import { CapaExportWizard } from "@/components/capa-export-wizard";
 import { CredentialPicker } from "@/components/credential-picker";
 import { OnboardingWizard } from "@/components/onboarding/onboarding-wizard";
 import { useT } from "@/lib/i18n";
@@ -35,6 +37,7 @@ export const Route = createFileRoute("/settings")({
 function SettingsPage() {
   const t = useT();
   const [setupOpen, setSetupOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   return (
     <>
       <div className="grid gap-4 md:grid-cols-2">
@@ -42,6 +45,29 @@ function SettingsPage() {
         <OrganizationPanel />
         <MailServerSetting />
         <BackupPanel />
+        <Panel className="p-5">
+          <div className="flex items-start gap-3">
+            <div className="grid h-9 w-9 place-items-center rounded-md bg-primary/15 text-primary">
+              <Archive className="h-4 w-4" />
+            </div>
+            <div>
+              <h3 className="font-serif text-lg">{t("Capa export", "Capa-Export")}</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {t(
+                  "Package a department or agent you built here into a Capa others can install.",
+                  "Verpacke ein Department oder einen Agenten, den du hier gebaut hast, in eine Capa, die andere installieren können.",
+                )}
+              </p>
+              <button
+                type="button"
+                onClick={() => setExportOpen(true)}
+                className="mt-3 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-panel-hover"
+              >
+                {t("Open wizard", "Wizard öffnen")}
+              </button>
+            </div>
+          </div>
+        </Panel>
       </div>
       {setupOpen && (
         // The SAME wizard as the first-run /welcome route -- there used to be
@@ -68,6 +94,29 @@ function SettingsPage() {
               </button>
             </div>
             <OnboardingWizard />
+          </div>
+        </div>
+      )}
+      {exportOpen && (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4"
+          onClick={() => setExportOpen(false)}
+        >
+          <div
+            className="w-full max-w-2xl rounded-xl border border-border bg-panel p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="font-serif text-lg">{t("Capa export", "Capa-Export")}</h2>
+              <button
+                type="button"
+                onClick={() => setExportOpen(false)}
+                className="rounded-md p-1 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <CapaExportWizard onClose={() => setExportOpen(false)} />
           </div>
         </div>
       )}

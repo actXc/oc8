@@ -2,7 +2,15 @@
 // existing TypeScript interfaces so screens swap mock imports for these hooks.
 
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, ApiError, fetchCapaIcon, previewBackup, restoreBackup } from "@/lib/api";
+import {
+  api,
+  ApiError,
+  fetchCapaIcon,
+  previewBackup,
+  previewCapaExport,
+  restoreBackup,
+  type CapaExportItemInput,
+} from "@/lib/api";
 import type { RuntimeOption } from "@/components/runtime-picker";
 import type { GuardrailLibraryEntry, GuardrailPreset } from "@/components/guardrail-preset-picker";
 import type {
@@ -1046,6 +1054,49 @@ export function useAgentInstructionHistory(agentId: string) {
   });
 }
 
+export interface MemoryRecord {
+  id: string;
+  content: string;
+  status: string;
+  createdAt: string;
+  writtenBy: string;
+}
+
+export interface MemoryList {
+  records: MemoryRecord[];
+}
+
+export function useAgentMemory(agentId: string) {
+  return useQuery({
+    queryKey: ["agents", agentId, "memory"],
+    queryFn: () => api.get<MemoryList>(`/agents/${agentId}/memory`),
+  });
+}
+
+export function useDeleteAgentMemory(agentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (recordId: string) => api.delete<void>(`/agents/${agentId}/memory/${recordId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["agents", agentId, "memory"] }),
+  });
+}
+
+export function useDepartmentMemory(departmentId: string) {
+  return useQuery({
+    queryKey: ["departments", departmentId, "memory"],
+    queryFn: () => api.get<MemoryList>(`/departments/${departmentId}/memory`),
+  });
+}
+
+export function useDeleteDepartmentMemory(departmentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (recordId: string) =>
+      api.delete<void>(`/departments/${departmentId}/memory/${recordId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["departments", departmentId, "memory"] }),
+  });
+}
+
 export function useCreateMcpConnection() {
   const qc = useQueryClient();
   return useMutation({
@@ -1184,6 +1235,20 @@ export function useAnswerRun(runId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (answer: string) => api.post<RunDTO>(`/runs/${runId}/answer`, { answer }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["run", runId] }),
+  });
+}
+
+// Cooperative cancel (§7.2, POST /runs/{id}/cancel): records the operator's
+// intent, doesn't stop the run synchronously -- a `queued` run is skipped
+// before start, a `running` one stops at its next step boundary. The
+// returned DTO's `state` may therefore still read "running" right after a
+// successful call; invalidating re-fetches it and the live WS patch (or the
+// next poll) carries the eventual "interrupted" transition through.
+export function useCancelRun(runId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<RunDTO>(`/runs/${runId}/cancel`, {}),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["run", runId] }),
   });
 }
@@ -2134,6 +2199,17 @@ export function useDeleteSecret() {
 export function usePreviewBackup() {
   return useMutation({
     mutationFn: (file: File) => previewBackup(file),
+  });
+}
+
+// ---- Capa export -------------------------------------------------------
+// `downloadCapaExport` (api.ts) is called directly from the wizard, not
+// wrapped in a hook -- same reasoning as `exportBackup` above: a browser
+// download has nothing worth caching.
+
+export function usePreviewCapaExport() {
+  return useMutation({
+    mutationFn: (items: CapaExportItemInput[]) => previewCapaExport(items),
   });
 }
 

@@ -290,4 +290,60 @@ export async function restoreBackup(
   return (await res.json()) as BackupRestoreResultDTO;
 }
 
+// ---- Capa export -------------------------------------------------------
+// Same shape as backup export/preview above: `POST /capas/export` returns
+// either a JSON preview (dry_run) or a binary ZIP, so it can't go through
+// `api.*`. `CapaExportPreviewItem`/`CapaExportPreviewResult` mirror
+// `oc8.api.v1.capas`'s `CapaExportPreviewItem`/`CapaExportPreviewResponse` --
+// those are plain `BaseModel`, not `CamelModel`, so the wire (and these
+// types) stay snake_case on purpose, same as the backup DTOs above.
+
+export interface CapaExportItemInput {
+  kind: "department" | "agent" | "skill";
+  id: string;
+  name: string;
+  version: string;
+  summary: string;
+}
+
+export interface CapaExportPreviewItem {
+  folder_name: string;
+  manifest_toml: string;
+  warnings: string[];
+  extra_files: Record<string, string>;
+}
+
+export interface CapaExportPreviewResult {
+  items: CapaExportPreviewItem[];
+  errors: string[];
+}
+
+export async function previewCapaExport(
+  items: CapaExportItemInput[],
+): Promise<CapaExportPreviewResult> {
+  const token = await getToken();
+  const res = await fetch(`${API_URL}/capas/export`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    body: JSON.stringify({ items, dry_run: true }),
+  });
+  if (!res.ok) throw await toError(res);
+  return (await res.json()) as CapaExportPreviewResult;
+}
+
+export async function downloadCapaExport(
+  items: CapaExportItemInput[],
+): Promise<{ blob: Blob; filename: string }> {
+  const token = await getToken();
+  const res = await fetch(`${API_URL}/capas/export`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    body: JSON.stringify({ items, dry_run: false }),
+  });
+  if (!res.ok) throw await toError(res);
+  const disposition = res.headers.get("content-disposition") ?? "";
+  const match = /filename="?([^";]+)"?/i.exec(disposition);
+  return { blob: await res.blob(), filename: match?.[1] ?? "capa-export.zip" };
+}
+
 export { API_URL, getToken, COMMUNITY_TOKEN_KEY };
