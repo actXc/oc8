@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
+from pydantic import BaseModel
 from sqlalchemy import select
 
 from oc8 import models as m
@@ -73,6 +74,30 @@ class InstantiateRequest(CamelModel):
 
 class InstantiateDepartmentRequest(CamelModel):
     name: str
+
+
+class CapaExportItem(BaseModel):
+    kind: Literal["department", "agent", "skill"]
+    id: uuid.UUID
+    name: str
+    version: str = "1.0.0"
+    summary: str = ""
+
+
+class CapaExportRequest(BaseModel):
+    items: list[CapaExportItem]
+    dry_run: bool = False
+
+
+class CapaExportPreviewItem(BaseModel):
+    folder_name: str
+    manifest_toml: str
+    warnings: list[str]
+
+
+class CapaExportPreviewResponse(BaseModel):
+    items: list[CapaExportPreviewItem]
+    errors: list[str]
 
 
 class PluginVersionDTO(CamelModel):
@@ -1147,6 +1172,95 @@ async def instantiate_department_endpoint(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     await db.commit()
     return department_to_dto(dept)
+
+
+@router.post(
+    "/capas/export",
+    # The two response shapes (a raw ZIP `Response` vs. the JSON preview DTO)
+    # are a Union FastAPI cannot turn into one response_model on its own --
+    # response_model=None disables that inference so each branch just returns
+    # what it actually is.
+    response_model=None,
+    dependencies=[Depends(require_permission(perm(PLUGIN, MANAGE)))],
+)
+async def export_capas(
+    body: CapaExportRequest, db: DbSession, principal: CurrentPrincipal
+) -> Response | CapaExportPreviewResponse:
+    """Render a department/agent/skill selection into capa manifests, either as
+    a JSON preview (`dry_run`) for the export wizard's Vorschau step, or as a
+    downloadable ZIP -- the same `Manifest`/`build_*_export` pair either way,
+    so what the wizard previews is exactly what the ZIP contains."""
+    from oc8.capas.export import (
+        ExportedCapa,
+        ExportValidationError,
+        build_agent_export,
+        build_department_export,
+        build_skill_export,
+    )
+    from oc8.capas.export_package import build_zip
+
+    results: list[ExportedCapa] = []
+    errors: list[str] = []
+    seen_folder_names: set[str] = set()
+    for item in body.items:
+        if item.name in seen_folder_names:
+            errors.append(f"duplicate capa name in this export: {item.name!r}")
+            continue
+        seen_folder_names.add(item.name)
+        try:
+            if item.kind == "department":
+                exported = await build_department_export(
+                    db,
+                    tenant_id=principal.tenant_id,
+                    department_id=item.id,
+                    capa_name=item.name,
+                    version=item.version,
+                    summary=item.summary,
+                )
+            elif item.kind == "agent":
+                exported = await build_agent_export(
+                    db,
+                    tenant_id=principal.tenant_id,
+                    agent_id=item.id,
+                    capa_name=item.name,
+                    version=item.version,
+                    summary=item.summary,
+                )
+            else:
+                exported = await build_skill_export(
+                    db,
+                    tenant_id=principal.tenant_id,
+                    skill_id=item.id,
+                    capa_name=item.name,
+                    version=item.version,
+                    summary=item.summary,
+                )
+        except ExportValidationError as exc:
+            errors.append(str(exc))
+            continue
+        results.append(exported)
+
+    if errors:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, {"errors": errors})
+
+    if body.dry_run:
+        return CapaExportPreviewResponse(
+            items=[
+                CapaExportPreviewItem(
+                    folder_name=r.folder_name, manifest_toml=r.manifest_toml, warnings=r.warnings
+                )
+                for r in results
+            ],
+            errors=[],
+        )
+
+    data = build_zip(results)
+    filename = "capa-export.zip" if len(results) != 1 else f"{results[0].folder_name}.zip"
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post(
