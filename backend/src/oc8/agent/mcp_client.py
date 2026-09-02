@@ -10,12 +10,14 @@ import re
 import tempfile
 from contextlib import AsyncExitStack
 from importlib.metadata import version as _pkg_version
+from pathlib import Path
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, cast
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+from oc8.constants import CORE_VERSION
 from oc8.modelrouter.types import NeutralTool
 
 if TYPE_CHECKING:
@@ -56,12 +58,36 @@ except Exception:  # pragma: no cover - a missing dist would break the import an
 # leak into a (possibly third-party) tool server.
 _SAFE_ENV_KEYS = ("PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", "SYSTEMROOT")
 
+#: Ships with oc8 core -- its sitecustomize.py gives every MCP subprocess a
+#: real `oc8/<version>` User-Agent for outbound HTTP (odoo_mcp's raw urllib
+#: calls today, any future tool pack's), instead of Python's bare
+#: `Python-urllib/<pyver>` default. A server sitting behind a WAF (Cloudflare,
+#: etc.) can then allowlist oc8 by name rather than by IP, or block the
+#: generic default outright. Python's `site` module imports `sitecustomize`
+#: automatically for every interpreter start as long as this directory is on
+#: PYTHONPATH -- true even for a `uv tool run <pkg>` console-script
+#: entrypoint, confirmed live against the real odoo_mcp subprocess
+#: (2026-09-02). This is core, not plugin, code: it patches Python's own
+#: urllib default, not any one vendor's behaviour, so it belongs here rather
+#: than under a specific capa's setup.
+_SITECUSTOMIZE_DIR = str(Path(__file__).resolve().parent / "_mcp_sitecustomize")
+
 
 def _safe_env(overrides: dict[str, str] | None) -> dict[str, str]:
     env = {k: os.environ[k] for k in _SAFE_ENV_KEYS if k in os.environ}
     # Workspace/config for the demo servers, but never secrets.
     env.update({k: v for k, v in os.environ.items() if k.startswith("OC8_MCP_")})
     env.update(overrides or {})
+    env["OC8_USER_AGENT"] = f"oc8/{CORE_VERSION}"
+    # Prepended, not overwritten: a plugin (microsoft365, google_workspace)
+    # may already need its own PYTHONPATH entry for its bridge package
+    # (tool_pack.toml's env.PYTHONPATH) -- both must stay importable.
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = (
+        os.pathsep.join([_SITECUSTOMIZE_DIR, existing_pythonpath])
+        if existing_pythonpath
+        else _SITECUSTOMIZE_DIR
+    )
     return env
 
 
