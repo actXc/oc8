@@ -725,8 +725,14 @@ export function AppShell() {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 flex items-center gap-4 border-b border-border bg-background/85 px-4 py-4 backdrop-blur md:px-8">
-          <div className="min-w-0 flex-1">
+        <header className="sticky top-0 z-20 flex flex-wrap items-center gap-x-4 gap-y-3 border-b border-border bg-background/85 px-4 py-4 backdrop-blur md:px-8">
+          {/* `min-w-[12rem]` (not `min-w-0`) on purpose: `flex-1` alone lets this
+              shrink to nothing before the fixed-width controls to its right ever
+              wrap, which crushed the title into a one-word-per-line column at a
+              few hundred px of window width rather than the row wrapping like it
+              was meant to. A real minimum forces the WHOLE block onto its own
+              line once the row is actually too narrow for both. */}
+          <div className="min-w-[12rem] flex-1">
             <h1 className="font-serif text-2xl leading-none md:text-3xl">{pageTitle(pathname)}</h1>
             <p className="mt-1 text-sm text-muted-foreground">{pageSubtitle(pathname)}</p>
           </div>
