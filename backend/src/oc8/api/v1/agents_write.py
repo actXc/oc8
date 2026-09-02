@@ -19,7 +19,7 @@ import datetime as dt
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import func, select
 
 from oc8 import models as m
@@ -454,6 +454,73 @@ async def update_instructions(
         principal=principal,
     )
     return await _agent_detail_dto(db, agent)
+
+
+@router.delete(
+    "/agents/{agent_id}/memory/{record_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_agent_memory(
+    agent_id: uuid.UUID,
+    record_id: uuid.UUID,
+    db: DbSession,
+    request: Request,
+    actor: Annotated[HumanActor, Depends(require_agent_write())],
+) -> Response:
+    agent = await _load_agent(db, agent_id)
+    await authorize_agent_write(
+        request,
+        db,
+        actor,
+        agent.department_id,
+        not_found=HTTPException(status.HTTP_404_NOT_FOUND, "agent not found"),
+    )
+    principal = actor.principal
+    # Scoped by store_id, not just tenant_id -- a record id that exists but
+    # belongs to a DIFFERENT agent's (or the department's) store must 404
+    # here the same way a foreign agent_id does, not silently delete across
+    # owners just because RLS already narrowed the query to this tenant.
+    store = (
+        await db.execute(
+            select(m.MemoryStore).where(
+                m.MemoryStore.tenant_id == principal.tenant_id,
+                m.MemoryStore.tier == "agent",
+                m.MemoryStore.owner_id == agent_id,
+            )
+        )
+    ).scalar_one_or_none()
+    record = (
+        None
+        if store is None
+        else (
+            await db.execute(
+                select(m.MemoryRecord).where(
+                    m.MemoryRecord.id == record_id, m.MemoryRecord.store_id == store.id
+                )
+            )
+        ).scalar_one_or_none()
+    )
+    if record is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "memory record not found")
+    content_snippet = record.content[:200]
+    await db.delete(record)
+    await db.flush()
+    await append_event(
+        db,
+        tenant_id=principal.tenant_id,
+        actor_type="operator",
+        actor_id=None,
+        category="admin",
+        action="agent.memory.deleted",
+        resource={
+            "agent_id": str(agent_id),
+            "record_id": str(record_id),
+            "content_snippet": content_snippet,
+            "by": principal.subject,
+        },
+        principal=principal,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(

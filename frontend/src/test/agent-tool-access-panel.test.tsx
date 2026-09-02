@@ -145,14 +145,22 @@ describe("AgentToolAccessPanel", () => {
     });
     expect(screen.getByText("Hubspot")).toBeInTheDocument();
     expect(screen.getByText(/not connected yet/i)).toBeInTheDocument();
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    // No tenant connections at all -- nothing to toggle and nothing left to
+    // add, so the only button on screen is a disabled "Add tool".
+    expect(screen.getByRole("button", { name: /add tool/i })).toBeDisabled();
   });
 
   it("toggling a connected tool off persists immediately, preserving its other fields", () => {
     mcpConnectionsMock.mockReturnValue({ data: [PLAIN_CONNECTION] });
     renderPanel();
 
-    fireEvent.click(screen.getByRole("button"));
+    // The Toggle button carries no accessible name (icon-only); "Add tool"
+    // does. Filter it out rather than assuming exactly one button exists.
+    const toggle = screen
+      .getAllByRole("button")
+      .find((b) => !/add tool/i.test(b.textContent ?? ""));
+    if (!toggle) throw new Error("toggle button not found");
+    fireEvent.click(toggle);
 
     expect(updateNarrowingMock).toHaveBeenCalledWith(
       {
@@ -224,5 +232,108 @@ describe("AgentToolAccessPanel", () => {
         expect.anything(),
       ),
     );
+  });
+
+  describe("agent-exclusive grants (tool not in the department frame)", () => {
+    const SALESFORCE_CONNECTION = {
+      ...PLAIN_CONNECTION,
+      id: "conn-2",
+      name: "Salesforce",
+    };
+
+    it("Add tool lists only tenant connections not already a tile here", () => {
+      mcpConnectionsMock.mockReturnValue({ data: [PLAIN_CONNECTION, SALESFORCE_CONNECTION] });
+      renderPanel();
+
+      fireEvent.click(screen.getByRole("button", { name: /add tool/i }));
+
+      expect(screen.getByText("Salesforce")).toBeInTheDocument();
+      // "Odoo" already has a tile (it's in the frame) -- it must not also
+      // appear as an addable option in the picker.
+      expect(screen.queryAllByText("Odoo")).toHaveLength(1);
+    });
+
+    it("picking a connection in Add tool grants it read-only, enabled, with no login pin", () => {
+      mcpConnectionsMock.mockReturnValue({ data: [PLAIN_CONNECTION, SALESFORCE_CONNECTION] });
+      renderPanel();
+
+      fireEvent.click(screen.getByRole("button", { name: /add tool/i }));
+      fireEvent.click(screen.getByText("Salesforce"));
+
+      expect(updateNarrowingMock).toHaveBeenCalledWith(
+        {
+          narrowing: {
+            tools: {
+              Odoo: {
+                enabled: true,
+                read: true,
+                write: false,
+                send: false,
+                approval_eur: null,
+                approval_actions: [],
+                only: [],
+                connection_id: null,
+              },
+              Salesforce: {
+                enabled: true,
+                read: true,
+                write: false,
+                send: false,
+                approval_eur: null,
+                approval_actions: [],
+                only: [],
+                connection_id: null,
+              },
+            },
+          },
+        },
+        expect.anything(),
+      );
+    });
+
+    it("Add tool is disabled once every tenant connection already has a tile", () => {
+      mcpConnectionsMock.mockReturnValue({ data: [PLAIN_CONNECTION] });
+      renderPanel();
+      expect(screen.getByRole("button", { name: /add tool/i })).toBeDisabled();
+    });
+
+    it("excludes a connection the frame already mentions but left disabled -- adding it there always 422s", () => {
+      // backend/src/oc8/authz/pdp.py's narrowing_within_frame keys off
+      // presence in frame_tools, not its `enabled` flag: a tool the
+      // department explicitly turned off is still frame-governed, never
+      // agent-exclusive. Offering it in Add tool would just fail on save.
+      mcpConnectionsMock.mockReturnValue({ data: [PLAIN_CONNECTION, SALESFORCE_CONNECTION] });
+      renderPanel({
+        ...ONE_TOOL_AGENT,
+        departmentFrameTools: {
+          ...ONE_TOOL_AGENT.departmentFrameTools,
+          Salesforce: { enabled: false, read: false, write: false, send: false, approvalEur: null },
+        },
+      });
+
+      // Salesforce is the only other tenant connection and it's excluded --
+      // nothing left to offer, so the button itself is disabled (clicking a
+      // disabled button never opens the picker).
+      expect(screen.getByRole("button", { name: /add tool/i })).toBeDisabled();
+    });
+
+    it("marks an agent-exclusive tile 'Agent only', leaving frame tiles unmarked", () => {
+      mcpConnectionsMock.mockReturnValue({ data: [PLAIN_CONNECTION, SALESFORCE_CONNECTION] });
+      renderPanel({
+        ...ONE_TOOL_AGENT,
+        effectiveTools: {
+          ...ONE_TOOL_AGENT.effectiveTools,
+          Salesforce: { enabled: true, read: true, write: false, send: false, approvalEur: null },
+        },
+        // departmentFrameTools deliberately still only has "Odoo" -- Salesforce
+        // reaches effectiveTools purely via the agent's own narrowing.
+      });
+
+      // Exactly one tile (Salesforce, the agent-exclusive one) carries the
+      // badge -- the frame tile (Odoo) must not also get it.
+      expect(screen.getAllByText("Agent only")).toHaveLength(1);
+      expect(screen.getByText("Odoo")).toBeInTheDocument();
+      expect(screen.getByText("Salesforce")).toBeInTheDocument();
+    });
   });
 });

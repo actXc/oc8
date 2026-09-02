@@ -1021,22 +1021,55 @@ export function AgentToolAccessPanel({
   const frame = agent.departmentFrameTools;
   const effective = agent.effectiveTools;
   const frameKeys = Object.keys(frame).filter((k) => frame[k]?.enabled);
+  // Agent-exclusive grants: tools this agent has directly, that the
+  // department never put in its frame -- backend/src/oc8/authz/pdp.py's
+  // second loop in effective_tool_policies. Derived from `effective` (not
+  // `agent.narrowing`, which isn't on this DTO) since that function now
+  // includes every such key regardless of its enabled state, so a toggled-
+  // off agent-only tool still keeps its tile instead of vanishing.
+  const agentOnlyKeys = Object.keys(effective).filter((k) => !(k in frame));
+  const allKeys = [...frameKeys, ...agentOnlyKeys];
   const connectionByName = new Map(connections.map((c) => [c.name, c] as const));
   const loginsByKey: Record<string, McpLoginDTO[]> = {};
   for (const login of logins.data ?? []) {
     (loginsByKey[login.name] ??= []).push(login);
   }
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [toolSearch, setToolSearch] = useState("");
+  // Every tenant connection not already a tile here, deduped by name (same
+  // convention as `connectionByName`) -- AND not a key the department frame
+  // already mentions at all, even disabled. backend/src/oc8/authz/pdp.py's
+  // narrowing_within_frame keys off presence in frame_tools, not its enabled
+  // flag: a tool the department explicitly turned off is still governed by
+  // it and stays narrow-only, never agent-exclusive -- offering it here
+  // would just 422 on save.
+  const frameToolKeys = Object.keys(frame);
+  const addableNames = Array.from(new Set(connections.map((c) => c.name))).filter(
+    (name) => !allKeys.includes(name) && !frameToolKeys.includes(name),
+  );
 
-  function persist(patch: Record<string, { enabled?: boolean; connectionId?: string | null }>) {
+  function persist(
+    patch: Record<
+      string,
+      Partial<{
+        enabled: boolean;
+        connectionId: string | null;
+        read: boolean;
+        write: boolean;
+        send: boolean;
+      }>
+    >,
+  ) {
+    const keys = new Set([...allKeys, ...Object.keys(patch)]);
     const tools: Record<string, unknown> = {};
-    for (const k of frameKeys) {
+    for (const k of keys) {
       const src = effective[k] ?? frame[k];
       const p = patch[k];
       tools[k] = {
         enabled: p?.enabled ?? !!src?.enabled,
-        read: !!src?.read,
-        write: !!src?.write,
-        send: !!src?.send,
+        read: p?.read ?? !!src?.read,
+        write: p?.write ?? !!src?.write,
+        send: p?.send ?? !!src?.send,
         approval_eur: src?.approvalEur ?? null,
         approval_actions: src?.approvalActions ?? [],
         only: src?.only ?? [],
@@ -1084,7 +1117,12 @@ export function AgentToolAccessPanel({
     }
   }
 
-  const activeCount = frameKeys.filter((k) => effective[k]?.enabled).length;
+  const activeCount = allKeys.filter((k) => effective[k]?.enabled).length;
+
+  function addTool(name: string) {
+    persist({ [name]: { enabled: true, read: true, write: false, send: false } });
+    setPickerOpen(false);
+  }
 
   return (
     <Panel className="p-5">
@@ -1096,25 +1134,39 @@ export function AgentToolAccessPanel({
           )}
           title={t("Available interfaces", "Verfügbare Schnittstellen")}
         />
-        {frameKeys.length > 0 && (
-          <span className="shrink-0 rounded-full border border-border bg-background/40 px-2 py-1 text-[11px] text-muted-foreground">
-            {t(
-              `${activeCount} of ${frameKeys.length} MCP interfaces active`,
-              `${activeCount} von ${frameKeys.length} MCP-Schnittstellen aktiv`,
-            )}
-          </span>
-        )}
+        <div className="flex shrink-0 items-center gap-2">
+          {allKeys.length > 0 && (
+            <span className="rounded-full border border-border bg-background/40 px-2 py-1 text-[11px] text-muted-foreground">
+              {t(
+                `${activeCount} of ${allKeys.length} MCP interfaces active`,
+                `${activeCount} von ${allKeys.length} MCP-Schnittstellen aktiv`,
+              )}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              setToolSearch("");
+              setPickerOpen(true);
+            }}
+            disabled={!mayManage || addableNames.length === 0}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition hover:bg-background/70 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Plus className="h-3.5 w-3.5" /> {t("Add tool", "Tool hinzufügen")}
+          </button>
+        </div>
       </div>
-      {frameKeys.length === 0 ? (
+      {allKeys.length === 0 ? (
         <p className="rounded-md border border-dashed border-border/70 bg-background/30 p-3 text-center text-xs text-muted-foreground">
           {t(
-            "No department frame — this agent has no tools to enable. Grant tools to the department under its Integrations tab first.",
-            "Kein Abteilungsrahmen — dieser Agent hat keine aktivierbaren Tools. Erst der Abteilung unter deren Integrations-Tab Tools gewähren.",
+            "No tools yet — add one directly for this agent, or grant it to the whole department first.",
+            "Noch keine Tools — direkt für diesen Agenten hinzufügen oder zuerst der ganzen Abteilung gewähren.",
           )}
         </p>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
-          {frameKeys.map((key) => {
+          {allKeys.map((key) => {
+            const isAgentOnly = agentOnlyKeys.includes(key);
             const connection = connectionByName.get(key);
             const connected = !!connection?.connected;
             const isOn = !!effective[key]?.enabled;
@@ -1160,14 +1212,21 @@ export function AgentToolAccessPanel({
                     />
                   )}
                 </div>
-                {!connected && (
-                  <span className="rounded-full border border-border bg-background/40 px-1.5 py-0.5 text-[9px] text-muted-foreground">
-                    {t(
-                      "not connected yet — connect under Capas",
-                      "noch nicht verbunden — unter Capas verbinden",
-                    )}
-                  </span>
-                )}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {isAgentOnly && (
+                    <span className="rounded-full border border-primary/40 bg-primary/10 px-1.5 py-0.5 text-[9px] uppercase tracking-widest text-primary">
+                      {t("Agent only", "Nur dieser Agent")}
+                    </span>
+                  )}
+                  {!connected && (
+                    <span className="rounded-full border border-border bg-background/40 px-1.5 py-0.5 text-[9px] text-muted-foreground">
+                      {t(
+                        "not connected yet — connect under Capas",
+                        "noch nicht verbunden — unter Capas verbinden",
+                      )}
+                    </span>
+                  )}
+                </div>
                 {connected && isOn && credentialType && mayManage && (
                   <div className="w-full min-w-0 border-t border-border/60 pt-2">
                     <div className="mb-1 text-[10px] uppercase tracking-widest text-muted-foreground">
@@ -1187,10 +1246,78 @@ export function AgentToolAccessPanel({
       )}
       <p className="mt-3 text-[11px] text-muted-foreground">
         {t(
-          "Fine-grained permissions (read/write/send, approval threshold) live on the Guardrails tab.",
-          "Feinabstufung der Berechtigungen (Lesen/Schreiben/Senden, Freigabe-Schwelle) findest du im Guardrails-Tab.",
+          "Fine-grained permissions (read/write/send, approval threshold) live on the Guardrails tab. “Agent only” tools are exclusive to this agent — sibling agents in the same department never get them.",
+          "Feinabstufung der Berechtigungen (Lesen/Schreiben/Senden, Freigabe-Schwelle) findest du im Guardrails-Tab. „Nur dieser Agent“-Tools sind exklusiv für diesen Agenten — andere Agenten derselben Abteilung bekommen sie nie.",
         )}
       </p>
+
+      {pickerOpen &&
+        (() => {
+          const searchTerm = toolSearch.trim().toLowerCase();
+          const filtered = searchTerm
+            ? addableNames.filter((name) => name.toLowerCase().includes(searchTerm))
+            : addableNames;
+          return (
+            <div
+              className="fixed inset-0 z-40 grid place-items-center bg-black/60 p-4 backdrop-blur-sm"
+              onClick={() => setPickerOpen(false)}
+            >
+              <div
+                className="w-full max-w-lg overflow-hidden rounded-xl border border-border bg-panel shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between border-b border-border px-5 py-4">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-widest text-muted-foreground">
+                      {t("Tenant connections", "Tenant-Verbindungen")}
+                    </div>
+                    <h2 className="font-serif text-xl">{t("Add tool", "Tool hinzufügen")}</h2>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPickerOpen(false)}
+                    className="grid h-8 w-8 place-items-center rounded-md border border-border text-muted-foreground transition hover:text-foreground"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="relative border-b border-border px-5 py-3">
+                  <Search className="pointer-events-none absolute left-8 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    value={toolSearch}
+                    onChange={(e) => setToolSearch(e.target.value)}
+                    placeholder={t("Search tools…", "Tools durchsuchen…")}
+                    className="w-full rounded-md border border-border bg-background/40 py-2 pl-8 pr-3 text-sm outline-none focus:border-primary/50"
+                  />
+                </div>
+                <div className="max-h-[60vh] divide-y divide-border overflow-y-auto">
+                  {filtered.length === 0 && (
+                    <div className="p-6 text-center text-sm text-muted-foreground">
+                      {addableNames.length === 0
+                        ? t(
+                            "Every tenant connection already has a tile here.",
+                            "Jede Tenant-Verbindung hat hier bereits eine Kachel.",
+                          )
+                        : t("No tools match your search.", "Keine Tools passen zur Suche.")}
+                    </div>
+                  )}
+                  {filtered.map((name) => (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => addTool(name)}
+                      className="flex w-full items-center gap-3 px-5 py-3 text-left transition hover:bg-primary/5"
+                    >
+                      <Wrench className="h-4 w-4 shrink-0 text-primary" />
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
+                      <Plus className="h-4 w-4 text-muted-foreground" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
     </Panel>
   );
 }
