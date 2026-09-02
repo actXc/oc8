@@ -215,6 +215,17 @@ class MemberDTO(CamelModel):
     #: silently.
     role_id: str | None = None
     role_name: str = ""
+    #: Set only by `POST /members` when it minted an invite link for a
+    #: passwordless member (community mode, no password given). `null` on
+    #: every other response that carries a `MemberDTO` -- `GET /members`
+    #: included -- because nothing else mints one.
+    invite_link: str | None = None
+    #: Whether that link was actually emailed. `False` alongside a non-null
+    #: `invite_link` means "no mail server configured (or the send failed)" --
+    #: the link itself is still returned so an administrator can copy/share it
+    #: by hand; a failed or skipped send never fails the request that created
+    #: the member.
+    invite_sent: bool = False
 
 
 class MeDTO(CamelModel):

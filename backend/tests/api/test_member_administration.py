@@ -10,24 +10,44 @@ company-wide view, a members list that crosses a tenant boundary.
 
 from __future__ import annotations
 
+import base64
 import datetime as dt
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 from asgi_lifespan import LifespanManager
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from oc8 import models as m
 from oc8.auth import get_identity_provider
 from oc8.authz.permissions import SEAT_APPROVER, SEAT_VIEWER
+from oc8.config import Settings
+from oc8.credentials.service import create_credential
 from oc8.main import create_app
 from tests.conftest import AppSessionFactory
 
 pytestmark = pytest.mark.asyncio
+
+
+@pytest.fixture(autouse=True)
+def _kek(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The invite tests' SMTP-configured branch resolves a secret-kind
+    `password` field through the real vault, which needs a KEK (mirrors
+    tests/api/test_auth_self_service.py's identical fixture)."""
+    from oc8 import config
+
+    monkeypatch.setattr(
+        config.get_settings(),
+        "secret_kek",
+        base64.b64encode(bytes(range(32))).decode(),
+        raising=False,
+    )
 
 
 def _headers(tenant: uuid.UUID, subject: str, role: str) -> dict[str, str]:
@@ -48,6 +68,26 @@ def _subject_uuid(subject: str) -> uuid.UUID:
         return uuid.UUID(subject)
     except ValueError:
         return uuid.uuid5(uuid.NAMESPACE_URL, f"oc8:subject:{subject}")
+
+
+async def _configure_smtp(db: AsyncSession, tenant: uuid.UUID) -> None:
+    """Point the tenant's `active_smtp_credential_id` at a real credential --
+    creating the tenant's `Organization` row first, since `resolve_smtp_config`
+    reads it. Mirrors `test_auth_self_service.py`'s helper of the same name."""
+    org = await db.get(m.Organization, tenant)
+    if org is None:
+        org = m.Organization(id=tenant, slug=str(tenant), name="t", settings={})
+        db.add(org)
+        await db.flush()
+    credential = await create_credential(
+        db,
+        tenant_id=tenant,
+        name="smtp",
+        credential_type="smtp_server",
+        field_values={"host": "smtp.example.com", "port": "587", "from_address": "a@b.com"},
+    )
+    org.settings = {**org.settings, "active_smtp_credential_id": str(credential.id)}
+    await db.flush()
 
 
 class _Office:
@@ -374,3 +414,171 @@ async def test_the_members_list_stops_at_the_tenant_boundary(
     subjects = {r["subject"] for r in listed.json()["items"]}
     assert "hos" in subjects
     assert "somebody-elses-employee" not in subjects
+
+
+# --- invite links for a passwordless member -------------------------------
+#
+# `POST /members` with no password used to leave a member created with no way
+# to ever sign in. These four tests cover the door that fixes it: community
+# mode with a mail server mints AND sends a link, community mode with no mail
+# server still mints and hands the link back, a password given up front skips
+# it entirely, and dev mode (where local passwords are meaningless) skips it
+# too. Redeeming that link at `POST /auth/password/reset` is covered in
+# `test_auth_self_service.py` (`_redeem_token` now accepts either purpose).
+
+
+def _community(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`POST /members`' invite branch is gated on `not get_settings().is_dev`,
+    the same flag `GET /auth/config` reads to report `mode`. The suite's
+    default `Settings.env` is `"dev"` (see `test_auth_config.py`), so every
+    OTHER test in this file exercises the feature switched OFF -- this is the
+    one override that switches it on, mirroring `test_auth_config.py`'s own
+    `Settings(env="production")` monkeypatch."""
+    monkeypatch.setattr(
+        "oc8.api.v1.members.get_settings", lambda: Settings(env="production")
+    )
+
+
+async def test_creating_a_passwordless_member_mints_and_mails_an_invite(
+    app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _community(monkeypatch)
+    office = await _office(app_session)
+    admin = _headers(office.tenant, "boss", "org_admin")
+    async with app_session(office.tenant) as db:
+        await _configure_smtp(db, office.tenant)
+
+    with patch("oc8.credentials.smtp.smtplib.SMTP") as smtp_cls:
+        client = MagicMock()
+        smtp_cls.return_value.__enter__.return_value = client
+        async with _http() as http:
+            created = await http.post(
+                "/api/v1/members",
+                json={"subject": "invitee@example.com", "displayName": "Invitee"},
+                headers=admin,
+            )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["inviteSent"] is True, body
+    assert body["inviteLink"], "no link returned even though one was minted"
+    assert "token=" in body["inviteLink"]
+    assert client.send_message.call_count == 1
+
+    async with app_session(office.tenant) as db:
+        member = (
+            await db.execute(
+                select(m.OrgMember).where(
+                    m.OrgMember.tenant_id == office.tenant,
+                    m.OrgMember.subject == "invitee@example.com",
+                )
+            )
+        ).scalar_one()
+        assert member.password_hash is None
+        token = (
+            await db.execute(
+                select(m.AccountVerificationToken).where(
+                    m.AccountVerificationToken.tenant_id == office.tenant,
+                    m.AccountVerificationToken.member_id == member.id,
+                )
+            )
+        ).scalar_one()
+        assert token.purpose == "invite"
+        assert token.used_at is None
+
+
+async def test_creating_a_passwordless_member_without_a_mail_server_still_returns_a_link(
+    app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No SMTP credential configured must not fail the request, and must not
+    leave the administrator with nothing to hand the new person either."""
+    _community(monkeypatch)
+    office = await _office(app_session)
+    admin = _headers(office.tenant, "boss", "org_admin")
+
+    async with _http() as http:
+        created = await http.post(
+            "/api/v1/members",
+            json={"subject": "invitee2@example.com", "displayName": "Invitee"},
+            headers=admin,
+        )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["inviteSent"] is False
+    assert body["inviteLink"], "the fallback link must still be returned with no mail server"
+
+    async with app_session(office.tenant) as db:
+        token = (
+            await db.execute(
+                select(m.AccountVerificationToken).where(
+                    m.AccountVerificationToken.tenant_id == office.tenant,
+                    m.AccountVerificationToken.purpose == "invite",
+                )
+            )
+        ).scalar_one()
+        assert token.used_at is None
+
+
+async def test_creating_a_member_with_a_password_mints_no_invite(
+    app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A password given up front is the existing, unchanged behaviour -- no
+    invite token, no link in the response, even with a mail server ready."""
+    _community(monkeypatch)
+    office = await _office(app_session)
+    admin = _headers(office.tenant, "boss", "org_admin")
+    async with app_session(office.tenant) as db:
+        await _configure_smtp(db, office.tenant)
+
+    with patch("oc8.credentials.smtp.smtplib.SMTP") as smtp_cls:
+        client = MagicMock()
+        smtp_cls.return_value.__enter__.return_value = client
+        async with _http() as http:
+            created = await http.post(
+                "/api/v1/members",
+                json={"subject": "hasapassword@example.com", "password": "correct-horse-battery"},
+                headers=admin,
+            )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body.get("inviteLink") is None
+    assert body["inviteSent"] is False
+    assert client.send_message.call_count == 0
+
+    async with app_session(office.tenant) as db:
+        assert (
+            await db.execute(
+                select(m.AccountVerificationToken).where(
+                    m.AccountVerificationToken.tenant_id == office.tenant
+                )
+            )
+        ).scalar_one_or_none() is None
+
+
+async def test_dev_mode_mints_no_invite_for_a_passwordless_member(
+    app_session: AppSessionFactory,
+) -> None:
+    """The suite's default settings ARE dev mode (`env="dev"`), so this test
+    takes no monkeypatch at all -- it is what every other test in this file
+    already exercises, made explicit."""
+    office = await _office(app_session)
+    admin = _headers(office.tenant, "boss", "org_admin")
+
+    async with _http() as http:
+        created = await http.post(
+            "/api/v1/members",
+            json={"subject": "devmode@example.com"},
+            headers=admin,
+        )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body.get("inviteLink") is None
+    assert body["inviteSent"] is False
+
+    async with app_session(office.tenant) as db:
+        assert (
+            await db.execute(
+                select(m.AccountVerificationToken).where(
+                    m.AccountVerificationToken.tenant_id == office.tenant
+                )
+            )
+        ).scalar_one_or_none() is None

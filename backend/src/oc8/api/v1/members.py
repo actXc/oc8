@@ -14,6 +14,9 @@ somewhere" would be exactly the hole above.
 
 from __future__ import annotations
 
+import datetime as dt
+import hashlib
+import secrets
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -28,6 +31,8 @@ from oc8.auth import Principal
 from oc8.auth.password import PasswordHashingError, hash_password
 from oc8.authz.permissions import MANAGE, MEMBER, VIEW, perm
 from oc8.authz.scope import scope_for_principal, subject_uuid_for
+from oc8.config import get_settings
+from oc8.mail.send import SmtpConfig, deliver, resolve_smtp_config
 from oc8.schemas.dto import MemberDTO
 from oc8.schemas.paging import Page
 from oc8.schemas.requests import (
@@ -49,6 +54,15 @@ from oc8.workspace.members import (
 )
 
 router = APIRouter()
+
+#: How long an invite link minted by `POST /members` stays usable. Long
+#: compared to `PASSWORD_RESET_TOKEN_TTL` (auth.py, 1 hour) on purpose: a
+#: password-reset link answers "I am locked out right now", which is urgent;
+#: an invite answers "somebody set up my account before I ever needed it",
+#: which is not -- the person it is mailed to may not open that inbox for
+#: days. 7 days balances that against the same window a stale, forgotten
+#: link stays a live credential for.
+INVITE_TOKEN_TTL = dt.timedelta(days=7)
 
 
 async def _acting_member_id(db: AsyncSession, principal: Principal) -> uuid.UUID | None:
@@ -151,6 +165,21 @@ async def create_member(
     administrator revoking it was answered 200 while the flag stayed set -- and
     the flag outlives the role that earned it, so a person demoted elsewhere
     kept the authority to sign off every approval in the company.
+
+    No password AND no way to ever get one used to leave a member exactly
+    that: created, and permanently locked out. When `body.password` is
+    omitted, this is now also the ONE writer of an `invite` verification
+    token -- mailed (or, with no mail server configured, handed back in
+    `inviteLink` for an administrator to share by hand) so that person can set
+    their own password at `/reset-password?token=...`, the same page a
+    forgot-password link already lands on.
+
+    Gated on `member.password_hash is None` rather than on `created`, so
+    re-inviting an existing passwordless member (one created before this
+    existed, or whose first invite link expired unused) works through this
+    same door -- and on `not get_settings().is_dev`, because in dev mode local
+    passwords are meaningless (the dev-login/dev-tenants flow is how everybody
+    signs in there) and `GET /auth/config` reports that same flag as `mode`.
     """
     member, created = await upsert_member(
         db,
@@ -159,6 +188,9 @@ async def create_member(
         display_name=body.display_name,
         all_departments=body.all_departments,
     )
+    invite_link: str | None = None
+    invite_smtp: SmtpConfig | None = None
+    invite_recipient: str | None = None
     if body.password is not None:
         try:
             member.password_hash = hash_password(body.password)
@@ -175,6 +207,41 @@ async def create_member(
             action="member.password_set",
             resource={"member_id": str(member.id), "subject": member.subject},
             reason="password set through POST /members",
+            principal=principal,
+        )
+    elif not get_settings().is_dev and member.password_hash is None:
+        invite_token = secrets.token_urlsafe(32)
+        db.add(
+            m.AccountVerificationToken(
+                tenant_id=principal.tenant_id,
+                member_id=member.id,
+                purpose="invite",
+                # The plaintext is mailed (or handed back once, in the
+                # response) and never stored -- same discipline as every
+                # other verification token in this table.
+                token_hash=hashlib.sha256(invite_token.encode()).hexdigest(),
+                expires_at=dt.datetime.now(tz=dt.UTC) + INVITE_TOKEN_TTL,
+            )
+        )
+        invite_link = (
+            f"{get_settings().frontend_base_url.rstrip('/')}/reset-password?token={invite_token}"
+        )
+        # Resolved here, inside the still-open, still tenant-bound transaction
+        # -- RLS binds `app.tenant_id` transaction-locally, and it dies at
+        # commit (see oc8.mail.send's module docstring). `member.subject` is
+        # read now for the same reason: a lazy refresh after commit has
+        # neither a connection nor a bound tenant left.
+        invite_smtp = await resolve_smtp_config(db, tenant_id=principal.tenant_id)
+        invite_recipient = member.subject
+        await append_event(
+            db,
+            tenant_id=principal.tenant_id,
+            actor_type="operator",
+            actor_id=await _acting_member_id(db, principal),
+            category="member",
+            action="member.invited",
+            resource={"member_id": str(member.id), "subject": member.subject},
+            reason="invite link minted through POST /members (no password given)",
             principal=principal,
         )
     if body.all_departments is not None:
@@ -200,6 +267,33 @@ async def create_member(
     dto = await _member_dto(db, member)
     await db.commit()
     response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+
+    # OUTSIDE the transaction, which just committed and handed its DB
+    # connection back to the pool -- same ordering, and the same reason, as
+    # `forgot_password`: `deliver` can block for ~40 seconds on a bad relay,
+    # and this route is authenticated (an administrator's request), so
+    # holding a pooled connection for that long is a cost every other request
+    # on the process would pay. Unlike `forgot_password`, this endpoint has no
+    # enumeration risk to protect -- the caller already knows this member
+    # exists, they just created it -- so a failed or skipped send is not
+    # hidden: `inviteSent` says so, and `inviteLink` is always returned
+    # alongside it as the fallback an administrator can copy and share by
+    # hand. Either way, the member itself is already created and committed;
+    # a mail failure here never fails this request.
+    invite_sent = False
+    if invite_smtp is not None and invite_recipient is not None:
+        invite_sent = await deliver(
+            invite_smtp,
+            to=invite_recipient,
+            subject="You've been invited",
+            body=(
+                "An administrator created an account for you.\n"
+                f"Click this link to set your password:\n{invite_link}\n\n"
+                f"This link expires in {INVITE_TOKEN_TTL.days} days."
+            ),
+        )
+    dto.invite_link = invite_link
+    dto.invite_sent = invite_sent
     return dto
 
 

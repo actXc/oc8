@@ -1338,6 +1338,41 @@ async def test_a_reset_link_replaces_the_hash_and_the_new_password_logs_in(
     assert not verify_password(OLD_PASSWORD, stored)
 
 
+async def test_an_invite_link_also_sets_a_password(app_session: AppSessionFactory) -> None:
+    """`purpose="invite"` (minted by `POST /members` for a member created with
+    no password, see `test_member_administration.py`) is redeemed by this
+    SAME route, not a second one -- `_redeem_token` now accepts either
+    purpose because both authorize the identical action, "set a new
+    password". Mirrors `test_a_reset_link_replaces_the_hash_and_the_new_password_logs_in`
+    exactly, minting an `invite`-purpose token instead of `password_reset`."""
+    tenant = uuid.uuid4()
+    email = "newhire@example.com"
+    await _sole_organization(app_session, tenant)
+    async with app_session(tenant) as db:
+        member = _member(tenant, email, password=None)
+        db.add(member)
+        await db.flush()
+        _mint_token(db, tenant, member.id, purpose="invite", plaintext="invite-abc")
+
+    async with _http() as http:
+        r = await http.post(
+            "/api/v1/auth/password/reset",
+            json={"token": "invite-abc", "newPassword": "brand-new-password"},
+        )
+        assert r.status_code == 204, r.text
+
+        login = await http.post(
+            "/api/v1/auth/login", json={"email": email, "password": "brand-new-password"}
+        )
+    assert login.status_code == 200, login.text
+
+    async with app_session(tenant) as db:
+        stored = (await _row(db, tenant, email)).password_hash
+        assert "member.password_reset" in await _actions(db, tenant)
+        assert [t.used_at for t in await _tokens(db, tenant)] != [None]
+    assert stored is not None
+
+
 async def test_a_reset_link_works_exactly_once(app_session: AppSessionFactory) -> None:
     """A spent link left live is a permanent skeleton key sitting in an inbox:
     anybody who later reads that mailbox owns the account."""

@@ -1293,9 +1293,9 @@ class ForgotPasswordResponse(CamelModel):
 
 
 async def _redeem_token(
-    db: AsyncSession, *, tenant_id: uuid.UUID, token: str, purpose: str
+    db: AsyncSession, *, tenant_id: uuid.UUID, token: str, purpose: str | tuple[str, ...]
 ) -> m.AccountVerificationToken:
-    """Find an unused, unexpired token of exactly `purpose` and SPEND it.
+    """Find an unused, unexpired token whose `purpose` is in `purpose` and SPEND it.
 
     Marking `used_at` here, rather than at the end of the caller, is what
     makes single-use structural instead of remembered: every path out of this
@@ -1319,11 +1319,19 @@ async def _redeem_token(
     `purpose` is part of the WHERE, not an assertion afterwards, which is what
     makes a `password_reset` token presented to `/auth/email/confirm`
     indistinguishable from a token that never existed -- it does not match, so
-    it is not spent, and the caller is told nothing.
+    it is not spent, and the caller is told nothing. A single string is the
+    common case (one purpose authorizes one action); a tuple is for the one
+    case where TWO purposes authorize the SAME action -- `password_reset` and
+    `invite` both end in "set a new password from a mailed link", the only
+    difference being why the link was minted, so `reset_password` accepts
+    either without weakening the principle above: a token still never
+    authorizes an action it was not minted for, it just so happens two mint
+    reasons lead to the identical one.
 
     Raises `HTTPException(400, INVALID_LINK_MESSAGE)` for every failure --
     malformed, unknown, wrong purpose, expired, already spent.
     """
+    purposes = (purpose,) if isinstance(purpose, str) else purpose
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     row = (
         await db.execute(
@@ -1331,7 +1339,7 @@ async def _redeem_token(
             .where(
                 m.AccountVerificationToken.tenant_id == tenant_id,
                 m.AccountVerificationToken.token_hash == token_hash,
-                m.AccountVerificationToken.purpose == purpose,
+                m.AccountVerificationToken.purpose.in_(purposes),
                 m.AccountVerificationToken.used_at.is_(None),
                 m.AccountVerificationToken.expires_at > dt.datetime.now(tz=dt.UTC),
             )
@@ -1625,8 +1633,15 @@ async def reset_password(body: ResetPasswordRequest) -> None:
 
     No current-password gate, because there is nobody here who knows one --
     that is the situation this route exists for. What replaces it is the
-    token: mailed to the address already on the account, valid for an hour,
-    and spent in the same transaction as the hash it authorizes.
+    token: mailed to the address already on the account, valid for an hour
+    (a `password_reset` link) or 7 days (`members.py`'s `INVITE_TOKEN_TTL`, an
+    `invite` link minted by `POST /members` for somebody created with no
+    password), and spent in the same transaction as the hash it authorizes.
+
+    Accepts either purpose -- see `_redeem_token`'s docstring for why that is
+    not a widening of what a token authorizes. The frontend's
+    `/reset-password?token=...` page needs no changes for this: it already
+    just posts whatever token is in the URL here.
 
     Answers `204` and echoes nothing. Every failure is the same generic 400
     (`_redeem_token`), so a caller cannot use this to test whether a link they
@@ -1636,7 +1651,9 @@ async def reset_password(body: ResetPasswordRequest) -> None:
         org = await _get_singleton_organization(unbound_db)
 
     async with tenant_session(org.id) as db:
-        row = await _redeem_token(db, tenant_id=org.id, token=body.token, purpose="password_reset")
+        row = await _redeem_token(
+            db, tenant_id=org.id, token=body.token, purpose=("password_reset", "invite")
+        )
         member = await _member_for_token(db, row)
         try:
             member.password_hash = hash_password(body.new_password)

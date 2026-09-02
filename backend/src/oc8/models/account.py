@@ -1,9 +1,10 @@
-"""Single-use, time-limited, mailed tokens backing the two account
-self-service flows that require proving control of an email address
-(design: docs/superpowers/specs/2026-08-28-account-self-service-design.md
-§4.4) -- forgot-password and email-change confirmation. One table for
-both: they are the same shape (a token tied to a member and a purpose),
-and no generic token table existed yet to reuse.
+"""Single-use, time-limited, mailed tokens backing the account self-service
+flows that require proving control of an email address (design:
+docs/superpowers/specs/2026-08-28-account-self-service-design.md §4.4) --
+forgot-password, email-change confirmation, and (migration 0084) the invite
+link `POST /members` mints for a person created with no password. One table
+for all three: they are the same shape (a token tied to a member and a
+purpose), and no generic token table existed yet to reuse.
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ class AccountVerificationToken(Base, PkMixin, TenantMixin, TimestampMixin):
 
     __table_args__ = (
         CheckConstraint(
-            "purpose IN ('password_reset','email_change')",
+            "purpose IN ('password_reset','email_change','invite')",
             name="ck_account_verification_token_purpose",
         ),
     )
