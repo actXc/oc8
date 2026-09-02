@@ -8,11 +8,13 @@
 // pagination only. Mirrors Task 19's `departments-list-toolbar.test.tsx`
 // minus the archive-toggle test.
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const useAssigneesMock = vi.fn();
+const createMemberMutateMock = vi.fn();
+const { toastSuccess } = vi.hoisted(() => ({ toastSuccess: vi.fn() }));
 
 // Real member rows go through <Link to="/members/$memberId">, which throws
 // without a <RouterProvider>; stub it as a plain anchor, same as
@@ -32,8 +34,13 @@ vi.mock("@/lib/roles-hooks", async (importOriginal) => {
   return {
     ...actual,
     useAssignees: (enabled: boolean, params: unknown) => useAssigneesMock(enabled, params),
-    useCreateMember: () => ({ mutate: vi.fn(), isPending: false }),
+    useCreateMember: () => ({ mutate: createMemberMutateMock, isPending: false }),
   };
+});
+
+vi.mock("sonner", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("sonner")>();
+  return { ...actual, toast: { ...actual.toast, success: toastSuccess } };
 });
 
 vi.mock("@/lib/hooks", async (importOriginal) => {
@@ -71,6 +78,9 @@ describe("Members list page", () => {
       isLoading: false,
       error: null,
     });
+    createMemberMutateMock.mockReset();
+    toastSuccess.mockReset();
+    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
   });
 
   it("re-fetches with the typed search term", () => {
@@ -180,5 +190,94 @@ describe("Members list page", () => {
     renderPage();
 
     expect(screen.getByText(/from their sign-in/i)).toBeInTheDocument();
+  });
+});
+
+// The invite-link follow-up (design: an admin-created user with no password
+// gets a mailed, or copyable, link to set one instead of being left with no
+// way in). These drive `CreateMemberDialog`'s `onSuccess` handler directly
+// through the captured `mutate(vars, { onSuccess })` callback, the same way
+// `departments-delete.test.tsx` drives a mutation's callbacks without a real
+// network layer.
+describe("Create-user invite link", () => {
+  function openCreateDialogAndSubmit(subject: string) {
+    fireEvent.click(screen.getByRole("button", { name: /new user/i }));
+    fireEvent.change(screen.getByPlaceholderText("jane.doe@example.com"), {
+      target: { value: subject },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^create user$/i }));
+  }
+
+  type CreatedMember = {
+    id: string;
+    subject: string;
+    displayName: string;
+    inviteLink?: string | null;
+    inviteSent?: boolean;
+  };
+
+  function lastOnSuccess(): (created: CreatedMember) => void {
+    const call = createMemberMutateMock.mock.calls.at(-1) as [
+      unknown,
+      { onSuccess: (created: CreatedMember) => void },
+    ];
+    return call[1].onSuccess;
+  }
+
+  it("shows a copyable link dialog when an invite was minted but not emailed", () => {
+    renderPage();
+    openCreateDialogAndSubmit("newperson@example.com");
+
+    expect(createMemberMutateMock).toHaveBeenCalledTimes(1);
+    act(() => {
+      lastOnSuccess()({
+        id: "m-3",
+        subject: "newperson@example.com",
+        displayName: "",
+        inviteLink: "https://oc8.example.test/reset-password?token=abc123",
+        inviteSent: false,
+      });
+    });
+
+    expect(screen.getByText(/share this invite link/i)).toBeInTheDocument();
+    expect(
+      screen.getByDisplayValue("https://oc8.example.test/reset-password?token=abc123"),
+    ).toBeInTheDocument();
+  });
+
+  it("shows an emailed-invite toast instead of the link dialog when the invite was sent", () => {
+    renderPage();
+    openCreateDialogAndSubmit("emailed@example.com");
+
+    act(() => {
+      lastOnSuccess()({
+        id: "m-4",
+        subject: "emailed@example.com",
+        displayName: "",
+        inviteLink: "https://oc8.example.test/reset-password?token=xyz",
+        inviteSent: true,
+      });
+    });
+
+    expect(toastSuccess).toHaveBeenCalledWith(expect.stringMatching(/invite was emailed/i));
+    expect(screen.queryByText(/share this invite link/i)).not.toBeInTheDocument();
+  });
+
+  it("does not open the invite dialog for a member created with a password", () => {
+    renderPage();
+    openCreateDialogAndSubmit("haspassword@example.com");
+
+    act(() => {
+      lastOnSuccess()({
+        id: "m-5",
+        subject: "haspassword@example.com",
+        displayName: "",
+        inviteLink: null,
+        inviteSent: false,
+      });
+    });
+
+    expect(toastSuccess).toHaveBeenCalledWith("User created");
+    expect(screen.queryByText(/share this invite link/i)).not.toBeInTheDocument();
   });
 });

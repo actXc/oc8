@@ -246,6 +246,17 @@ export function useDeleteRole() {
  *  only ever WIDENS: the backend applies it only when non-empty, so a call
  *  that omits it (e.g. an `allDepartments`-only save) cannot blank out a name
  *  set earlier. `allDepartments` stays tri-state -- omitted leaves it alone. */
+/** The two invite fields `POST /members` adds on top of `RoleAssignee`
+ *  (backend's `MemberDTO.inviteLink`/`inviteSent`) -- set only when the
+ *  request omitted a password, community mode is active, and the member had
+ *  no password already. Widened here rather than added to `RoleAssignee`
+ *  itself: every OTHER consumer of that type reads a plain member row that
+ *  never carries either field. */
+export type CreatedMember = RoleAssignee & {
+  inviteLink?: string | null;
+  inviteSent?: boolean;
+};
+
 export function useCreateMember() {
   const invalidate = useAuthorityInvalidator();
   return useMutation({
@@ -255,7 +266,7 @@ export function useCreateMember() {
       allDepartments?: boolean;
       password?: string;
     }) =>
-      api.post<RoleAssignee>("/members", {
+      api.post<CreatedMember>("/members", {
         subject: body.subject,
         displayName: body.displayName ?? "",
         ...(body.allDepartments === undefined ? {} : { allDepartments: body.allDepartments }),

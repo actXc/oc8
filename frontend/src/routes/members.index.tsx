@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ChevronRight, Loader2, Plus, Users } from "lucide-react";
+import { Check, ChevronRight, Copy, Loader2, Plus, Users } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Panel, roleLabel } from "@/components/app-shell";
@@ -25,6 +25,12 @@ export function MembersPage() {
   const may = useMay();
   const mayManage = may("member:manage");
   const [createOpen, setCreateOpen] = useState(false);
+  // Set only when `POST /members` minted an invite link that could NOT be
+  // emailed (no mail server configured, or the send failed) -- the fallback
+  // an administrator can still copy and hand to the new person by hand.
+  // `inviteSent` links show a toast instead (see `CreateMemberDialog`) since
+  // there is nothing left for the administrator to do with them.
+  const [pendingInviteLink, setPendingInviteLink] = useState<string | null>(null);
 
   // Gate the whole page on member:manage so only admins can see it. This
   // check runs AFTER every hook above so hook order stays identical across
@@ -81,17 +87,97 @@ export function MembersPage() {
 
       <MembersTable />
 
-      <CreateMemberDialog open={createOpen} onOpenChange={setCreateOpen} />
+      <CreateMemberDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onInviteLinkNotSent={setPendingInviteLink}
+      />
+      <InviteLinkDialog
+        link={pendingInviteLink}
+        onOpenChange={(open) => {
+          if (!open) setPendingInviteLink(null);
+        }}
+      />
     </Panel>
+  );
+}
+
+/** Shown once, right after `CreateMemberDialog` closes, ONLY when an invite
+ *  link was minted but could not be emailed (no mail server configured, or
+ *  the send failed) -- the fallback path the design calls for: a link an
+ *  administrator can copy and hand to the new person by hand. When the link
+ *  WAS emailed, `CreateMemberDialog` shows a plain success toast instead and
+ *  this dialog never opens -- there is nothing left here to act on. */
+function InviteLinkDialog({
+  link,
+  onOpenChange,
+}: {
+  link: string | null;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const t = useT();
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    if (!link) return;
+    await navigator.clipboard.writeText(link);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <Dialog open={link !== null} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t("Share this invite link", "Diesen Einladungslink teilen")}</DialogTitle>
+          <DialogDescription>
+            {t(
+              "No mail server is configured for this instance, so the invite could not be emailed. Copy this link and send it to the new user yourself — it lets them set their own password.",
+              "Für diese Instanz ist kein Mailserver konfiguriert, daher konnte die Einladung nicht per E-Mail versendet werden. Kopieren Sie diesen Link und senden Sie ihn selbst an den neuen Benutzer — damit kann er sein eigenes Passwort festlegen.",
+            )}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex items-center gap-2">
+          <input
+            readOnly
+            value={link ?? ""}
+            onFocus={(e) => e.currentTarget.select()}
+            className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-xs"
+          />
+          <button
+            type="button"
+            onClick={copy}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs font-medium transition hover:bg-accent"
+          >
+            {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+            {copied ? t("Copied", "Kopiert") : t("Copy", "Kopieren")}
+          </button>
+        </div>
+        <div className="flex justify-end">
+          <button
+            onClick={() => onOpenChange(false)}
+            className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground"
+          >
+            {t("Done", "Fertig")}
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 function CreateMemberDialog({
   open,
   onOpenChange,
+  onInviteLinkNotSent,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Called with the invite link when one was minted but NOT emailed, so the
+   *  parent can offer it in a copyable follow-up dialog. Never called for a
+   *  member created with a password, in dev mode, or when the invite WAS
+   *  emailed successfully. */
+  onInviteLinkNotSent: (link: string) => void;
 }) {
   const t = useT();
   const createMember = useCreateMember();
@@ -124,8 +210,18 @@ function CreateMemberDialog({
         ...(localAuth && password.length > 0 ? { password } : {}),
       },
       {
-        onSuccess: () => {
-          toast.success(t("User created", "Benutzer angelegt"));
+        onSuccess: (created) => {
+          if (created.inviteSent) {
+            toast.success(
+              t(
+                "User created — an invite was emailed to them",
+                "Benutzer angelegt — eine Einladung wurde per E-Mail verschickt",
+              ),
+            );
+          } else {
+            toast.success(t("User created", "Benutzer angelegt"));
+            if (created.inviteLink) onInviteLinkNotSent(created.inviteLink);
+          }
           reset();
           onOpenChange(false);
         },
