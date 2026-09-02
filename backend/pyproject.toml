@@ -65,6 +65,7 @@ dependencies = [
     # so this is not an optional nicety: without it those models raise at
     # import time, which is the right way for it to fail.
     "email-validator>=2.2",
+    "tomli-w>=1.2.0",
 ]
 
 [project.scripts]
