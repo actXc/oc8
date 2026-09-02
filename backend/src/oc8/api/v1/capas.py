@@ -93,6 +93,10 @@ class CapaExportPreviewItem(BaseModel):
     folder_name: str
     manifest_toml: str
     warnings: list[str]
+    #: Sibling files the export produced alongside plugin.toml (e.g. a
+    #: skill's `skills/<name>.toml` body) -- relative path -> content. Empty
+    #: for agent/department exports, which have no sibling files of their own.
+    extra_files: dict[str, str] = {}
 
 
 class CapaExportPreviewResponse(BaseModel):
@@ -1247,7 +1251,10 @@ async def export_capas(
         return CapaExportPreviewResponse(
             items=[
                 CapaExportPreviewItem(
-                    folder_name=r.folder_name, manifest_toml=r.manifest_toml, warnings=r.warnings
+                    folder_name=r.folder_name,
+                    manifest_toml=r.manifest_toml,
+                    warnings=r.warnings,
+                    extra_files=r.extra_files,
                 )
                 for r in results
             ],
