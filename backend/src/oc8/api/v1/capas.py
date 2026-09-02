@@ -1191,7 +1191,7 @@ async def export_capas(
     body: CapaExportRequest, db: DbSession, principal: CurrentPrincipal
 ) -> Response | CapaExportPreviewResponse:
     """Render a department/agent/skill selection into capa manifests, either as
-    a JSON preview (`dry_run`) for the export wizard's Vorschau step, or as a
+    a JSON preview (`dry_run`) for the export wizard's Preview step, or as a
     downloadable ZIP -- the same `Manifest`/`build_*_export` pair either way,
     so what the wizard previews is exactly what the ZIP contains."""
     from oc8.capas.export import (
@@ -1244,7 +1244,14 @@ async def export_capas(
             continue
         results.append(exported)
 
-    if errors:
+    # A dry_run preview returns 200 with `errors` populated -- the wizard's
+    # Preview step is the designed inline-error surface (export.py's own
+    # docstring: "the wizard's Preview step must show inline -- never a
+    # silently dropped item") and can only render that if the response
+    # actually reaches the frontend as data. A real (non-dry_run) export
+    # still 422s: there is no ZIP to hand back for a selection that failed
+    # validation, so raising is the only option.
+    if errors and not body.dry_run:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, {"errors": errors})
 
     if body.dry_run:
@@ -1258,7 +1265,7 @@ async def export_capas(
                 )
                 for r in results
             ],
-            errors=[],
+            errors=errors,
         )
 
     data = build_zip(results)

@@ -18,6 +18,7 @@ import { BackupPanel } from "@/components/backup-panel";
 import { CapaExportWizard } from "@/components/capa-export-wizard";
 import { CredentialPicker } from "@/components/credential-picker";
 import { OnboardingWizard } from "@/components/onboarding/onboarding-wizard";
+import { useCan } from "@/lib/governance-hooks";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
@@ -36,6 +37,13 @@ export const Route = createFileRoute("/settings")({
 
 function SettingsPage() {
   const t = useT();
+  const can = useCan();
+  // Same gate the /capas route itself already applies to its manage surface
+  // (`mayManage = can("plugin:manage")`, routes/capas.tsx) -- POST
+  // /capas/export requires the same permission, so a settings:view-only
+  // user could otherwise fill in the whole wizard and only discover they're
+  // blocked at Preview.
+  const mayExportCapas = can("plugin:manage");
   const [setupOpen, setSetupOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   return (
@@ -45,29 +53,31 @@ function SettingsPage() {
         <OrganizationPanel />
         <MailServerSetting />
         <BackupPanel />
-        <Panel className="p-5">
-          <div className="flex items-start gap-3">
-            <div className="grid h-9 w-9 place-items-center rounded-md bg-primary/15 text-primary">
-              <Archive className="h-4 w-4" />
+        {mayExportCapas && (
+          <Panel className="p-5">
+            <div className="flex items-start gap-3">
+              <div className="grid h-9 w-9 place-items-center rounded-md bg-primary/15 text-primary">
+                <Archive className="h-4 w-4" />
+              </div>
+              <div>
+                <h3 className="font-serif text-lg">{t("Capa export", "Capa-Export")}</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {t(
+                    "Package a department or agent you built here into a Capa others can install.",
+                    "Verpacke ein Department oder einen Agenten, den du hier gebaut hast, in eine Capa, die andere installieren können.",
+                  )}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setExportOpen(true)}
+                  className="mt-3 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-panel-hover"
+                >
+                  {t("Open wizard", "Wizard öffnen")}
+                </button>
+              </div>
             </div>
-            <div>
-              <h3 className="font-serif text-lg">{t("Capa export", "Capa-Export")}</h3>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t(
-                  "Package a department or agent you built here into a Capa others can install.",
-                  "Verpacke ein Department oder einen Agenten, den du hier gebaut hast, in eine Capa, die andere installieren können.",
-                )}
-              </p>
-              <button
-                type="button"
-                onClick={() => setExportOpen(true)}
-                className="mt-3 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-panel-hover"
-              >
-                {t("Open wizard", "Wizard öffnen")}
-              </button>
-            </div>
-          </div>
-        </Panel>
+          </Panel>
+        )}
       </div>
       {setupOpen && (
         // The SAME wizard as the first-run /welcome route -- there used to be

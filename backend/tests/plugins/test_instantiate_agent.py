@@ -197,3 +197,37 @@ async def test_instantiate_agent_creates_trigger_when_present(
         assert trigger.cron_expression == "0 9 * * *"
         assert trigger.task_text == "Daily reconciliation"
         assert trigger.enabled is True
+        # A trigger built by hand-constructing a Trigger row (instead of going
+        # through triggers/service.py::create_trigger) never got next_run_at
+        # set -- the scheduler only ever selects `next_run_at <= now`
+        # (triggers/scheduler.py), so a NULL value can never be selected and
+        # the trigger is permanently dead despite existing in the database.
+        assert trigger.next_run_at is not None
+
+
+async def test_instantiate_agent_rejects_an_invalid_cron_trigger(
+    app_session: AppSessionFactory,
+) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as s:
+        dept = m.Department(tenant_id=tenant, name="Finance", frame={})
+        s.add(dept)
+        await s.flush()
+        version = await install_plugin(
+            s,
+            tenant_id=tenant,
+            manifest_data=_agent_template_manifest(
+                trigger={
+                    "kind": "cron",
+                    "cron_expression": "not a cron expression",
+                    "task_text": "Daily reconciliation",
+                }
+            ),
+        )
+        with pytest.raises(PluginError, match="invalid trigger"):
+            await instantiate_agent(
+                s,
+                tenant_id=tenant,
+                version=version,
+                department_id=dept.id,
+            )

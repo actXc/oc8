@@ -187,7 +187,15 @@ async def test_export_dry_run_skill_returns_extra_files(app_session: AppSessionF
             assert "never promise a discount" in extra_contents
 
 
-async def test_export_unknown_item_id_returns_422(app_session: AppSessionFactory) -> None:
+async def test_export_dry_run_unknown_item_id_returns_200_with_inline_error(
+    app_session: AppSessionFactory,
+) -> None:
+    """A dry_run preview returns 200 with `errors` populated, not a 422 --
+    the wizard's Preview step is the designed surface for this
+    (export.py's own docstring: "the wizard's Preview step must show
+    inline -- never a silently dropped item"), and a raised HTTPException
+    reaches the frontend as an opaque JSON-blob error message instead of
+    the structured `errors` list the UI already knows how to render."""
     tenant = uuid.uuid4()
     async with app_session(tenant):
         pass  # tenant exists in RLS terms even with zero rows
@@ -207,6 +215,39 @@ async def test_export_unknown_item_id_returns_422(app_session: AppSessionFactory
                         }
                     ],
                     "dry_run": True,
+                },
+                headers=_headers(tenant),
+            )
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["items"] == []
+            assert len(body["errors"]) == 1
+            assert "not found" in body["errors"][0]
+
+
+async def test_export_real_unknown_item_id_returns_422(app_session: AppSessionFactory) -> None:
+    """The non-dry_run (real ZIP) branch still 422s on a selection error --
+    there's no ZIP to hand back for a failed selection, so raising is the
+    only option there."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant):
+        pass  # tenant exists in RLS terms even with zero rows
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.post(
+                "/api/v1/capas/export",
+                json={
+                    "items": [
+                        {
+                            "kind": "department",
+                            "id": str(uuid.uuid4()),
+                            "name": "ghost",
+                            "version": "1.0.0",
+                            "summary": "",
+                        }
+                    ],
+                    "dry_run": False,
                 },
                 headers=_headers(tenant),
             )

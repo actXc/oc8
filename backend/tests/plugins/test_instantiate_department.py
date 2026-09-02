@@ -169,6 +169,52 @@ async def test_instantiate_creates_skill_assignment_for_existing_local_skill(
         assert assignment.enabled is True
 
 
+async def test_instantiate_handles_a_duplicate_skill_name_without_crashing(
+    app_session: AppSessionFactory,
+) -> None:
+    """`Skill.name` has no unique constraint on `(tenant_id, name)` -- an
+    archived skill sharing a name with a live one is a real (if unlikely)
+    shape a hand-edited or re-exported capa could trigger. Before this fix,
+    `_assign_named_skills` used `scalar_one_or_none()`, which raises
+    `MultipleResultsFound` (not a `PluginError`) on two matching rows and
+    would 500 the whole department instantiate rather than just skip or
+    bind cleanly."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as s:
+        archived = m.Skill(tenant_id=tenant, name="crm", origin="local")
+        s.add(archived)
+        await s.flush()
+        archived.deleted_at = archived.created_at
+        await s.flush()
+
+        skill = m.Skill(tenant_id=tenant, name="crm", origin="local")
+        s.add(skill)
+        await s.flush()
+        skill_version = m.SkillVersion(
+            tenant_id=tenant,
+            skill_id=skill.id,
+            semver="1.0.0",
+            definition={"schema_version": 1},
+            artifact_hash=b"x",
+        )
+        s.add(skill_version)
+        await s.flush()
+        skill.current_version_id = skill_version.id
+        await s.flush()
+
+        version = _version(
+            agents=[{"name": "Head of Sales", "is_team_lead": True, "skills": ["crm"]}]
+        )
+        dept = await instantiate_department(s, tenant_id=tenant, version=version, name="Sales")
+        agent = (
+            await s.execute(select(m.Agent).where(m.Agent.department_id == dept.id))
+        ).scalar_one()
+        assignment = (
+            await s.execute(select(m.SkillAssignment).where(m.SkillAssignment.agent_id == agent.id))
+        ).scalar_one()
+        assert assignment.skill_version_id == skill_version.id
+
+
 async def test_instantiate_skips_missing_skill_silently(app_session: AppSessionFactory) -> None:
     """A named skill that doesn't (yet) exist in the target tenant -- e.g. its
     sibling `skill` capa in the ZIP hasn't been installed yet -- must not

@@ -53,7 +53,7 @@ _NON_PORTABLE_POLICY_KEYS = ("connection_id", "default_connection_id")
 
 
 class ExportValidationError(ValueError):
-    """A selection-level problem the wizard's Vorschau step must show
+    """A selection-level problem the wizard's Preview step must show
     inline -- never a silently dropped item."""
 
 

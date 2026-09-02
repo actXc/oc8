@@ -22,8 +22,9 @@ from oc8.models import (
     MemoryStore,
     Skill,
     SkillAssignment,
-    Trigger,
 )
+from oc8.triggers.service import InvalidTriggerConfig
+from oc8.triggers.service import create_trigger as create_trigger_row
 
 __all__ = [
     "CoreCompatError",
@@ -141,13 +142,35 @@ async def _assign_named_skills(
     `Agent.definition["skills"]`. A name with no matching LOCAL Skill row in
     this tenant yet (its sibling `skill` capa may not be installed) is skipped,
     not raised -- same "malformed/incomplete data does not block the rest of
-    the install" convention `materialise.py` already uses."""
+    the install" convention `materialise.py` already uses.
+
+    `Skill.name` has no unique constraint on `(tenant_id, name)` -- an
+    archived skill sharing a name with a live one is a real (if unlikely)
+    shape, and `scalar_one_or_none()` raises `MultipleResultsFound` on it,
+    which is not a `PluginError` and would 500 the whole install. Note this
+    intentionally does NOT filter by `origin`: a department/agent template's
+    sibling `skill` capa materialises its Skill row with `origin="store"`
+    (materialise.py), not "local" -- the export side's "only local skills
+    are exportable" rule is a property of the SOURCE tenant's data, not a
+    constraint on what this install-side lookup may bind to in the TARGET
+    tenant. Filtering to live rows only and taking the first deterministically
+    (oldest wins) avoids the crash without narrowing which row it can find."""
     for name in skill_names:
         skill = (
-            await db.execute(
-                select(Skill).where(Skill.tenant_id == tenant_id, Skill.name == name)
+            (
+                await db.execute(
+                    select(Skill)
+                    .where(
+                        Skill.tenant_id == tenant_id,
+                        Skill.name == name,
+                        Skill.deleted_at.is_(None),
+                    )
+                    .order_by(Skill.created_at)
+                )
             )
-        ).scalar_one_or_none()
+            .scalars()
+            .first()
+        )
         if skill is None or skill.current_version_id is None:
             continue
         db.add(
@@ -167,19 +190,29 @@ async def _create_trigger_if_present(
     agent_id: uuid.UUID,
     trigger: dict[str, object] | None,
 ) -> None:
+    """Goes through `triggers/service.py::create_trigger` -- the single funnel
+    every trigger creation is required to go through (see that function's own
+    docstring) -- rather than constructing a `Trigger` row directly. A
+    hand-built row never got `next_run_at` set, and the scheduler only ever
+    selects `next_run_at <= now` (triggers/scheduler.py); a NULL there can
+    never satisfy that comparison, so every trigger installed from a capa
+    template was silently, permanently dead. Routing through `create_trigger`
+    also gets cron-expression validation (a hand-edited manifest's
+    `cron_expression` is an unvalidated `str` at the `TemplateAgent` schema
+    level) and startup jitter for free."""
     if not trigger:
         return
-    db.add(
-        Trigger(
+    try:
+        await create_trigger_row(
+            db,
             tenant_id=tenant_id,
             agent_id=agent_id,
             kind="cron",
             task_text=str(trigger.get("task_text", "")),
             cron_expression=str(trigger.get("cron_expression", "")),
-            enabled=True,
         )
-    )
-    await db.flush()
+    except InvalidTriggerConfig as exc:
+        raise PluginError(f"invalid trigger in template: {exc}") from exc
 
 
 async def instantiate_agent(

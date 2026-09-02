@@ -199,6 +199,14 @@ async def test_export_unzip_install_round_trip(
         ).scalar_one()
         assert new_trigger.cron_expression == "0 8 * * 1-5"
         assert new_trigger.task_text == "Tagesreport erstellen"
+        # A hand-built Trigger row (bypassing triggers/service.py::create_trigger)
+        # never got next_run_at set -- the scheduler only ever selects
+        # `next_run_at <= now` (triggers/scheduler.py), so a NULL there can
+        # never be selected and the trigger would be permanently dead despite
+        # existing in the database. Asserting it's set is the only way this
+        # test would have caught that -- it only checked the two content
+        # fields before.
+        assert new_trigger.next_run_at is not None
 
         # Skill assignment round-tripped (Task 1's fix).
         new_skill = (
