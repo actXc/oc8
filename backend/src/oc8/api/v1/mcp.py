@@ -266,6 +266,31 @@ async def update_connection(
     return _to_dto(conn)
 
 
+@router.delete(
+    "/mcp/connections/{conn_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_permission(perm(INTEGRATION, MANAGE)))],
+)
+async def delete_connection(
+    conn_id: uuid.UUID,
+    db: DbSession,
+    principal: CurrentPrincipal,
+) -> None:
+    """Drop one connection row -- e.g. a stale duplicate left behind by a
+    failed setup attempt (`configure_plugin`, api/v1/capas.py, makes a new
+    row per distinct department target rather than overwriting one that
+    already exists). Safe to delete outright: an Agent/Department narrowing
+    references a connection by NAME, not by this row's id (capas/export.py's
+    own docstring confirms the convention), so nothing holds a foreign key to
+    it -- at worst a stale name reference resolves to "no connection", the
+    same already-handled case as a name that was never configured."""
+    conn = await db.get(m.McpConnection, conn_id)
+    if conn is None or conn.tenant_id != principal.tenant_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "connection not found")
+    await db.delete(conn)
+    await db.commit()
+
+
 @router.post(
     "/mcp/connections/{conn_id}/test",
     response_model=McpConnectionDTO,
