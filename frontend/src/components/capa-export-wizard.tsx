@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Loader2 } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Loader2, Search } from "lucide-react";
 import { toast } from "sonner";
 import { StepDots } from "@/components/onboarding/step-dots";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -323,6 +323,70 @@ function SelectableRow({
   );
 }
 
+/** One section of the Selection step: a header with a live match count, a
+ * fixed-height scroll container (so a tenant with 100+ agents or 200+
+ * skills can't blow the wizard's own height past `max-h-[55vh]`), and two
+ * distinct empty states -- nothing exists yet vs. nothing matches the
+ * current search, since those call for different copy. */
+function SelectionSection({
+  title,
+  items,
+  query,
+  emptyMessage,
+  idPrefix,
+  selectedIds,
+  onCheckedChange,
+}: {
+  title: string;
+  items: { id: string; name: string }[];
+  query: string;
+  emptyMessage: string;
+  idPrefix: string;
+  selectedIds: Set<string>;
+  onCheckedChange: (id: string, checked: boolean) => void;
+}) {
+  const t = useT();
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter((item) => item.name.toLowerCase().includes(q));
+  }, [items, query]);
+
+  return (
+    <section>
+      <p className="text-sm font-medium">
+        {title}
+        {items.length > 0 && (
+          <span className="ml-1.5 font-normal text-muted-foreground">
+            (
+            {filtered.length === items.length ? items.length : `${filtered.length}/${items.length}`}
+            )
+          </span>
+        )}
+      </p>
+      {items.length === 0 && <p className="mt-1 text-xs text-muted-foreground">{emptyMessage}</p>}
+      {items.length > 0 && filtered.length === 0 && (
+        <p className="mt-1 text-xs text-muted-foreground">
+          {t(`No matches for "${query}".`, `Keine Treffer für „${query}".`)}
+        </p>
+      )}
+      {filtered.length > 0 && (
+        <div className="mt-2 max-h-56 space-y-1.5 overflow-y-auto pr-1">
+          {filtered.map((item) => (
+            <SelectableRow
+              key={item.id}
+              id={`${idPrefix}-${item.id}`}
+              label={item.name}
+              checked={selectedIds.has(item.id)}
+              onCheckedChange={(checked) => onCheckedChange(item.id, checked)}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function SelectionStep({
   departments,
   selectableAgents,
@@ -337,73 +401,65 @@ function SelectionStep({
   onToggle: (kind: keyof Selection, id: string, checked: boolean) => void;
 }) {
   const t = useT();
+  const [query, setQuery] = useState("");
+  // 100+ agents / 200+ skills is a real tenant shape this wizard has to
+  // stay usable for, not just a handful of test fixtures -- one search box
+  // narrows all three sections at once instead of forcing a scroll hunt
+  // through each.
+  const totalItems = departments.length + selectableAgents.length + localSkills.length;
   return (
     <div className="space-y-5">
-      <section>
-        <p className="text-sm font-medium">{t("Departments", "Departments")}</p>
-        {departments.length === 0 && (
-          <p className="mt-1 text-xs text-muted-foreground">
-            {t("No departments yet.", "Noch keine Departments.")}
-          </p>
-        )}
-        <div className="mt-2 space-y-1.5">
-          {departments.map((dept) => (
-            <SelectableRow
-              key={dept.id}
-              id={`export-department-${dept.id}`}
-              label={dept.name}
-              checked={selection.departmentIds.has(dept.id)}
-              onCheckedChange={(checked) => onToggle("departmentIds", dept.id, checked)}
-            />
-          ))}
-        </div>
-      </section>
-
-      <section>
-        <p className="text-sm font-medium">{t("Standalone agents", "Einzelne Agenten")}</p>
-        {selectableAgents.length === 0 && (
-          <p className="mt-1 text-xs text-muted-foreground">
-            {t(
-              "No agents outside a selected department.",
-              "Keine Agenten außerhalb eines ausgewählten Departments.",
+      {totalItems > 0 && (
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            placeholder={t(
+              "Search departments, agents, skills…",
+              "Departments, Agenten, Skills durchsuchen…",
             )}
-          </p>
-        )}
-        <div className="mt-2 space-y-1.5">
-          {selectableAgents.map((agent) => (
-            <SelectableRow
-              key={agent.id}
-              id={`export-agent-${agent.id}`}
-              label={agent.name}
-              checked={selection.agentIds.has(agent.id)}
-              onCheckedChange={(checked) => onToggle("agentIds", agent.id, checked)}
-            />
-          ))}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="w-full rounded-md border border-border bg-panel py-1.5 pl-8 pr-2 text-sm"
+          />
         </div>
-      </section>
+      )}
 
-      <section>
-        <p className="text-sm font-medium">{t("Skills", "Skills")}</p>
-        {localSkills.length === 0 && (
-          <p className="mt-1 text-xs text-muted-foreground">
-            {t(
-              "No locally authored skills to export.",
-              "Keine lokal erstellten Skills zum Exportieren.",
-            )}
-          </p>
+      <SelectionSection
+        title={t("Departments", "Departments")}
+        items={departments}
+        query={query}
+        emptyMessage={t("No departments yet.", "Noch keine Departments.")}
+        idPrefix="export-department"
+        selectedIds={selection.departmentIds}
+        onCheckedChange={(id, checked) => onToggle("departmentIds", id, checked)}
+      />
+
+      <SelectionSection
+        title={t("Standalone agents", "Einzelne Agenten")}
+        items={selectableAgents}
+        query={query}
+        emptyMessage={t(
+          "No agents outside a selected department.",
+          "Keine Agenten außerhalb eines ausgewählten Departments.",
         )}
-        <div className="mt-2 space-y-1.5">
-          {localSkills.map((skill) => (
-            <SelectableRow
-              key={skill.id}
-              id={`export-skill-${skill.id}`}
-              label={skill.name}
-              checked={selection.skillIds.has(skill.id)}
-              onCheckedChange={(checked) => onToggle("skillIds", skill.id, checked)}
-            />
-          ))}
-        </div>
-      </section>
+        idPrefix="export-agent"
+        selectedIds={selection.agentIds}
+        onCheckedChange={(id, checked) => onToggle("agentIds", id, checked)}
+      />
+
+      <SelectionSection
+        title={t("Skills", "Skills")}
+        items={localSkills}
+        query={query}
+        emptyMessage={t(
+          "No locally authored skills to export.",
+          "Keine lokal erstellten Skills zum Exportieren.",
+        )}
+        idPrefix="export-skill"
+        selectedIds={selection.skillIds}
+        onCheckedChange={(id, checked) => onToggle("skillIds", id, checked)}
+      />
     </div>
   );
 }

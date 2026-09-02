@@ -108,6 +108,22 @@ describe("CapaExportWizard", () => {
     expect(screen.queryByText("Store Skill")).not.toBeInTheDocument();
   });
 
+  it("filters all three sections by the search box, keeping only name matches", () => {
+    renderWizard();
+
+    fireEvent.change(screen.getByPlaceholderText("Search departments, agents, skills…"), {
+      target: { value: "ada" },
+    });
+
+    // Only "Ada" contains "ada" (case-insensitive) -- everything else in
+    // every section, including the two other checkboxes visible before
+    // filtering, drops out.
+    expect(screen.getByRole("checkbox", { name: "Ada" })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Sales" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Bob" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Local Skill" })).not.toBeInTheDocument();
+  });
+
   it("calls the preview mutation with the built items and renders warnings and extra_files from the result", () => {
     renderWizard();
 

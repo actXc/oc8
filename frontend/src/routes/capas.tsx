@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import {
   AlertTriangle,
+  Archive,
   BadgeCheck,
   Bot,
   Box,
@@ -18,10 +19,12 @@ import {
   ShieldCheck,
   Sparkles,
   UserRound,
+  X,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Panel } from "@/components/app-shell";
+import { CapaExportWizard } from "@/components/capa-export-wizard";
 import { DetailSheet } from "@/components/detail-sheet";
 import { ListToolbar, groupItems, type ListQueryState } from "@/components/list-toolbar";
 import {
@@ -209,6 +212,7 @@ export function CapasPage() {
   const [pending, setPending] = useState<string | null>(null);
   const [setupPlugin, setSetupPlugin] = useState<DiscoveredCapa | null>(null);
   const [detailPlugin, setDetailPlugin] = useState<DiscoveredCapa | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
 
   // The Installed/Available tabs are an ADDITIONAL filter layer on top of
   // the toolbar's search/type/group -- they slice whatever page the toolbar
@@ -324,19 +328,31 @@ export function CapasPage() {
   return (
     <div className="space-y-6">
       <Panel className="p-5">
-        <header className="flex items-start gap-3">
-          <div className="grid h-9 w-9 place-items-center rounded-md bg-primary/15 text-primary">
-            <Layers className="h-4 w-4" />
+        <header className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <div className="grid h-9 w-9 place-items-center rounded-md bg-primary/15 text-primary">
+              <Layers className="h-4 w-4" />
+            </div>
+            <div>
+              <div className="font-serif text-lg leading-tight">{t("Capas", "Capas")}</div>
+              <p className="mt-0.5 max-w-2xl text-xs text-muted-foreground">
+                {t(
+                  "A Capa is anything installable in oc8 — an agent template, an MCP tool pack, a guardrail set, a department template, a runtime, or a bundle of several.",
+                  "Eine Capa ist alles Installierbare in oc8 — eine Agentenvorlage, ein MCP-Tool-Paket, Guardrails, eine Abteilungsvorlage, eine Runtime oder ein Bündel davon.",
+                )}
+              </p>
+            </div>
           </div>
-          <div>
-            <div className="font-serif text-lg leading-tight">{t("Capas", "Capas")}</div>
-            <p className="mt-0.5 max-w-2xl text-xs text-muted-foreground">
-              {t(
-                "A Capa is anything installable in oc8 — an agent template, an MCP tool pack, a guardrail set, a department template, a runtime, or a bundle of several.",
-                "Eine Capa ist alles Installierbare in oc8 — eine Agentenvorlage, ein MCP-Tool-Paket, Guardrails, eine Abteilungsvorlage, eine Runtime oder ein Bündel davon.",
-              )}
-            </p>
-          </div>
+          {mayManage && (
+            <button
+              type="button"
+              onClick={() => setExportOpen(true)}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-background/30 px-3 py-1.5 text-sm text-foreground transition hover:border-primary/50"
+            >
+              <Archive className="h-3.5 w-3.5" />
+              {t("Export as Capa", "Als Capa exportieren")}
+            </button>
+          )}
         </header>
       </Panel>
 
@@ -549,6 +565,30 @@ export function CapasPage() {
       )}
 
       {setupPlugin && <CapaSetupDialog plugin={setupPlugin} onClose={() => setSetupPlugin(null)} />}
+
+      {exportOpen && (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4"
+          onClick={() => setExportOpen(false)}
+        >
+          <div
+            className="w-full max-w-2xl rounded-xl border border-border bg-panel p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="font-serif text-lg">{t("Export as Capa", "Als Capa exportieren")}</h2>
+              <button
+                type="button"
+                onClick={() => setExportOpen(false)}
+                className="rounded-md p-1 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <CapaExportWizard onClose={() => setExportOpen(false)} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
