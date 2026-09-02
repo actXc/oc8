@@ -13,3 +13,11 @@ ODOO_USER = "username"
 
 [secret_env_fields]
 ODOO_PASSWORD = "system"
+# Same value under a second env var name, same reasoning as
+# tool_pack.toml's `credential_env_fields` mapping for the login-picker path:
+# ODOO_API_KEY selects mcp-server-odoo's correct API-key auth; ODOO_PASSWORD
+# alone makes it try an interactive /web/session/authenticate login instead,
+# which Odoo refuses for an API key. Without this, "Save & test" via the
+# Capa setup dialog launched the bridge with only ODOO_PASSWORD set, so a
+# correct API key still failed with what looked like "wrong credentials".
+ODOO_API_KEY = "system"
