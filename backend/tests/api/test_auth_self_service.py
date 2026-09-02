@@ -942,6 +942,40 @@ async def test_every_broken_confirmation_link_says_the_same_sentence(
         assert [t.used_at for t in reset] == [None]
 
 
+async def test_an_invite_link_cannot_be_used_to_confirm_an_email_change(
+    app_session: AppSessionFactory,
+) -> None:
+    """`_redeem_token` now accepts a tuple of purposes for `reset_password`
+    (`password_reset` OR `invite`), because both mints authorize the same
+    action. `confirm_email_change` was NOT touched -- it still calls
+    `_redeem_token(purpose="email_change")`, a plain string -- so an
+    `invite`-purpose token (minted by `POST /members`, see
+    `test_member_administration.py`) must still fail here exactly like the
+    `password_reset` case in `test_every_broken_confirmation_link_says_the_same_sentence`
+    above. This is the regression guard the review asked for: a future edit
+    that widens `confirm_email_change`'s call to also accept `invite` --
+    copy-pasting the tuple pattern without thinking -- would fail this test.
+    """
+    tenant = uuid.uuid4()
+    email = "newhire@example.com"
+    await _sole_organization(app_session, tenant)
+    async with app_session(tenant) as db:
+        member = _member(tenant, email, password=None)
+        db.add(member)
+        await db.flush()
+        _mint_token(db, tenant, member.id, purpose="invite", plaintext="invite-abc")
+
+    async with _http() as http:
+        r = await http.post("/api/v1/auth/email/confirm", json={"token": "invite-abc"})
+    assert r.status_code == 400, r.text
+    assert r.json() == {"detail": INVALID_LINK_MESSAGE}
+
+    async with app_session(tenant) as db:
+        # A refused lookup must not consume the link it refused.
+        invite = [t for t in await _tokens(db, tenant) if t.purpose == "invite"]
+        assert [t.used_at for t in invite] == [None]
+
+
 async def test_confirming_an_address_somebody_else_claimed_meanwhile_conflicts(
     app_session: AppSessionFactory,
 ) -> None:

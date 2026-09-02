@@ -20,7 +20,7 @@ import secrets
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from oc8 import models as m
@@ -210,6 +210,23 @@ async def create_member(
             principal=principal,
         )
     elif not get_settings().is_dev and member.password_hash is None:
+        # A re-invite (this same branch, reached again for a subject whose
+        # first link leaked, went to the wrong inbox, or simply expired
+        # unused) must not leave that earlier link live for the rest of its
+        # 7-day `INVITE_TOKEN_TTL` -- mirrors `forgot_password`'s exact
+        # UPDATE-then-mint pattern in `auth.py` (spend every prior unused row
+        # for this member/purpose before writing the new one), just with
+        # `invite` in place of `password_reset`.
+        await db.execute(
+            update(m.AccountVerificationToken)
+            .where(
+                m.AccountVerificationToken.tenant_id == principal.tenant_id,
+                m.AccountVerificationToken.member_id == member.id,
+                m.AccountVerificationToken.purpose == "invite",
+                m.AccountVerificationToken.used_at.is_(None),
+            )
+            .values(used_at=dt.datetime.now(tz=dt.UTC))
+        )
         invite_token = secrets.token_urlsafe(32)
         db.add(
             m.AccountVerificationToken(

@@ -518,6 +518,79 @@ async def test_creating_a_passwordless_member_without_a_mail_server_still_return
         assert token.used_at is None
 
 
+async def test_re_inviting_a_passwordless_member_revokes_the_earlier_link(
+    app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A leaked or misdirected invite link would otherwise stay live for the
+    rest of `INVITE_TOKEN_TTL` (7 days) -- much longer than `password_reset`'s
+    1-hour credential lifetime, so the gap matters. Re-inviting is just
+    `POST /members` again for the same still-passwordless subject: gated on
+    `member.password_hash is None`, not `created` (see the docstring above
+    `_community`), so the second call reaches the exact same invite-mint
+    branch and must spend the FIRST link before minting the second -- mirrors
+    `forgot_password`'s UPDATE-then-mint pattern in `auth.py`.
+    """
+    _community(monkeypatch)
+    office = await _office(app_session)
+    admin = _headers(office.tenant, "boss", "org_admin")
+
+    async with _http() as http:
+        first = await http.post(
+            "/api/v1/members",
+            json={"subject": "reinvited@example.com", "displayName": "Reinvited"},
+            headers=admin,
+        )
+        assert first.status_code == 201, first.text
+        first_link = first.json()["inviteLink"]
+        assert first_link
+
+        second = await http.post(
+            "/api/v1/members",
+            json={"subject": "reinvited@example.com", "displayName": "Reinvited"},
+            headers=admin,
+        )
+    # 200, not 201 -- `upsert_member` merged into the row the first call
+    # created, which is exactly what puts this through the same `elif`
+    # branch rather than some separate re-invite path.
+    assert second.status_code == 200, second.text
+    second_link = second.json()["inviteLink"]
+    assert second_link and second_link != first_link
+
+    async with app_session(office.tenant) as db:
+        member = (
+            await db.execute(
+                select(m.OrgMember).where(
+                    m.OrgMember.tenant_id == office.tenant,
+                    m.OrgMember.subject == "reinvited@example.com",
+                )
+            )
+        ).scalar_one()
+        tokens = (
+            (
+                await db.execute(
+                    select(m.AccountVerificationToken)
+                    .where(
+                        m.AccountVerificationToken.tenant_id == office.tenant,
+                        m.AccountVerificationToken.member_id == member.id,
+                        m.AccountVerificationToken.purpose == "invite",
+                    )
+                    .order_by(m.AccountVerificationToken.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(tokens) == 2, tokens
+    assert tokens[0].used_at is not None, "the superseded first link must be spent"
+    assert tokens[1].used_at is None, "the current second link must still be live"
+    # `_redeem_token`'s WHERE clause matches on `used_at IS NULL`, so a spent
+    # row here is already provably dead to `/auth/password/reset` -- that
+    # redemption door itself (both purposes, the generic 400 for a spent
+    # token) is exercised end-to-end in `test_auth_self_service.py`, which
+    # this file does not duplicate since it needs a singleton `Organization`
+    # this file's `_office` fixture does not set up.
+
+
 async def test_creating_a_member_with_a_password_mints_no_invite(
     app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
