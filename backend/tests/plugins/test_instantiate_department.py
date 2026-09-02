@@ -102,3 +102,88 @@ async def test_duplicate_name_and_bad_reports_to_rejected(
                 name="X",
                 version=_version(agents=[{"name": "A", "reports_to": "Ghost"}]),
             )
+
+
+async def test_instantiate_creates_trigger_when_agent_has_one(
+    app_session: AppSessionFactory,
+) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as s:
+        version = _version(
+            agents=[
+                {
+                    "name": "Nora",
+                    "is_team_lead": True,
+                    "trigger": {
+                        "kind": "cron",
+                        "cron_expression": "0 8 * * 1-5",
+                        "task_text": "Tagesreport erstellen",
+                    },
+                },
+            ]
+        )
+        dept = await instantiate_department(s, tenant_id=tenant, version=version, name="Sales")
+        agent = (
+            await s.execute(select(m.Agent).where(m.Agent.department_id == dept.id))
+        ).scalar_one()
+        trigger = (
+            await s.execute(select(m.Trigger).where(m.Trigger.agent_id == agent.id))
+        ).scalar_one()
+        assert trigger.kind == "cron"
+        assert trigger.cron_expression == "0 8 * * 1-5"
+        assert trigger.task_text == "Tagesreport erstellen"
+        assert trigger.enabled is True
+
+
+async def test_instantiate_creates_skill_assignment_for_existing_local_skill(
+    app_session: AppSessionFactory,
+) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as s:
+        skill = m.Skill(tenant_id=tenant, name="crm", origin="local")
+        s.add(skill)
+        await s.flush()
+        skill_version = m.SkillVersion(
+            tenant_id=tenant,
+            skill_id=skill.id,
+            semver="1.0.0",
+            definition={"schema_version": 1},
+            artifact_hash=b"x",
+        )
+        s.add(skill_version)
+        await s.flush()
+        skill.current_version_id = skill_version.id
+        await s.flush()
+
+        version = _version(
+            agents=[{"name": "Head of Sales", "is_team_lead": True, "skills": ["crm"]}]
+        )
+        dept = await instantiate_department(s, tenant_id=tenant, version=version, name="Sales")
+        agent = (
+            await s.execute(select(m.Agent).where(m.Agent.department_id == dept.id))
+        ).scalar_one()
+        assignment = (
+            await s.execute(select(m.SkillAssignment).where(m.SkillAssignment.agent_id == agent.id))
+        ).scalar_one()
+        assert assignment.skill_version_id == skill_version.id
+        assert assignment.enabled is True
+
+
+async def test_instantiate_skips_missing_skill_silently(app_session: AppSessionFactory) -> None:
+    """A named skill that doesn't (yet) exist in the target tenant -- e.g. its
+    sibling `skill` capa in the ZIP hasn't been installed yet -- must not
+    fail the whole department instantiate. Matches materialise.py's own
+    "malformed data is logged and skipped, not raised" convention."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as s:
+        version = _version(
+            agents=[{"name": "Head of Sales", "is_team_lead": True, "skills": ["nonexistent"]}]
+        )
+        dept = await instantiate_department(s, tenant_id=tenant, version=version, name="Sales")
+        agent = (
+            await s.execute(select(m.Agent).where(m.Agent.department_id == dept.id))
+        ).scalar_one()
+        assignments = (
+            await s.execute(select(m.SkillAssignment).where(m.SkillAssignment.agent_id == agent.id))
+        ).scalars().all()
+        assert assignments == []

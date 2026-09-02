@@ -14,7 +14,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from oc8.capas.manifest import Manifest, ManifestError, parse_manifest
 from oc8.capas.registry import enabled_capability_registry
 from oc8.constants import CORE_VERSION
-from oc8.models import Agent, Capa, CapaVersion, Department, MemoryStore
+from oc8.models import (
+    Agent,
+    Capa,
+    CapaVersion,
+    Department,
+    MemoryStore,
+    Skill,
+    SkillAssignment,
+    Trigger,
+)
 
 __all__ = [
     "CoreCompatError",
@@ -123,6 +132,56 @@ async def install_plugin(
     return version
 
 
+async def _assign_named_skills(
+    db: AsyncSession, *, tenant_id: uuid.UUID, agent_id: uuid.UUID, skill_names: list[str]
+) -> None:
+    """Turn an agent template's `skills` name list into real `SkillAssignment`
+    rows -- the read side of the runtime's own skill resolution
+    (`skills/runtime.py`), which only ever looks at `SkillAssignment`, never at
+    `Agent.definition["skills"]`. A name with no matching LOCAL Skill row in
+    this tenant yet (its sibling `skill` capa may not be installed) is skipped,
+    not raised -- same "malformed/incomplete data does not block the rest of
+    the install" convention `materialise.py` already uses."""
+    for name in skill_names:
+        skill = (
+            await db.execute(
+                select(Skill).where(Skill.tenant_id == tenant_id, Skill.name == name)
+            )
+        ).scalar_one_or_none()
+        if skill is None or skill.current_version_id is None:
+            continue
+        db.add(
+            SkillAssignment(
+                tenant_id=tenant_id,
+                agent_id=agent_id,
+                skill_version_id=skill.current_version_id,
+            )
+        )
+    await db.flush()
+
+
+async def _create_trigger_if_present(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    agent_id: uuid.UUID,
+    trigger: dict[str, object] | None,
+) -> None:
+    if not trigger:
+        return
+    db.add(
+        Trigger(
+            tenant_id=tenant_id,
+            agent_id=agent_id,
+            kind="cron",
+            task_text=str(trigger.get("task_text", "")),
+            cron_expression=str(trigger.get("cron_expression", "")),
+            enabled=True,
+        )
+    )
+    await db.flush()
+
+
 async def instantiate_agent(
     db: AsyncSession,
     *,
@@ -159,6 +218,12 @@ async def instantiate_agent(
     await db.flush()
     db.add(MemoryStore(tenant_id=tenant_id, tier="agent", owner_id=agent.id))
     await db.flush()
+    await _assign_named_skills(
+        db, tenant_id=tenant_id, agent_id=agent.id, skill_names=list(spec.get("skills") or [])
+    )
+    await _create_trigger_if_present(
+        db, tenant_id=tenant_id, agent_id=agent.id, trigger=spec.get("trigger")
+    )
     return agent
 
 
@@ -217,6 +282,12 @@ async def instantiate_department(
         db.add(agent)
         await db.flush()
         db.add(MemoryStore(tenant_id=tenant_id, tier="agent", owner_id=agent.id))
+        await _assign_named_skills(
+            db, tenant_id=tenant_id, agent_id=agent.id, skill_names=list(a.get("skills") or [])
+        )
+        await _create_trigger_if_present(
+            db, tenant_id=tenant_id, agent_id=agent.id, trigger=a.get("trigger")
+        )
         if lead_id is None and agent.is_team_lead:
             lead_id = agent.id
 

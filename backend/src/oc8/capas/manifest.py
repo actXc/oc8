@@ -83,6 +83,18 @@ class SandboxManifest(BaseModel):
     services: list[str] = []
 
 
+class TemplateAgentTrigger(BaseModel):
+    """A cron schedule an agent template ships. The ONLY trigger kind a
+    template may declare -- a webhook trigger's token is a secret and an
+    event trigger names a source that may not exist in the target tenant,
+    so neither survives an export/install round trip (design's Non-Goals)."""
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["cron"] = "cron"
+    cron_expression: str
+    task_text: str
+
+
 class TemplateAgent(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str
@@ -96,6 +108,10 @@ class TemplateAgent(BaseModel):
     # Per-agent step budget (0 = framework default). Lets an agent plugin give a
     # long, multi-record workflow more room without touching the core.
     max_steps: int = 0
+    # Per-agent cron schedule a template ships (Capa-Exporter design,
+    # Component 3). None = no trigger, the same as every pre-existing
+    # manifest that predates this field.
+    trigger: TemplateAgentTrigger | None = None
 
 
 class DepartmentTemplateSpec(BaseModel):

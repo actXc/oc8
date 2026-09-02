@@ -163,3 +163,37 @@ async def test_legacy_thin_agent_template_still_instantiates(
         assert agent.name == "legacy.mod"
         assert agent.mission == ""
         assert agent.definition["plugin"] == "legacy.mod"
+
+
+async def test_instantiate_agent_creates_trigger_when_present(
+    app_session: AppSessionFactory,
+) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as s:
+        dept = m.Department(tenant_id=tenant, name="Finance", frame={})
+        s.add(dept)
+        await s.flush()
+        version = await install_plugin(
+            s,
+            tenant_id=tenant,
+            manifest_data=_agent_template_manifest(
+                trigger={
+                    "kind": "cron",
+                    "cron_expression": "0 9 * * *",
+                    "task_text": "Daily reconciliation",
+                }
+            ),
+        )
+        agent = await instantiate_agent(
+            s,
+            tenant_id=tenant,
+            version=version,
+            department_id=dept.id,
+        )
+        trigger = (
+            await s.execute(select(m.Trigger).where(m.Trigger.agent_id == agent.id))
+        ).scalar_one()
+        assert trigger.kind == "cron"
+        assert trigger.cron_expression == "0 9 * * *"
+        assert trigger.task_text == "Daily reconciliation"
+        assert trigger.enabled is True
