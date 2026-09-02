@@ -134,18 +134,30 @@ def _sanitize_policy(key: str, policy: object, warnings: list[str]) -> object:
     can reach a manifest -- a connection id is a row in THIS tenant's own
     `mcp_connection` table, meaningless (and a leak) in another tenant. The
     rest of the policy (rights, approval settings, `only`) is portable and
-    kept as-is."""
+    kept as-is.
+
+    Also drops any key whose value is `None` (e.g. an unset `approval_eur`
+    or `only`, per `ToolPolicy.to_json()`, authz/pdp.py:107-109) -- TOML has
+    no null literal, so a raw `None` surviving into the manifest crashes
+    `tomli_w.dumps` (`frame`/`narrowing` are untyped `dict[str, Any]` in
+    manifest.py, so pydantic's `exclude_none` on the outer `Manifest` never
+    reaches into them). `ToolPolicy.from_json()` reads every field via
+    `data.get(...)`, so a missing key and an explicit `null` are the same
+    value on install -- dropping the key changes nothing but the render."""
     if not isinstance(policy, dict):
         return policy
     dropped = [k for k in _NON_PORTABLE_POLICY_KEYS if policy.get(k)]
-    if not dropped:
-        return policy
-    warnings.append(
-        f"tool grant '{key}' pins a specific connection login ({', '.join(dropped)}) -- "
-        "that pin is tenant-specific and was dropped from the export; the target tenant "
-        "must choose its own connection for this tool after install"
-    )
-    return {k: v for k, v in policy.items() if k not in _NON_PORTABLE_POLICY_KEYS}
+    if dropped:
+        warnings.append(
+            f"tool grant '{key}' pins a specific connection login ({', '.join(dropped)}) -- "
+            "that pin is tenant-specific and was dropped from the export; the target tenant "
+            "must choose its own connection for this tool after install"
+        )
+    return {
+        k: v
+        for k, v in policy.items()
+        if k not in _NON_PORTABLE_POLICY_KEYS and v is not None
+    }
 
 
 async def _local_skill_names_for_agent(

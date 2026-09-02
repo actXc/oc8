@@ -237,6 +237,86 @@ async def test_build_department_export_resolves_connection_to_capability_depende
         assert exported.warnings == []
 
 
+async def test_build_department_export_drops_null_policy_fields(
+    app_session: AppSessionFactory,
+) -> None:
+    """`ToolPolicy.to_json()` (authz/pdp.py:107-109) always writes `only` and
+    `approval_eur`, `None` when unset -- the real shape stored on a
+    department's `frame.tools` (confirmed live against a real Helpdesk
+    department, 2026-09-02). `frame`/`narrowing` are untyped `dict[str, Any]`
+    in manifest.py, so `Manifest.model_dump(exclude_none=True)` never reaches
+    into them -- a raw `None` used to reach `tomli_w.dumps` and crash with
+    `TypeError: Object of type 'NoneType' is not TOML serializable` for any
+    real department, not just a crafted fixture."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as s:
+        capa = m.Capa(tenant_id=tenant, name="odoo_mcp", type="tool_pack")
+        s.add(capa)
+        await s.flush()
+        capa_version = m.CapaVersion(
+            tenant_id=tenant,
+            capa_id=capa.id,
+            semver="1.0.0",
+            manifest={"name": "odoo_mcp", "version": "1.0.0"},
+            artifact_hash=b"x",
+            capabilities=["integration:odoo"],
+        )
+        s.add(capa_version)
+        await s.flush()
+        capa.current_version_id = capa_version.id
+        s.add(
+            m.McpConnection(
+                tenant_id=tenant,
+                name="odoo",
+                server_url="stdio://odoo",
+                config={"_plugin_name": "odoo_mcp"},
+            )
+        )
+        dept = m.Department(
+            tenant_id=tenant,
+            name="Helpdesk",
+            frame={
+                "tools": {
+                    "odoo": {
+                        "only": None,
+                        "read": True,
+                        "send": True,
+                        "write": True,
+                        "enabled": True,
+                        "approval_eur": None,
+                        "approval_actions": [],
+                        "default_connection_id": str(uuid.uuid4()),
+                    }
+                },
+                "memory": {},
+            },
+        )
+        s.add(dept)
+        await s.flush()
+        lead = m.Agent(
+            tenant_id=tenant,
+            department_id=dept.id,
+            name="Nora",
+            is_team_lead=True,
+            status="stopped",
+        )
+        s.add(lead)
+        await s.flush()
+        dept.team_lead_agent_id = lead.id
+        await s.flush()
+
+        exported = await build_department_export(
+            s, tenant_id=tenant, department_id=dept.id, capa_name="helpdesk",
+            version="1.0.0", summary="",
+        )
+        parsed = parse_manifest(__import__("tomllib").loads(exported.manifest_toml)["plugin"])
+        assert parsed.department_template is not None
+        odoo_policy = (parsed.department_template.frame.get("tools") or {})["odoo"]
+        assert "only" not in odoo_policy
+        assert "approval_eur" not in odoo_policy
+        assert odoo_policy["read"] is True
+
+
 _UUID_RE = re.compile(
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 )
