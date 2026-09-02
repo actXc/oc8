@@ -20,4 +20,6 @@ def build_zip(items: list[ExportedCapa]) -> bytes:
     with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
         for item in items:
             zf.writestr(f"{item.folder_name}/{MANIFEST_FILENAME}", item.manifest_toml)
+            for path, content in item.extra_files.items():
+                zf.writestr(f"{item.folder_name}/{path}", content)
     return buf.getvalue()

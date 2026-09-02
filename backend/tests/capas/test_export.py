@@ -13,7 +13,7 @@ from oc8.capas.export import (
     build_department_export,
     build_skill_export,
 )
-from oc8.capas.manifest import parse_manifest
+from oc8.capas.manifest import SkillTemplateSpec, parse_manifest
 from tests.conftest import AppSessionFactory
 
 pytestmark = pytest.mark.asyncio
@@ -65,9 +65,14 @@ async def test_build_skill_export_round_trips_through_parse_manifest(
         parsed = parse_manifest(tomllib.loads(exported.manifest_toml)["plugin"])
         assert parsed.name == "crm_follow_up"
         assert parsed.type == "skill"
-        assert parsed.skill_template is not None
-        assert parsed.skill_template.name == "crm-follow-up"
-        assert parsed.skill_template.instruction == "do crm-follow-up"
+        # The skill body lives in a sibling skills/<name>.toml, not inline in
+        # plugin.toml -- discovery.py hard-rejects an inline skill_template.
+        assert parsed.skill_template is None
+        assert set(exported.extra_files) == {"skills/crm_follow_up.toml"}
+        skill_raw = tomllib.loads(exported.extra_files["skills/crm_follow_up.toml"])
+        skill_spec = SkillTemplateSpec.model_validate(skill_raw)
+        assert skill_spec.name == "crm-follow-up"
+        assert skill_spec.instruction == "do crm-follow-up"
 
 
 async def test_build_skill_export_excludes_store_origin_skill(

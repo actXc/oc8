@@ -62,6 +62,10 @@ class ExportedCapa:
     folder_name: str
     manifest_toml: str
     warnings: list[str] = field(default_factory=list)
+    #: Relative path (e.g. "skills/crm_follow_up.toml") -> file content,
+    #: written alongside plugin.toml in the ZIP. Empty for agent/department
+    #: exports, which have no sibling files of their own.
+    extra_files: dict[str, str] = field(default_factory=dict)
 
 
 def _check_capa_name(name: str) -> None:
@@ -229,10 +233,21 @@ async def build_skill_export(
         requires_kbs=[],  # Non-Goals: no KB portability
         guardrails=list(definition.get("guardrails") or []),
     )
-    manifest = Manifest(
-        name=capa_name, version=version, type="skill", summary=summary, skill_template=spec
+    manifest = Manifest(name=capa_name, version=version, type="skill", summary=summary)
+    # A skill's own body lives in a sibling skills/<name>.toml, NOT inline in
+    # plugin.toml -- `discovery.py::_read_oc8_table` hard-rejects an inline
+    # skill_template table (August 2026 plugin package restructure). That
+    # file's top level IS the skill's fields directly, so it is rendered as
+    # its own standalone document rather than wrapped in {"plugin": ...}.
+    skill_toml = tomli_w.dumps(
+        spec.model_dump(mode="json", exclude_none=True, exclude_defaults=True)
     )
-    return ExportedCapa(folder_name=capa_name, manifest_toml=_render(manifest), warnings=[])
+    return ExportedCapa(
+        folder_name=capa_name,
+        manifest_toml=_render(manifest),
+        warnings=[],
+        extra_files={f"skills/{capa_name}.toml": skill_toml},
+    )
 
 
 async def build_agent_export(
