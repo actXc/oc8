@@ -11,7 +11,11 @@ const Checkbox = React.forwardRef<
   <CheckboxPrimitive.Root
     ref={ref}
     className={cn(
-      "grid place-content-center peer h-4 w-4 shrink-0 rounded-sm border border-primary shadow cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground",
+      // `rounded` (Tailwind's default 4px), not the app's `rounded-sm` token
+      // (`--radius-sm`, derived from `--radius: 14px` -- tuned for buttons
+      // and panels) -- on a 16px box that token renders as a near-circle,
+      // not a checkbox.
+      "grid place-content-center peer h-4 w-4 shrink-0 rounded border border-primary shadow cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground",
       className,
     )}
     {...props}

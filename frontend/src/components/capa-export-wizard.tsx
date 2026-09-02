@@ -2,9 +2,11 @@ import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { StepDots } from "@/components/onboarding/step-dots";
+import { Checkbox } from "@/components/ui/checkbox";
 import { downloadCapaExport, type CapaExportItemInput } from "@/lib/api";
 import { useAgents, useDepartments, usePreviewCapaExport, useSkills } from "@/lib/hooks";
 import { useT } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 
 type WizardStep = "selection" | "details" | "preview" | "export";
 
@@ -28,7 +30,7 @@ type DetailsByKey = Record<string, ItemDetails>;
 /** A capa name must match `_NAME_RE` in `backend/src/oc8/capas/export.py`
  * (lowercase, starts with a letter, only letters/digits/underscore). This is
  * only a friendly default for the Details step's input -- the backend is the
- * one enforcing the rule, and a bad name surfaces there as a Vorschau error. */
+ * one enforcing the rule, and a bad name surfaces there as a Preview error. */
 function slugify(value: string): string {
   return value
     .toLowerCase()
@@ -286,6 +288,41 @@ export function CapaExportWizard({ onClose }: { onClose: () => void }) {
   );
 }
 
+/** A selectable "row card" -- the same bordered/rounded treatment the
+ * guided-setup steps and credential picker already use elsewhere on the
+ * Settings page (`routes/settings.tsx`), rather than a bare native checkbox
+ * + label. The whole row is the click target, not just the checkbox. */
+function SelectableRow({
+  id,
+  label,
+  checked,
+  onCheckedChange,
+}: {
+  id: string;
+  label: string;
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return (
+    <label
+      htmlFor={id}
+      className={cn(
+        "flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2 text-sm transition",
+        checked
+          ? "border-primary bg-primary/10"
+          : "border-border bg-background/30 hover:border-primary/40",
+      )}
+    >
+      <Checkbox
+        id={id}
+        checked={checked}
+        onCheckedChange={(value) => onCheckedChange(value === true)}
+      />
+      {label}
+    </label>
+  );
+}
+
 function SelectionStep({
   departments,
   selectableAgents,
@@ -311,14 +348,13 @@ function SelectionStep({
         )}
         <div className="mt-2 space-y-1.5">
           {departments.map((dept) => (
-            <label key={dept.id} className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={selection.departmentIds.has(dept.id)}
-                onChange={(e) => onToggle("departmentIds", dept.id, e.target.checked)}
-              />
-              {dept.name}
-            </label>
+            <SelectableRow
+              key={dept.id}
+              id={`export-department-${dept.id}`}
+              label={dept.name}
+              checked={selection.departmentIds.has(dept.id)}
+              onCheckedChange={(checked) => onToggle("departmentIds", dept.id, checked)}
+            />
           ))}
         </div>
       </section>
@@ -335,14 +371,13 @@ function SelectionStep({
         )}
         <div className="mt-2 space-y-1.5">
           {selectableAgents.map((agent) => (
-            <label key={agent.id} className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={selection.agentIds.has(agent.id)}
-                onChange={(e) => onToggle("agentIds", agent.id, e.target.checked)}
-              />
-              {agent.name}
-            </label>
+            <SelectableRow
+              key={agent.id}
+              id={`export-agent-${agent.id}`}
+              label={agent.name}
+              checked={selection.agentIds.has(agent.id)}
+              onCheckedChange={(checked) => onToggle("agentIds", agent.id, checked)}
+            />
           ))}
         </div>
       </section>
@@ -359,14 +394,13 @@ function SelectionStep({
         )}
         <div className="mt-2 space-y-1.5">
           {localSkills.map((skill) => (
-            <label key={skill.id} className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={selection.skillIds.has(skill.id)}
-                onChange={(e) => onToggle("skillIds", skill.id, e.target.checked)}
-              />
-              {skill.name}
-            </label>
+            <SelectableRow
+              key={skill.id}
+              id={`export-skill-${skill.id}`}
+              label={skill.name}
+              checked={selection.skillIds.has(skill.id)}
+              onCheckedChange={(checked) => onToggle("skillIds", skill.id, checked)}
+            />
           ))}
         </div>
       </section>
