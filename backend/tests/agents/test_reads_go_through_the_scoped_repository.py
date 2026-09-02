@@ -93,6 +93,13 @@ ALLOWED: dict[str, str] = {
     "api/mcp_gateway.py": "agent-token-authenticated path, scoped to the token's own run",
     "api/v1/capas.py": "a different permission (plugin install), department-existence check only",
     "api/v1/internal_agent.py": "agent-token-authenticated path, scoped to the token's own run",
+    "capas/export.py": (
+        "gated by plugin:manage -- the SAME tenant-wide permission api/v1/capas.py above "
+        "already uses for capa install/enable, not a narrower departmental seat. An "
+        "operator packaging a Department/Agent/Skill they already administer into a "
+        "portable capa is the same 'admin already sees every department' shape as "
+        "copilot/capabilities.py below, just reading full content instead of an id"
+    ),
     "approvals/service.py": "approval-effect resolution acting on the approval's own bound agent",
     "copilot/capabilities.py": (
         "gated by copilot:manage (NEVER_DELEGATABLE, org_admin only); an admin "
