@@ -39,6 +39,18 @@ __all__ = [
 #: reject a bad name before any DB work happens.
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
+#: Raw McpConnection ids a tool-policy dict may carry -- `connection_id` at
+#: agent-narrowing level (`ToolPolicy.to_json()`, authz/pdp.py) and
+#: `default_connection_id` at department-frame level (`ToolPolicyWriteDTO`,
+#: api/v1/departments.py). Both name a connection specific to THIS tenant
+#: (agent tool login selection design); neither is portable, so both are
+#: stripped from every policy dict this module ever exports, regardless of
+#: which level it came from -- a department's cascade can copy its own
+#: `default_connection_id` verbatim onto an agent's narrowing
+#: (departments.py's `set_department_tools`), so checking only the "native"
+#: key for each level is not enough.
+_NON_PORTABLE_POLICY_KEYS = ("connection_id", "default_connection_id")
+
 
 class ExportValidationError(ValueError):
     """A selection-level problem the wizard's Vorschau step must show
@@ -108,9 +120,28 @@ async def _resolve_tool_grants(
                 "the target environment would have no way to satisfy it"
             )
             continue
-        kept[key] = policy
+        kept[key] = _sanitize_policy(key, policy, warnings)
         depends.update(version.capabilities)
     return kept, sorted(depends), warnings
+
+
+def _sanitize_policy(key: str, policy: object, warnings: list[str]) -> object:
+    """Strip any raw connection id out of one tool's policy dict before it
+    can reach a manifest -- a connection id is a row in THIS tenant's own
+    `mcp_connection` table, meaningless (and a leak) in another tenant. The
+    rest of the policy (rights, approval settings, `only`) is portable and
+    kept as-is."""
+    if not isinstance(policy, dict):
+        return policy
+    dropped = [k for k in _NON_PORTABLE_POLICY_KEYS if policy.get(k)]
+    if not dropped:
+        return policy
+    warnings.append(
+        f"tool grant '{key}' pins a specific connection login ({', '.join(dropped)}) -- "
+        "that pin is tenant-specific and was dropped from the export; the target tenant "
+        "must choose its own connection for this tool after install"
+    )
+    return {k: v for k, v in policy.items() if k not in _NON_PORTABLE_POLICY_KEYS}
 
 
 async def _local_skill_names_for_agent(

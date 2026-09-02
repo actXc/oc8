@@ -245,7 +245,15 @@ async def test_build_department_export_never_leaks_any_uuid_into_toml(
     appear in generated TOML. Scanning the RENDERED TEXT for anything shaped
     like a UUID is a stronger check than asserting individual fields are
     absent -- it catches a leak through any field, present or future, not
-    just the ones this test happens to name."""
+    just the ones this test happens to name.
+
+    Crucially, this plants a real connection id INSIDE a tool-policy dict at
+    both levels the runtime actually writes one: `default_connection_id` on
+    `Department.frame["tools"][key]` (`ToolPolicyWriteDTO`,
+    api/v1/departments.py) and `connection_id` on
+    `Agent.narrowing["tools"][key]` (`ToolPolicy.to_json()`, authz/pdp.py) --
+    the exact leak path a generic UUID scan over untouched fixtures would
+    never exercise."""
     tenant = uuid.uuid4()
     async with app_session(tenant) as s:
         skill = await _make_skill(s, tenant, "crm-follow-up")
@@ -272,10 +280,16 @@ async def test_build_department_export_never_leaks_any_uuid_into_toml(
                 credential_id=uuid.uuid4(),
             )
         )
+        dept_connection_id = str(uuid.uuid4())
         dept = m.Department(
             tenant_id=tenant,
             name="Vertrieb",
-            frame={"tools": {"odoo": {"read": True}}, "memory": {"department": ["read"]}},
+            frame={
+                "tools": {
+                    "odoo": {"read": True, "default_connection_id": dept_connection_id}
+                },
+                "memory": {"department": ["read"]},
+            },
         )
         s.add(dept)
         await s.flush()
@@ -290,12 +304,17 @@ async def test_build_department_export_never_leaks_any_uuid_into_toml(
         s.add(lead)
         await s.flush()
         dept.team_lead_agent_id = lead.id
+        agent_connection_id = str(uuid.uuid4())
         rep = m.Agent(
             tenant_id=tenant,
             department_id=dept.id,
             name="Rep A",
             status="stopped",
             model_config_id=uuid.uuid4(),
+            narrowing={
+                "tools": {"odoo": {"read": True, "connection_id": agent_connection_id}}
+            },
+            narrowing_overridden_keys=["odoo"],
         )
         s.add(rep)
         await s.flush()
@@ -310,9 +329,21 @@ async def test_build_department_export_never_leaks_any_uuid_into_toml(
             s, tenant_id=tenant, department_id=dept.id, capa_name="vertrieb",
             version="1.0.0", summary="",
         )
+        assert dept_connection_id not in exported.manifest_toml
+        assert agent_connection_id not in exported.manifest_toml
         assert _UUID_RE.search(exported.manifest_toml) is None
         for warning in exported.warnings:
             assert _UUID_RE.search(warning) is None
+        assert any("odoo" in w and "connection" in w for w in exported.warnings)
+
+        parsed = parse_manifest(__import__("tomllib").loads(exported.manifest_toml)["plugin"])
+        assert parsed.department_template is not None
+        frame_tools = parsed.department_template.frame.get("tools") or {}
+        assert "default_connection_id" not in frame_tools.get("odoo", {})
+        assert frame_tools["odoo"]["read"] is True
+        rep_a = next(a for a in parsed.department_template.agents if a.name == "Rep A")
+        assert "connection_id" not in rep_a.narrowing.get("tools", {}).get("odoo", {})
+        assert rep_a.narrowing["tools"]["odoo"]["read"] is True
 
 
 async def test_build_department_export_rejects_duplicate_agent_names(
