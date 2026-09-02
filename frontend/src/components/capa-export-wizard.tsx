@@ -48,9 +48,13 @@ export function CapaExportWizard({ onClose }: { onClose: () => void }) {
   // The Selection step renders every row as a checkbox, not a paginated list
   // view -- so each list hook is called with an explicit large pageSize
   // rather than the default (20) `ListQueryParams` would otherwise use.
-  const { data: departmentsPage } = useDepartments({ pageSize: 500 });
-  const { data: agentsPage } = useAgents({ pageSize: 500 });
-  const { data: skillsPage } = useSkills({ pageSize: 500 });
+  // 200, not 500: /departments, /agents, and /skills all cap their `limit`
+  // query param at 200 server-side (Query(..., le=200)) -- 500 always fails
+  // with 422 before the handler runs, silently emptying every section of
+  // this step for every tenant (found live, 2026-09-02).
+  const { data: departmentsPage } = useDepartments({ pageSize: 200 });
+  const { data: agentsPage } = useAgents({ pageSize: 200 });
+  const { data: skillsPage } = useSkills({ pageSize: 200 });
   const departments = departmentsPage?.items ?? [];
   const agents = agentsPage?.items ?? [];
   // Only locally authored skills are exportable (build_skill_export rejects
