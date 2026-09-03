@@ -1,12 +1,17 @@
-import { useEffect, useState } from "react";
-import { RotateCcw } from "lucide-react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { Paperclip, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Panel } from "@/components/app-shell";
+import { useConfirm } from "@/hooks/use-confirm";
 import {
+  useAgentInstructionFiles,
   useAgentInstructionHistory,
   useAssistant,
+  useDeleteInstructionFile,
   useUpdateAgentInstructions,
+  useUploadInstructionFile,
   type AgentInstructionRevision,
+  type FileAttachmentDTO,
 } from "@/lib/hooks";
 import {
   useChatSessions,
@@ -142,19 +147,22 @@ function DraftWithCopilot({
   }
 
   function sendAndTrack(message: string) {
-    sendMessage.mutate({ message }, {
-      onSuccess: (userMessage) => {
-        if (userMessage.runId) {
-          setAwaitingRunId(userMessage.runId);
-        } else {
-          // No run was enqueued for this message (e.g. the Assistant's
-          // secret-blindness gate refused it outright) -- there is nothing
-          // to wait for.
-          fail();
-        }
+    sendMessage.mutate(
+      { message },
+      {
+        onSuccess: (userMessage) => {
+          if (userMessage.runId) {
+            setAwaitingRunId(userMessage.runId);
+          } else {
+            // No run was enqueued for this message (e.g. the Assistant's
+            // secret-blindness gate refused it outright) -- there is nothing
+            // to wait for.
+            fail();
+          }
+        },
+        onError: fail,
       },
-      onError: fail,
-    });
+    );
   }
 
   // A generate request made before any session existed yet: send it as soon
@@ -299,6 +307,49 @@ export function AgentInstructionsPanel({
   const update = useUpdateAgentInstructions();
   const history = useAgentInstructionHistory(agentId);
 
+  // "Attached files": reference material (PDF, Excel, images) this agent can
+  // read on demand via read_instruction_file, the same shape as ChatWindow's
+  // upload button but scoped to owner_type="agent_instructions" instead of a
+  // single chat turn -- see agent/preamble.py's has_instruction_files.
+  const files = useAgentInstructionFiles(agentId);
+  const uploadFile = useUploadInstructionFile(agentId);
+  const deleteInstructionFile = useDeleteInstructionFile(agentId);
+  const { confirm, ConfirmDialog } = useConfirm();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  function handleFileChosen(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    uploadFile.mutate(file, {
+      onError: (error: Error) =>
+        toast.error(t("Couldn't upload the file", "Datei konnte nicht hochgeladen werden"), {
+          description: error.message,
+        }),
+    });
+  }
+
+  async function handleDeleteFile(file: FileAttachmentDTO) {
+    const ok = await confirm({
+      title: t("Delete this file?", "Diese Datei löschen?"),
+      description: t(
+        `Permanently delete "${file.filename}"? The agent will no longer be able to read it.`,
+        `"${file.filename}" endgültig löschen? Der Agent kann sie danach nicht mehr lesen.`,
+      ),
+      confirmLabel: t("Delete", "Löschen"),
+      cancelLabel: t("Cancel", "Abbrechen"),
+    });
+    if (!ok) return;
+    deleteInstructionFile.mutate(file.id, {
+      onSuccess: () =>
+        toast.success(t("File deleted", "Datei gelöscht"), { description: file.filename }),
+      onError: (error: Error) =>
+        toast.error(t("Couldn't delete the file", "Datei konnte nicht gelöscht werden"), {
+          description: error.message,
+        }),
+    });
+  }
+
   // Same permission the floating oc8 Copilot dock (copilot-dock.tsx) already
   // gates on -- this reuses that dock's chat pipeline against the same
   // tenant-wide Assistant agent, so anyone who can't see the dock can't
@@ -419,6 +470,77 @@ export function AgentInstructionsPanel({
           {!mayManage &&
             ` ${t("Your role does not include agent:manage, so this field is read-only for you.", "Ihre Rolle enthält agent:manage nicht, deshalb ist dieses Feld für Sie schreibgeschützt.")}`}
         </p>
+
+        <div className="mt-6 border-t border-border pt-4">
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="text-sm font-medium">{t("Attached files", "Angehängte Dateien")}</h4>
+            {mayManage && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  aria-label={t("Attach a file", "Datei anhängen")}
+                  onChange={handleFileChosen}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadFile.isPending}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-[11px] text-muted-foreground transition hover:border-primary/40 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Paperclip className="h-3 w-3" />
+                  {uploadFile.isPending
+                    ? t("Uploading…", "Wird hochgeladen…")
+                    : t("Attach file", "Datei anhängen")}
+                </button>
+              </>
+            )}
+          </div>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            {t(
+              "Reference material this agent can read on demand — never injected into every run automatically.",
+              "Referenzmaterial, das dieser Agent bei Bedarf lesen kann — wird nicht automatisch in jeden Lauf eingefügt.",
+            )}
+          </p>
+          {files.isLoading && (
+            <p className="mt-3 text-xs text-muted-foreground">{t("Loading…", "Wird geladen…")}</p>
+          )}
+          {files.isSuccess && files.data.length === 0 && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              {t("No files attached yet.", "Noch keine Dateien angehängt.")}
+            </p>
+          )}
+          {files.isSuccess && files.data.length > 0 && (
+            <ul className="mt-3 space-y-1.5">
+              {files.data.map((f) => (
+                <li
+                  key={f.id}
+                  className="flex items-center justify-between gap-2 rounded-md border border-border/60 bg-background/30 px-2.5 py-1.5 text-xs"
+                >
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" />
+                    <span className="truncate" title={f.filename}>
+                      {f.filename}
+                    </span>
+                  </span>
+                  {mayManage && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteFile(f)}
+                      title={t("Delete file", "Datei löschen")}
+                      aria-label={t("Delete file", "Datei löschen")}
+                      className="shrink-0 rounded-md p-1 text-muted-foreground transition hover:text-destructive"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        {ConfirmDialog}
       </Panel>
 
       <Panel className="p-5">

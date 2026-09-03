@@ -5,11 +5,15 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import {
   api,
   ApiError,
+  deleteFile,
   fetchCapaIcon,
+  listInstructionFiles,
   previewBackup,
   previewCapaExport,
   restoreBackup,
+  uploadInstructionFile,
   type CapaExportItemInput,
+  type FileAttachmentDTO,
 } from "@/lib/api";
 import type { RuntimeOption } from "@/components/runtime-picker";
 import type { GuardrailLibraryEntry, GuardrailPreset } from "@/components/guardrail-preset-picker";
@@ -1053,6 +1057,42 @@ export function useAgentInstructionHistory(agentId: string) {
     getNextPageParam: (last: AgentInstructionHistoryPage) => last.nextBeforeSeq,
   });
 }
+
+// The Instructions tab's own "Attached files" section -- reference files
+// (PDF, Excel, images) attached to the agent's standing instructions rather
+// than to a single chat turn (`FileAttachment(owner_type="agent_instructions")`
+// on the backend, Task 11). Same query-key shape as useAgentMemory/
+// useDeleteAgentMemory below: a plain list query plus mutations that
+// invalidate it on success.
+const instructionFilesKey = (agentId: string) => ["agents", agentId, "instruction-files"];
+
+export function useAgentInstructionFiles(agentId: string) {
+  return useQuery({
+    queryKey: instructionFilesKey(agentId),
+    queryFn: () => listInstructionFiles(agentId),
+  });
+}
+
+export function useUploadInstructionFile(agentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (file: File) => uploadInstructionFile(agentId, file),
+    onSuccess: () => qc.invalidateQueries({ queryKey: instructionFilesKey(agentId) }),
+  });
+}
+
+// `deleteFile` (api.ts) is owner-type-agnostic -- `DELETE /files/{id}` works
+// on a chat attachment too -- but this hook is scoped to one agent's own
+// instruction-files list so its cache invalidation only refetches that list.
+export function useDeleteInstructionFile(agentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (fileId: string) => deleteFile(fileId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: instructionFilesKey(agentId) }),
+  });
+}
+
+export type { FileAttachmentDTO };
 
 export interface MemoryRecord {
   id: string;

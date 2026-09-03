@@ -321,6 +321,38 @@ export async function uploadChatAttachment(
   return (await res.json()) as FileAttachmentDTO;
 }
 
+// Same shape as uploadChatAttachment above, but for the agent Instructions
+// tab's own "Attached files" section (owner_type="agent_instructions" on the
+// backend rather than "chat_message").
+export async function uploadInstructionFile(
+  agentId: string,
+  file: File,
+): Promise<FileAttachmentDTO> {
+  const token = await getToken();
+  const body = new FormData();
+  body.append("file", file);
+  const res = await fetch(`${API_URL}/agents/${agentId}/instruction-files`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}` },
+    body,
+  });
+  if (!res.ok) throw await toError(res);
+  return (await res.json()) as FileAttachmentDTO;
+}
+
+// A plain JSON GET, unlike the multipart calls above -- goes through the
+// normal `api.get` helper.
+export function listInstructionFiles(agentId: string): Promise<FileAttachmentDTO[]> {
+  return api.get<FileAttachmentDTO[]>(`/agents/${agentId}/instruction-files`);
+}
+
+// Owner-type-agnostic: `DELETE /files/{id}` (Task 6) works on either a chat
+// attachment or an instruction file, so this one function serves both --
+// only the Instructions tab actually calls it yet.
+export function deleteFile(fileId: string): Promise<void> {
+  return api.delete<void>(`/files/${fileId}`);
+}
+
 // ---- Capa export -------------------------------------------------------
 // Same shape as backup export/preview above: `POST /capas/export` returns
 // either a JSON preview (dry_run) or a binary ZIP, so it can't go through

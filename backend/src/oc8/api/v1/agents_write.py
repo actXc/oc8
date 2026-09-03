@@ -19,7 +19,7 @@ import datetime as dt
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, UploadFile, status
 from sqlalchemy import func, select
 
 from oc8 import models as m
@@ -27,6 +27,7 @@ from oc8.agents.hire import create_hire_request, require_hire_approval
 from oc8.api.deps import DbSession, authorize_agent_write, require_agent_write
 from oc8.api.v1._serializers import agent_to_dto
 from oc8.api.v1.agents import _agent_detail_dto
+from oc8.api.v1.files import _attachment_dto, _store_upload
 from oc8.audit import append_event
 from oc8.authz.pdp import ToolPolicy, missing_skill_requirements, narrowing_within_frame
 from oc8.authz.scope import HumanActor
@@ -42,7 +43,7 @@ from oc8.runtime.registry import (
     check_runtime_capabilities,
     resolve_runtime_plugin,
 )
-from oc8.schemas.dto import AgentDetailDTO, AgentDTO
+from oc8.schemas.dto import AgentDetailDTO, AgentDTO, FileAttachmentDTO
 from oc8.schemas.requests import (
     AssignSkillRequest,
     CreateAgentRequest,
@@ -454,6 +455,73 @@ async def update_instructions(
         principal=principal,
     )
     return await _agent_detail_dto(db, agent)
+
+
+@router.post(
+    "/agents/{agent_id}/instruction-files",
+    response_model=FileAttachmentDTO,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_instruction_file(
+    agent_id: uuid.UUID,
+    db: DbSession,
+    request: Request,
+    actor: Annotated[HumanActor, Depends(require_agent_write())],
+    file: UploadFile,
+) -> FileAttachmentDTO:
+    agent = await _load_agent(db, agent_id)
+    await authorize_agent_write(
+        request,
+        db,
+        actor,
+        agent.department_id,
+        not_found=HTTPException(status.HTTP_404_NOT_FOUND, "agent not found"),
+    )
+    row = await _store_upload(
+        db,
+        tenant_id=actor.principal.tenant_id,
+        owner_type="agent_instructions",
+        owner_id=agent.id,
+        file=file,
+    )
+    await db.commit()
+    return _attachment_dto(row)
+
+
+@router.get(
+    "/agents/{agent_id}/instruction-files",
+    response_model=list[FileAttachmentDTO],
+)
+async def list_instruction_files(
+    agent_id: uuid.UUID,
+    db: DbSession,
+    request: Request,
+    actor: Annotated[HumanActor, Depends(require_agent_write())],
+) -> list[FileAttachmentDTO]:
+    agent = await _load_agent(db, agent_id)
+    await authorize_agent_write(
+        request,
+        db,
+        actor,
+        agent.department_id,
+        not_found=HTTPException(status.HTTP_404_NOT_FOUND, "agent not found"),
+    )
+    rows = (
+        (
+            await db.execute(
+                select(m.FileAttachment)
+                .where(
+                    m.FileAttachment.tenant_id == actor.principal.tenant_id,
+                    m.FileAttachment.owner_type == "agent_instructions",
+                    m.FileAttachment.owner_id == agent.id,
+                )
+                .order_by(m.FileAttachment.created_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [_attachment_dto(row) for row in rows]
 
 
 @router.delete(

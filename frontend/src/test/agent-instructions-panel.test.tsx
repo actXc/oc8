@@ -11,6 +11,9 @@ const {
   createSessionMock,
   messagesMock,
   sendMessageMock,
+  listInstructionFilesMock,
+  uploadInstructionFileMock,
+  deleteFileMock,
 } = vi.hoisted(() => ({
   getHistory: vi.fn((_url: string) => ({ revisions: [], totalCount: 0, nextBeforeSeq: null })),
   patchInstructions: vi.fn(),
@@ -19,6 +22,9 @@ const {
   createSessionMock: vi.fn(),
   messagesMock: vi.fn(),
   sendMessageMock: vi.fn(),
+  listInstructionFilesMock: vi.fn(() => []),
+  uploadInstructionFileMock: vi.fn(),
+  deleteFileMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -32,11 +38,16 @@ vi.mock("@/lib/api", () => ({
       throw new Error(`unexpected PATCH ${url}`);
     },
   },
+  listInstructionFiles: (agentId: string) => listInstructionFilesMock(agentId),
+  uploadInstructionFile: (agentId: string, file: File) => uploadInstructionFileMock(agentId, file),
+  deleteFile: (fileId: string) => deleteFileMock(fileId),
 }));
 
-// Only useAssistant is mocked here -- useAgentInstructionHistory and
-// useUpdateAgentInstructions keep running for real, against the @/lib/api
-// mock above, exactly as the pre-existing tests already relied on.
+// Only useAssistant is mocked here -- useAgentInstructionHistory,
+// useUpdateAgentInstructions, and the three "Attached files" hooks
+// (useAgentInstructionFiles/useUploadInstructionFile/useDeleteInstructionFile)
+// keep running for real, against the @/lib/api mock above, exactly as the
+// pre-existing tests already relied on.
 vi.mock("@/lib/hooks", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/hooks")>();
   return { ...actual, useAssistant: () => assistantMock() };
@@ -68,6 +79,10 @@ describe("AgentInstructionsPanel", () => {
     messagesMock.mockReset();
     messagesMock.mockReturnValue({ data: undefined });
     sendMessageMock.mockReset();
+    listInstructionFilesMock.mockReset();
+    listInstructionFilesMock.mockReturnValue([]);
+    uploadInstructionFileMock.mockReset();
+    deleteFileMock.mockReset();
   });
 
   it("saves an edited instructions text and disables Save until something changes", async () => {
@@ -552,6 +567,90 @@ describe("AgentInstructionsPanel", () => {
       await waitFor(() =>
         expect(screen.getByRole("button", { name: /^generate$/i })).not.toBeDisabled(),
       );
+    });
+  });
+
+  describe("Attached files", () => {
+    const fileDto = {
+      id: "f1",
+      filename: "runbook.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 1024,
+      isImage: false,
+      createdAt: "2026-09-03T00:00:00Z",
+    };
+
+    it("shows no files attached yet when the list is empty", async () => {
+      renderWithClient(<AgentInstructionsPanel agentId="agent-1" mission="" mayManage={true} />);
+      expect(await screen.findByText(/no files attached yet/i)).toBeInTheDocument();
+    });
+
+    it("lists files already attached to the agent's instructions", async () => {
+      listInstructionFilesMock.mockReturnValue([fileDto]);
+      renderWithClient(<AgentInstructionsPanel agentId="agent-1" mission="" mayManage={true} />);
+      expect(await screen.findByText("runbook.pdf")).toBeInTheDocument();
+    });
+
+    it("uploading a file sends it for this agent and adds it to the list", async () => {
+      let uploaded = false;
+      uploadInstructionFileMock.mockImplementation(async (agentId: string, file: File) => {
+        expect(agentId).toBe("agent-1");
+        expect(file.name).toBe("runbook.pdf");
+        uploaded = true;
+        return fileDto;
+      });
+      listInstructionFilesMock.mockImplementation(() => (uploaded ? [fileDto] : []));
+
+      renderWithClient(<AgentInstructionsPanel agentId="agent-1" mission="" mayManage={true} />);
+      await screen.findByText(/no files attached yet/i);
+
+      const file = new File(["%PDF-1.4"], "runbook.pdf", { type: "application/pdf" });
+      fireEvent.change(screen.getByLabelText(/attach a file/i), { target: { files: [file] } });
+
+      await waitFor(() => expect(uploadInstructionFileMock).toHaveBeenCalledWith("agent-1", file));
+      expect(await screen.findByText("runbook.pdf")).toBeInTheDocument();
+    });
+
+    it("deleting an attached file asks for confirmation, then removes it", async () => {
+      let deleted = false;
+      listInstructionFilesMock.mockImplementation(() => (deleted ? [] : [fileDto]));
+      deleteFileMock.mockImplementation(async (fileId: string) => {
+        expect(fileId).toBe("f1");
+        deleted = true;
+      });
+
+      renderWithClient(<AgentInstructionsPanel agentId="agent-1" mission="" mayManage={true} />);
+      await screen.findByText("runbook.pdf");
+
+      fireEvent.click(screen.getByRole("button", { name: /delete file/i }));
+      // Confirming must not have persisted yet -- the dialog is a real gate.
+      expect(deleteFileMock).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: /^delete$/i }));
+
+      await waitFor(() => expect(deleteFileMock).toHaveBeenCalledWith("f1"));
+      await waitFor(() => expect(screen.queryByText("runbook.pdf")).not.toBeInTheDocument());
+    });
+
+    it("cancelling the delete confirmation leaves the file and never persists", async () => {
+      listInstructionFilesMock.mockReturnValue([fileDto]);
+      renderWithClient(<AgentInstructionsPanel agentId="agent-1" mission="" mayManage={true} />);
+      await screen.findByText("runbook.pdf");
+
+      fireEvent.click(screen.getByRole("button", { name: /delete file/i }));
+      fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+
+      expect(deleteFileMock).not.toHaveBeenCalled();
+      expect(screen.getByText("runbook.pdf")).toBeInTheDocument();
+    });
+
+    it("hides the attach button and delete controls when the caller lacks agent:manage", async () => {
+      listInstructionFilesMock.mockReturnValue([fileDto]);
+      renderWithClient(<AgentInstructionsPanel agentId="agent-1" mission="" mayManage={false} />);
+      await screen.findByText("runbook.pdf");
+
+      expect(screen.queryByLabelText(/attach a file/i)).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /delete file/i })).not.toBeInTheDocument();
     });
   });
 });
