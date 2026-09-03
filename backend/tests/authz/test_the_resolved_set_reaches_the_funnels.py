@@ -88,7 +88,7 @@ class _FakeChannel:
 
         return ChannelCapabilities(max_classification="internal")
 
-    def verify_inbound(self, *, headers: dict[str, str], body: bytes) -> bool:
+    async def verify_inbound(self, *, headers: dict[str, str], body: bytes) -> bool:
         return True
 
     def parse_inbound(self, update: dict[str, Any]) -> Any:
