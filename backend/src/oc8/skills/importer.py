@@ -58,6 +58,17 @@ _ALIEN_TOOLS = {
     "webfetch", "websearch", "task", "todowrite", "bashoutput", "killshell",
 }
 
+#: Same three names read_reference_file (agent/control_tools.py) will ever
+#: serve. Duplicated here, not imported: this module has no dependency on
+#: agent/, and importer.py's own boundary logic is self-contained by design.
+_REFERENCE_SUBDIRS = ("references/", "assets/", "scripts/")
+#: Skip (not refuse) a single bundled file over this size -- the skill's
+#: instruction text still imports; only that one file is left unreadable.
+_MAX_BUNDLED_FILE_BYTES = 200_000
+#: Stop collecting further bundled files for one skill once the running total
+#: would exceed this -- a bound on tenant storage, not on any one file.
+_MAX_BUNDLED_TOTAL_BYTES = 2_000_000
+
 _FRONTMATTER = re.compile(r"^---\s*\n(.*?)\n---\s*\n(.*)$", re.S)
 #: Enough YAML for a frontmatter block: `key: value` and `- item`. A full parser
 #: would be a dependency for four fields we actually read.
@@ -66,7 +77,8 @@ _KEY = re.compile(r"^([A-Za-z][\w-]*):\s*(.*)$")
 
 @dataclass(frozen=True)
 class Candidate:
-    """One skill found at a source, with everything needed to decide on it."""
+    """One skill found at a source, with everything needed to decide on it --
+    and, once imported, everything needed to serve reference_root reads too."""
 
     name: str
     description: str
@@ -75,6 +87,11 @@ class Candidate:
     tokens: int
     verdict: str  # "fits" | "tight" | "too_big"
     warnings: list[str] = field(default_factory=list)
+    #: rel_path (e.g. "references/checklist.md") -> raw bytes, for every file
+    #: under this skill's own references//assets//scripts/ found alongside its
+    #: SKILL.md in the SAME archive pass. Never in to_json(): the preview
+    #: response must not carry raw file bytes to the browser.
+    bundled_files: dict[str, bytes] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -185,16 +202,22 @@ def archive_url(source: str) -> str:
 
 
 def read_archive(blob: bytes, *, budget_tokens: int, limit: int = 200) -> list[Candidate]:
-    """Every SKILL.md in an archive, judged.
+    """Every SKILL.md in an archive, judged -- each carrying its own bundled
+    references//assets//scripts/ files, if it has any.
 
     Members are read from the stream and never written to disk: a tar entry can
     name `../` and a path traversal during an import would be an odd way to lose
     a machine.
     """
-    out: list[Candidate] = []
+    candidates_by_dir: dict[str, Candidate] = {}
+    bundles: dict[str, dict[str, bytes]] = {}  # skill directory -> {rel_path: bytes}
+    bundle_totals: dict[str, int] = {}
+
     with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tar:
-        for member in tar:
-            if not member.isfile() or len(out) >= limit:
+        members = tar.getmembers()
+
+        for member in members:
+            if not member.isfile() or len(candidates_by_dir) >= limit:
                 continue
             if not member.name.lower().endswith("skill.md"):
                 continue
@@ -207,8 +230,52 @@ def read_archive(blob: bytes, *, budget_tokens: int, limit: int = 200) -> list[C
             # Strip the archive's top directory, which carries a commit hash.
             path = member.name.split("/", 1)[-1]
             candidate = parse_skill(text, path=path, budget_tokens=budget_tokens)
-            if candidate is not None:
-                out.append(candidate)
+            if candidate is None:
+                continue
+            skill_dir = path.rsplit("/", 1)[0] + "/" if "/" in path else ""
+            candidates_by_dir[skill_dir] = candidate
+            bundles[skill_dir] = {}
+            bundle_totals[skill_dir] = 0
+
+        if candidates_by_dir:
+            # Second pass: classify every other file against the skill
+            # directories just discovered. member.name still carries the
+            # archive's top directory, so strip it the same way before
+            # comparing against skill_dir (which is already stripped).
+            for member in members:
+                if not member.isfile():
+                    continue
+                stripped = member.name.split("/", 1)[-1]
+                for skill_dir in candidates_by_dir:
+                    if skill_dir and not stripped.startswith(skill_dir):
+                        continue
+                    rel = stripped[len(skill_dir):] if skill_dir else stripped
+                    if not rel.startswith(_REFERENCE_SUBDIRS):
+                        continue
+                    if member.size > _MAX_BUNDLED_FILE_BYTES:
+                        continue
+                    if bundle_totals[skill_dir] + member.size > _MAX_BUNDLED_TOTAL_BYTES:
+                        continue
+                    handle = tar.extractfile(member)
+                    if handle is None:
+                        continue
+                    data = handle.read()
+                    bundles[skill_dir][rel] = data
+                    bundle_totals[skill_dir] += len(data)
+
+    out = [
+        Candidate(
+            name=c.name,
+            description=c.description,
+            instruction=c.instruction,
+            path=c.path,
+            tokens=c.tokens,
+            verdict=c.verdict,
+            warnings=c.warnings,
+            bundled_files=bundles[skill_dir],
+        )
+        for skill_dir, c in candidates_by_dir.items()
+    ]
     return sorted(out, key=lambda c: c.name.lower())
 
 

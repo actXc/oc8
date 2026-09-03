@@ -78,6 +78,96 @@ def test_bundled_files_are_flagged() -> None:
     assert any("read_reference_file" in w for w in c.warnings)
 
 
+def _tar_with_paths(entries: dict[str, str | bytes]) -> bytes:
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        for name, content in entries.items():
+            data = content if isinstance(content, bytes) else content.encode()
+            info = tarfile.TarInfo(name=name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+    return buf.getvalue()
+
+
+def test_bundled_files_under_a_nested_skill_are_captured_relative_to_its_own_dir() -> None:
+    blob = _tar_with_paths(
+        {
+            "repo-abc/skills/one/SKILL.md": SMALL,
+            "repo-abc/skills/one/references/checklist.md": "1. Check VAT ID.\n",
+            "repo-abc/skills/one/scripts/run.sh": "echo hi\n",
+            # A file belonging to a DIFFERENT skill must never leak in here.
+            "repo-abc/skills/two/references/other.md": "not this skill's file\n",
+        }
+    )
+    found = read_archive(blob, budget_tokens=1000)
+    assert len(found) == 1
+    assert found[0].bundled_files == {
+        "references/checklist.md": b"1. Check VAT ID.\n",
+        "scripts/run.sh": b"echo hi\n",
+    }
+
+
+def test_bundled_files_at_the_archive_root_are_captured_too() -> None:
+    blob = _tar_with_paths(
+        {
+            "repo-abc/SKILL.md": SMALL,
+            "repo-abc/references/checklist.md": "root-level reference\n",
+        }
+    )
+    found = read_archive(blob, budget_tokens=1000)
+    assert len(found) == 1
+    assert found[0].bundled_files == {"references/checklist.md": b"root-level reference\n"}
+
+
+def test_a_skill_with_no_bundled_files_gets_an_empty_dict() -> None:
+    blob = _tar_with_paths({"repo-abc/skills/one/SKILL.md": SMALL})
+    found = read_archive(blob, budget_tokens=1000)
+    assert found[0].bundled_files == {}
+
+
+def test_bundled_files_are_not_serialised_into_the_preview_json() -> None:
+    blob = _tar_with_paths(
+        {
+            "repo-abc/skills/one/SKILL.md": SMALL,
+            "repo-abc/skills/one/references/checklist.md": "x\n",
+        }
+    )
+    found = read_archive(blob, budget_tokens=1000)
+    assert "bundled_files" not in found[0].to_json()
+
+
+def test_an_oversized_bundled_file_is_skipped_not_refused() -> None:
+    blob = _tar_with_paths(
+        {
+            "repo-abc/skills/one/SKILL.md": SMALL,
+            "repo-abc/skills/one/references/huge.md": "x" * 250_000,
+            "repo-abc/skills/one/references/small.md": "kept\n",
+        }
+    )
+    found = read_archive(blob, budget_tokens=1000)
+    assert found[0].verdict == "fits"  # the skill itself still imports fine
+    assert "references/huge.md" not in found[0].bundled_files
+    assert found[0].bundled_files["references/small.md"] == b"kept\n"
+
+
+def test_the_total_bundle_size_is_capped_per_skill() -> None:
+    # Eleven files at exactly the 200_000-byte PER-FILE cap (_MAX_BUNDLED_FILE_BYTES)
+    # -- none individually oversized, so the per-file check never rejects one.
+    # Eleven of them total 2_200_000, over the 2_000_000 total cap
+    # (_MAX_BUNDLED_TOTAL_BYTES). Collection stops once the running total would
+    # exceed that cap; files are read in the archive's own member order, so
+    # exactly ten are kept here (10 * 200_000 = 2_000_000, the eleventh would
+    # push it to 2_200_000).
+    entries: dict[str, str | bytes] = {"repo-abc/skills/one/SKILL.md": SMALL}
+    for i in range(11):
+        entries[f"repo-abc/skills/one/references/f{i}.md"] = "x" * 200_000
+    blob = _tar_with_paths(entries)
+    found = read_archive(blob, budget_tokens=1000)
+    total = sum(len(v) for v in found[0].bundled_files.values())
+    assert total <= 2_000_000
+    assert len(found[0].bundled_files) == 10
+
+
 def test_something_that_is_not_a_skill_is_not_one() -> None:
     assert parse_skill("# Just a readme\n", path="README.md", budget_tokens=1000) is None
     assert parse_skill("---\ndescription: no name\n---\n\nbody", path="a", budget_tokens=1) is None
