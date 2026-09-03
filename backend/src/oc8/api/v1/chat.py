@@ -16,10 +16,22 @@ from oc8.api.deps import CurrentPrincipal, DbSession, require_departmental, requ
 from oc8.authz.authority import Authority, authority_for_principal, tenant_wide_read
 from oc8.authz.permissions import AGENT, COPILOT, MANAGE, RUN_START, VIEW, perm
 from oc8.authz.scope import HumanActor
-from oc8.chat.service import create_session, get_session, list_messages, list_sessions, send_message
+from oc8.chat.service import (
+    create_session,
+    delete_session,
+    get_session,
+    list_messages,
+    list_sessions,
+    rename_session,
+    send_message,
+)
 from oc8.schemas.base import CamelModel
 from oc8.schemas.dto import ChatMessageDTO, ChatSessionDTO
-from oc8.schemas.requests import CreateChatSessionRequest, SendChatMessageRequest
+from oc8.schemas.requests import (
+    CreateChatSessionRequest,
+    RenameChatSessionRequest,
+    SendChatMessageRequest,
+)
 
 router = APIRouter()
 
@@ -124,13 +136,12 @@ async def create_chat_session(
     return _session_dto(session)
 
 
-@router.get("/chat/sessions/{session_id}/messages", response_model=list[ChatMessageDTO])
-async def get_messages(
-    request: Request,
-    session_id: uuid.UUID,
-    db: DbSession,
-    actor: Annotated[HumanActor, Depends(require_departmental(perm(AGENT, VIEW)))],
-) -> list[ChatMessageDTO]:
+async def _owned_session(
+    request: Request, session_id: uuid.UUID, db: DbSession, actor: HumanActor
+) -> m.ChatSession:
+    """Every chat-session sub-resource (messages, rename, delete) is gated by
+    the same ownership check -- a session belongs to the member who created
+    it, with the Assistant's tenant-wide `copilot:manage` carve-out on top."""
     session = await get_session(db, tenant_id=actor.principal.tenant_id, session_id=session_id)
     owned = session is not None and session.member_id == actor.member.id
     if session is not None and not owned:
@@ -143,8 +154,45 @@ async def get_messages(
         )
     if session is None or not owned:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "chat session not found")
+    return session
+
+
+@router.get("/chat/sessions/{session_id}/messages", response_model=list[ChatMessageDTO])
+async def get_messages(
+    request: Request,
+    session_id: uuid.UUID,
+    db: DbSession,
+    actor: Annotated[HumanActor, Depends(require_departmental(perm(AGENT, VIEW)))],
+) -> list[ChatMessageDTO]:
+    await _owned_session(request, session_id, db, actor)
     messages = await list_messages(db, tenant_id=actor.principal.tenant_id, session_id=session_id)
     return [_message_dto(msg) for msg in messages]
+
+
+@router.patch("/chat/sessions/{session_id}", response_model=ChatSessionDTO)
+async def rename_chat_session(
+    request: Request,
+    session_id: uuid.UUID,
+    body: RenameChatSessionRequest,
+    db: DbSession,
+    actor: Annotated[HumanActor, Depends(require_departmental(perm(AGENT, VIEW)))],
+) -> ChatSessionDTO:
+    session = await _owned_session(request, session_id, db, actor)
+    await rename_session(db, session=session, title=body.title)
+    await db.commit()
+    return _session_dto(session)
+
+
+@router.delete("/chat/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_chat_session(
+    request: Request,
+    session_id: uuid.UUID,
+    db: DbSession,
+    actor: Annotated[HumanActor, Depends(require_departmental(perm(AGENT, VIEW)))],
+) -> None:
+    session = await _owned_session(request, session_id, db, actor)
+    await delete_session(db, tenant_id=actor.principal.tenant_id, session=session)
+    await db.commit()
 
 
 @router.post(
@@ -167,18 +215,7 @@ async def post_message(
     db: DbSession,
     actor: Annotated[HumanActor, Depends(require_departmental(perm(AGENT, VIEW)))],
 ) -> ChatMessageDTO:
-    session = await get_session(db, tenant_id=actor.principal.tenant_id, session_id=session_id)
-    owned = session is not None and session.member_id == actor.member.id
-    if session is not None and not owned:
-        authority = await authority_for_principal(request, db, actor.principal)
-        owned = await _assistant_visible(
-            db,
-            tenant_id=actor.principal.tenant_id,
-            authority=authority,
-            agent_id=session.agent_id,
-        )
-    if session is None or not owned:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "chat session not found")
+    session = await _owned_session(request, session_id, db, actor)
     user_message, run = await send_message(
         db,
         session=session,

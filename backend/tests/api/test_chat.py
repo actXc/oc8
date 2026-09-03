@@ -613,6 +613,136 @@ async def test_the_first_turn_of_a_new_session_already_carries_its_task(
         )
 
 
+# --- Rename / delete a chat session ---
+
+
+async def test_rename_session_persists_the_new_title(app_session: AppSessionFactory) -> None:
+    tenant = uuid.uuid4()
+    agent_id = await _seed_agent(app_session, tenant)
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            session_id = (
+                await c.post(
+                    "/api/v1/chat/sessions",
+                    json={"agentId": str(agent_id)},
+                    headers=_headers(tenant),
+                )
+            ).json()["id"]
+
+            r = await c.patch(
+                f"/api/v1/chat/sessions/{session_id}",
+                json={"title": "VPN Tickets"},
+                headers=_headers(tenant),
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["title"] == "VPN Tickets"
+
+            list_r = await c.get(
+                f"/api/v1/chat/sessions?agentId={agent_id}", headers=_headers(tenant)
+            )
+            renamed = next(s for s in list_r.json() if s["id"] == session_id)
+            assert renamed["title"] == "VPN Tickets"
+
+
+async def test_rename_a_foreign_session_is_refused(app_session: AppSessionFactory) -> None:
+    tenant = uuid.uuid4()
+    agent_id = await _seed_agent(app_session, tenant)
+    app = create_app()
+    other_token = get_identity_provider().mint(
+        tenant_id=tenant, subject="other-operator", role="org_admin"
+    )
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            session_id = (
+                await c.post(
+                    "/api/v1/chat/sessions",
+                    json={"agentId": str(agent_id)},
+                    headers=_headers(tenant),
+                )
+            ).json()["id"]
+
+            r = await c.patch(
+                f"/api/v1/chat/sessions/{session_id}",
+                json={"title": "Hijacked"},
+                headers={"Authorization": f"Bearer {other_token}"},
+            )
+            assert r.status_code == 404, r.text
+
+
+async def test_delete_session_removes_it_and_its_transcript(
+    app_session: AppSessionFactory, redis_url: str
+) -> None:
+    tenant = uuid.uuid4()
+    agent_id = await _seed_agent(app_session, tenant)
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            session_id = (
+                await c.post(
+                    "/api/v1/chat/sessions",
+                    json={"agentId": str(agent_id)},
+                    headers=_headers(tenant),
+                )
+            ).json()["id"]
+            await c.post(
+                f"/api/v1/chat/sessions/{session_id}/messages",
+                json={"message": "Hallo!"},
+                headers=_headers(tenant),
+            )
+
+            r = await c.delete(
+                f"/api/v1/chat/sessions/{session_id}", headers=_headers(tenant)
+            )
+            assert r.status_code == 204, r.text
+
+            list_r = await c.get(
+                f"/api/v1/chat/sessions?agentId={agent_id}", headers=_headers(tenant)
+            )
+            assert session_id not in [s["id"] for s in list_r.json()]
+
+            messages_r = await c.get(
+                f"/api/v1/chat/sessions/{session_id}/messages", headers=_headers(tenant)
+            )
+            assert messages_r.status_code == 404, messages_r.text
+
+    async with app_session(tenant) as db:
+        orphans = (
+            await db.execute(
+                select(m.ChatMessage).where(m.ChatMessage.session_id == uuid.UUID(session_id))
+            )
+        ).scalars().all()
+        assert orphans == []
+
+
+async def test_delete_a_foreign_session_is_refused(app_session: AppSessionFactory) -> None:
+    tenant = uuid.uuid4()
+    agent_id = await _seed_agent(app_session, tenant)
+    app = create_app()
+    other_token = get_identity_provider().mint(
+        tenant_id=tenant, subject="other-operator", role="org_admin"
+    )
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            session_id = (
+                await c.post(
+                    "/api/v1/chat/sessions",
+                    json={"agentId": str(agent_id)},
+                    headers=_headers(tenant),
+                )
+            ).json()["id"]
+
+            r = await c.delete(
+                f"/api/v1/chat/sessions/{session_id}",
+                headers={"Authorization": f"Bearer {other_token}"},
+            )
+            assert r.status_code == 404, r.text
+
+    async with app_session(tenant) as db:
+        still_there = await db.get(m.ChatSession, uuid.UUID(session_id))
+        assert still_there is not None
+
+
 async def test_a_second_turn_reuses_the_task_the_first_one_opened(
     app_session: AppSessionFactory, redis_url: str
 ) -> None:

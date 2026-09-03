@@ -6,15 +6,24 @@
 // autonomous run.
 
 import { useEffect, useRef, useState } from "react";
-import { MessageSquare, Plus, Send } from "lucide-react";
+import { ChevronDown, MessageSquare, Pencil, Plus, Send, Trash2 } from "lucide-react";
 import { Panel } from "@/components/app-shell";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { RUN_COMPONENT_REGISTRY } from "@/components/run-record-card";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { useConfirm } from "@/hooks/use-confirm";
+import {
   useChatSessions,
   useCreateChatSession,
   useChatMessages,
+  useDeleteChatSession,
+  useRenameChatSession,
   useSendChatMessage,
+  type ChatSessionDTO,
 } from "@/lib/hooks-chat";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -67,18 +76,12 @@ export function ChatWindow({ agentId, agentName }: { agentId: string; agentName:
         </div>
         <div className="flex items-center gap-2">
           {sessions && sessions.length > 0 && (
-            <select
-              value={sessionId ?? ""}
-              onChange={(e) => setSessionId(e.target.value || null)}
-              className="rounded-md border border-border bg-background/40 px-2 py-1 text-xs outline-none"
-            >
-              {sessions.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.title || t("Untitled chat", "Unbenannter Chat")} ·{" "}
-                  {new Date(s.createdAt).toLocaleDateString()}
-                </option>
-              ))}
-            </select>
+            <ChatSessionPicker
+              agentId={agentId}
+              sessions={sessions}
+              sessionId={sessionId}
+              onSelect={setSessionId}
+            />
           )}
           <button
             type="button"
@@ -195,5 +198,137 @@ export function ChatWindow({ agentId, agentName }: { agentId: string; agentName:
         </div>
       )}
     </Panel>
+  );
+}
+
+// Session switcher + per-session rename/delete. A native <select> can't host
+// per-row buttons, so this is a dropdown of plain rows instead of
+// DropdownMenuItem: an Item's onSelect closes the whole menu, which would
+// kill an in-progress rename or interrupt a delete confirmation.
+function ChatSessionPicker({
+  agentId,
+  sessions,
+  sessionId,
+  onSelect,
+}: {
+  agentId: string;
+  sessions: ChatSessionDTO[];
+  sessionId: string | null;
+  onSelect: (sessionId: string | null) => void;
+}) {
+  const t = useT();
+  const rename = useRenameChatSession(agentId);
+  const del = useDeleteChatSession(agentId);
+  const { confirm, ConfirmDialog } = useConfirm();
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
+
+  const current = sessions.find((s) => s.id === sessionId);
+
+  function startRename(s: ChatSessionDTO) {
+    setEditingId(s.id);
+    setEditValue(s.title || t("Untitled chat", "Unbenannter Chat"));
+  }
+
+  function commitRename(s: ChatSessionDTO) {
+    const trimmed = editValue.trim();
+    if (trimmed && trimmed !== s.title) rename.mutate({ sessionId: s.id, title: trimmed });
+    setEditingId(null);
+  }
+
+  async function handleDelete(s: ChatSessionDTO) {
+    const label = s.title || t("Untitled chat", "Unbenannter Chat");
+    const ok = await confirm({
+      title: t("Delete chat?", "Chat löschen?"),
+      description: t(
+        `This permanently deletes "${label}" and its messages.`,
+        `Löscht „${label}“ und alle Nachrichten dauerhaft.`,
+      ),
+      confirmLabel: t("Delete", "Löschen"),
+      cancelLabel: t("Cancel", "Abbrechen"),
+    });
+    if (!ok) return;
+    del.mutate(s.id, { onSuccess: () => sessionId === s.id && onSelect(null) });
+  }
+
+  return (
+    <>
+      {ConfirmDialog}
+      <DropdownMenu>
+        <DropdownMenuTrigger className="inline-flex max-w-[220px] items-center gap-1 rounded-md border border-border bg-background/40 px-2 py-1 text-xs outline-none">
+          <span className="truncate">
+            {current?.title || t("Untitled chat", "Unbenannter Chat")}
+          </span>
+          <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-72 p-1">
+          {sessions.map((s) => (
+            <div
+              key={s.id}
+              className={cn(
+                "group flex items-center gap-1 rounded-sm px-1 py-1 text-sm",
+                s.id === sessionId && "bg-accent/60",
+              )}
+            >
+              {editingId === s.id ? (
+                <input
+                  autoFocus
+                  value={editValue}
+                  onChange={(e) => setEditValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      commitRename(s);
+                    } else if (e.key === "Escape") {
+                      setEditingId(null);
+                    }
+                  }}
+                  onBlur={() => commitRename(s)}
+                  className="min-w-0 flex-1 rounded border border-primary/50 bg-background px-1.5 py-0.5 text-xs outline-none"
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onSelect(s.id)}
+                  className="flex-1 truncate px-1.5 py-0.5 text-left"
+                  title={s.title || t("Untitled chat", "Unbenannter Chat")}
+                >
+                  {s.title || t("Untitled chat", "Unbenannter Chat")}
+                  <span className="ml-1.5 text-[10px] text-muted-foreground">
+                    {new Date(s.createdAt).toLocaleDateString()}
+                  </span>
+                </button>
+              )}
+              {editingId !== s.id && (
+                <div className="flex shrink-0 items-center opacity-0 transition group-hover:opacity-100">
+                  <button
+                    type="button"
+                    title={t("Rename", "Umbenennen")}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      startRename(s);
+                    }}
+                    className="rounded p-1 text-muted-foreground transition hover:text-foreground"
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                  <button
+                    type="button"
+                    title={t("Delete", "Löschen")}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleDelete(s);
+                    }}
+                    className="rounded p-1 text-muted-foreground transition hover:text-destructive"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
   );
 }
