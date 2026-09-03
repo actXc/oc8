@@ -387,3 +387,174 @@ async def test_a_large_file_is_truncated_not_refused(
     assert outcome is not None
     assert "[truncated" in outcome.output
     assert len(outcome.output) < 70_000
+
+
+# ------------------------------------------------------------------ imported (DB-backed)
+
+
+async def _imported_file(
+    db: Any, tenant: uuid.UUID, skill_version_id: uuid.UUID, rel_path: str, content: bytes
+) -> None:
+    db.add(
+        m.ImportedSkillFile(
+            tenant_id=tenant,
+            skill_version_id=skill_version_id,
+            rel_path=rel_path,
+            content=content,
+        )
+    )
+    await db.flush()
+
+
+@pytest.mark.asyncio
+async def test_reads_a_reference_file_for_a_directly_imported_skill(
+    app_session: Any,
+) -> None:
+    tenant = uuid.uuid4()
+    skill_version_id = uuid.uuid4()
+    skill = _skill("Imported One", reference_root=f"imported:{skill_version_id}")
+    async with app_session(tenant) as db:
+        await _imported_file(
+            db, tenant, skill_version_id, "references/checklist.md", b"1. Check VAT ID.\n"
+        )
+        agent, task = await _dept_agent_task(db, tenant)
+        outcome = await execute_control_tool(
+            db,
+            tenant_id=tenant,
+            agent=agent,
+            task=task,
+            tc=ToolCall(
+                id="c1",
+                name="read_reference_file",
+                arguments={"skill": "Imported One", "path": "references/checklist.md"},
+            ),
+            decision=Decision(Effect.ALLOW),
+            assigned_skills=[skill],
+            active_skills=[],
+            mcp_conn=None,
+            originating_operator=None,
+        )
+    assert outcome is not None
+    assert "Check VAT ID" in outcome.output
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_path_for_an_imported_skill_is_a_plain_error(
+    app_session: Any,
+) -> None:
+    tenant = uuid.uuid4()
+    skill_version_id = uuid.uuid4()
+    skill = _skill("Imported One", reference_root=f"imported:{skill_version_id}")
+    async with app_session(tenant) as db:
+        await _imported_file(
+            db, tenant, skill_version_id, "references/checklist.md", b"present\n"
+        )
+        agent, task = await _dept_agent_task(db, tenant)
+        outcome = await execute_control_tool(
+            db,
+            tenant_id=tenant,
+            agent=agent,
+            task=task,
+            tc=ToolCall(
+                id="c1",
+                name="read_reference_file",
+                arguments={"skill": "Imported One", "path": "references/does-not-exist.md"},
+            ),
+            decision=Decision(Effect.ALLOW),
+            assigned_skills=[skill],
+            active_skills=[],
+            mcp_conn=None,
+            originating_operator=None,
+        )
+    assert outcome is not None
+    assert "no such file" in outcome.output
+
+
+@pytest.mark.asyncio
+async def test_a_skill_version_with_no_stored_files_is_a_plain_error(
+    app_session: Any,
+) -> None:
+    # No ImportedSkillFile row exists at all for this skill_version_id.
+    tenant = uuid.uuid4()
+    skill = _skill("Imported One", reference_root=f"imported:{uuid.uuid4()}")
+    async with app_session(tenant) as db:
+        agent, task = await _dept_agent_task(db, tenant)
+        outcome = await execute_control_tool(
+            db,
+            tenant_id=tenant,
+            agent=agent,
+            task=task,
+            tc=ToolCall(
+                id="c1",
+                name="read_reference_file",
+                arguments={"skill": "Imported One", "path": "references/checklist.md"},
+            ),
+            decision=Decision(Effect.ALLOW),
+            assigned_skills=[skill],
+            active_skills=[],
+            mcp_conn=None,
+            originating_operator=None,
+        )
+    assert outcome is not None
+    assert "no such file" in outcome.output
+
+
+@pytest.mark.asyncio
+async def test_a_bad_path_is_rejected_before_the_db_is_even_queried(
+    app_session: Any,
+) -> None:
+    tenant = uuid.uuid4()
+    skill_version_id = uuid.uuid4()
+    skill = _skill("Imported One", reference_root=f"imported:{skill_version_id}")
+    async with app_session(tenant) as db:
+        agent, task = await _dept_agent_task(db, tenant)
+        outcome = await execute_control_tool(
+            db,
+            tenant_id=tenant,
+            agent=agent,
+            task=task,
+            tc=ToolCall(
+                id="c1",
+                name="read_reference_file",
+                arguments={"skill": "Imported One", "path": "../../etc/passwd"},
+            ),
+            decision=Decision(Effect.ALLOW),
+            assigned_skills=[skill],
+            active_skills=[],
+            mcp_conn=None,
+            originating_operator=None,
+        )
+    assert outcome is not None
+    assert outcome.output.startswith("ERROR")
+    assert "escapes" in outcome.output or "must start with" in outcome.output
+
+
+@pytest.mark.asyncio
+async def test_a_large_imported_file_is_truncated_not_refused(app_session: Any) -> None:
+    tenant = uuid.uuid4()
+    skill_version_id = uuid.uuid4()
+    skill = _skill("Imported One", reference_root=f"imported:{skill_version_id}")
+    async with app_session(tenant) as db:
+        await _imported_file(
+            db, tenant, skill_version_id, "references/big.md", b"x" * 70_000
+        )
+        agent, task = await _dept_agent_task(db, tenant)
+        outcome = await execute_control_tool(
+            db,
+            tenant_id=tenant,
+            agent=agent,
+            task=task,
+            tc=ToolCall(
+                id="c1",
+                name="read_reference_file",
+                arguments={"skill": "Imported One", "path": "references/big.md"},
+            ),
+            decision=Decision(Effect.ALLOW),
+            assigned_skills=[skill],
+            active_skills=[],
+            mcp_conn=None,
+            originating_operator=None,
+        )
+    assert outcome is not None
+    assert "[truncated" in outcome.output
+    assert len(outcome.output) < 70_000

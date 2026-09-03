@@ -818,23 +818,43 @@ async def execute_control_tool(
                     "scripts/ and stay within the skill's own directory"
                 )
             )
-        capa_name, _, skill_subpath = skill.definition.reference_root.partition("/")
-        plugin = find_plugin(capa_name)
-        if plugin is None or not plugin.valid:
-            return ControlOutcome(output=f"ERROR: '{skill_name}'s capa is not installed here")
-        base = (Path(plugin.path) / skill_subpath).resolve()
-        target = (base / normalized).resolve()
-        try:
-            target.relative_to(base)
-        except ValueError:
-            # Cannot actually happen given the ".." check above, but a second,
-            # independent gate on the RESOLVED path costs nothing and a
-            # regression in the string check alone would still be caught here.
-            return ControlOutcome(output="ERROR: path escapes the skill's own directory")
-        if not target.is_file():
-            return ControlOutcome(output=f"ERROR: no such file: {rel_path}")
-        size = target.stat().st_size
-        raw = target.read_bytes()[:_MAX_REFERENCE_FILE_BYTES]
+        if skill.definition.reference_root.startswith("imported:"):
+            skill_version_id = uuid.UUID(
+                skill.definition.reference_root.removeprefix("imported:")
+            )
+            row = (
+                await db.execute(
+                    select(m.ImportedSkillFile).where(
+                        m.ImportedSkillFile.tenant_id == tenant_id,
+                        m.ImportedSkillFile.skill_version_id == skill_version_id,
+                        m.ImportedSkillFile.rel_path == normalized,
+                    )
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                return ControlOutcome(output=f"ERROR: no such file: {rel_path}")
+            content, size = row.content, len(row.content)
+        else:
+            capa_name, _, skill_subpath = skill.definition.reference_root.partition("/")
+            plugin = find_plugin(capa_name)
+            if plugin is None or not plugin.valid:
+                return ControlOutcome(
+                    output=f"ERROR: '{skill_name}'s capa is not installed here"
+                )
+            base = (Path(plugin.path) / skill_subpath).resolve()
+            target = (base / normalized).resolve()
+            try:
+                target.relative_to(base)
+            except ValueError:
+                # Cannot actually happen given the ".." check above, but a second,
+                # independent gate on the RESOLVED path costs nothing and a
+                # regression in the string check alone would still be caught here.
+                return ControlOutcome(output="ERROR: path escapes the skill's own directory")
+            if not target.is_file():
+                return ControlOutcome(output=f"ERROR: no such file: {rel_path}")
+            size = target.stat().st_size
+            content = target.read_bytes()
+        raw = content[:_MAX_REFERENCE_FILE_BYTES]
         text = raw.decode("utf-8", errors="replace")
         if size > _MAX_REFERENCE_FILE_BYTES:
             text += (
