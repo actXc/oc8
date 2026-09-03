@@ -55,7 +55,7 @@ class ApprovalChannel(Protocol):
         """
         ...
 
-    def verify_inbound(self, *, headers: Mapping[str, str], body: bytes) -> bool:
+    async def verify_inbound(self, *, headers: Mapping[str, str], body: bytes) -> bool:
         """Is this really from the platform?
 
         The webhook has no oc8 authentication and cannot have any -- the caller
