@@ -1,17 +1,21 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const sessionsMock = vi.fn();
 const createSessionMock = vi.fn();
 const messagesMock = vi.fn();
 const sendMessageMock = vi.fn();
+const renameSessionMock = vi.fn();
+const deleteSessionMock = vi.fn();
 
 vi.mock("@/lib/hooks-chat", () => ({
   useChatSessions: () => sessionsMock(),
   useCreateChatSession: () => ({ mutate: createSessionMock, isPending: false }),
   useChatMessages: () => messagesMock(),
   useSendChatMessage: () => ({ mutate: sendMessageMock, isPending: false }),
+  useRenameChatSession: () => ({ mutate: renameSessionMock }),
+  useDeleteChatSession: () => ({ mutate: deleteSessionMock }),
 }));
 
 import { ChatWindow } from "@/components/chat-window";
@@ -31,6 +35,8 @@ describe("ChatWindow", () => {
     createSessionMock.mockReset();
     messagesMock.mockReset();
     sendMessageMock.mockReset();
+    renameSessionMock.mockReset();
+    deleteSessionMock.mockReset();
   });
 
   it("offers to start a chat when the agent has no sessions yet", () => {
@@ -130,5 +136,92 @@ describe("ChatWindow", () => {
     });
     renderChat();
     expect(screen.getByText("Wochenbericht")).toBeInTheDocument();
+  });
+});
+
+describe("ChatWindow session picker", () => {
+  beforeEach(() => {
+    sessionsMock.mockReset();
+    createSessionMock.mockReset();
+    messagesMock.mockReset();
+    sendMessageMock.mockReset();
+    renameSessionMock.mockReset();
+    deleteSessionMock.mockReset();
+    sessionsMock.mockReturnValue({
+      data: [
+        { id: "s1", agentId: "agent-1", title: "VPN Tickets", createdAt: "2026-08-27T00:00:00Z" },
+        { id: "s2", agentId: "agent-1", title: "", createdAt: "2026-08-26T00:00:00Z" },
+      ],
+      isLoading: false,
+    });
+    messagesMock.mockReturnValue({ data: [], isLoading: false });
+  });
+
+  // Radix's DropdownMenuTrigger opens on pointerdown, not click -- jsdom's
+  // fireEvent.click doesn't synthesize a pointerdown the way a real browser
+  // click does, so a plain click silently never opens the menu.
+  function openPicker() {
+    fireEvent.pointerDown(screen.getByRole("button", { name: "VPN Tickets" }), { button: 0 });
+  }
+
+  it("shows the current session's title on the picker trigger, defaulting to the newest session", () => {
+    renderChat();
+    expect(screen.getByRole("button", { name: "VPN Tickets" })).toBeInTheDocument();
+  });
+
+  it("lists every session in the dropdown, falling back to a placeholder for an unnamed one", () => {
+    renderChat();
+    openPicker();
+    expect(screen.getAllByText("VPN Tickets").length).toBeGreaterThan(0);
+    expect(screen.getByText("Untitled chat")).toBeInTheDocument();
+  });
+
+  it("renaming a session commits the new title on Enter", async () => {
+    renderChat();
+    openPicker();
+    fireEvent.click(screen.getAllByRole("button", { name: /rename/i })[0]);
+
+    const input = screen.getByDisplayValue("VPN Tickets");
+    fireEvent.change(input, { target: { value: "Zugriff Laufwerk" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(renameSessionMock).toHaveBeenCalledWith({
+        sessionId: "s1",
+        title: "Zugriff Laufwerk",
+      }),
+    );
+  });
+
+  it("blank input on blur does not persist a rename", () => {
+    renderChat();
+    openPicker();
+    fireEvent.click(screen.getAllByRole("button", { name: /rename/i })[0]);
+
+    const input = screen.getByDisplayValue("VPN Tickets");
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.blur(input);
+
+    expect(renameSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("deleting a session asks for confirmation before persisting", async () => {
+    renderChat();
+    openPicker();
+    fireEvent.click(screen.getAllByRole("button", { name: /delete/i })[0]);
+
+    expect(deleteSessionMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /^delete$/i }));
+
+    await waitFor(() => expect(deleteSessionMock).toHaveBeenCalledWith("s1", expect.anything()));
+  });
+
+  it("cancelling the delete confirmation leaves the session untouched", () => {
+    renderChat();
+    openPicker();
+    fireEvent.click(screen.getAllByRole("button", { name: /delete/i })[0]);
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+
+    expect(deleteSessionMock).not.toHaveBeenCalled();
   });
 });

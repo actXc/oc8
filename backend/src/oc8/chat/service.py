@@ -25,7 +25,7 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from oc8 import models as m
@@ -80,6 +80,23 @@ async def list_sessions(
         stmt = stmt.where(m.ChatSession.agent_id == agent_id)
     stmt = stmt.order_by(m.ChatSession.last_message_at.desc().nulls_last(), m.ChatSession.id.desc())
     return list((await db.execute(stmt)).scalars())
+
+
+async def rename_session(db: AsyncSession, *, session: m.ChatSession, title: str) -> None:
+    session.title = title
+    await db.flush()
+
+
+async def delete_session(db: AsyncSession, *, tenant_id: uuid.UUID, session: m.ChatSession) -> None:
+    """`ChatMessage` carries no DB-level foreign key to `ChatSession` (this
+    codebase's tables generally don't use them) -- its transcript has to be
+    removed explicitly or it survives as orphaned rows."""
+    await db.execute(
+        delete(m.ChatMessage).where(
+            m.ChatMessage.tenant_id == tenant_id, m.ChatMessage.session_id == session.id
+        )
+    )
+    await db.delete(session)
 
 
 async def list_messages(

@@ -69,6 +69,29 @@ export function useChatMessages(sessionId: string | null) {
   });
 }
 
+export function useRenameChatSession(agentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sessionId, title }: { sessionId: string; title: string }) =>
+      api.patch<ChatSessionDTO>(`/chat/sessions/${sessionId}`, { title }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.sessions(agentId) });
+      qc.invalidateQueries({ queryKey: keys.sessions() });
+    },
+  });
+}
+
+export function useDeleteChatSession(agentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (sessionId: string) => api.delete<void>(`/chat/sessions/${sessionId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.sessions(agentId) });
+      qc.invalidateQueries({ queryKey: keys.sessions() });
+    },
+  });
+}
+
 export function useSendChatMessage(sessionId: string) {
   const qc = useQueryClient();
   return useMutation({
