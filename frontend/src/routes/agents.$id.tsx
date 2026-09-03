@@ -96,6 +96,7 @@ import { formatMs } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import { useMayManageAgent } from "@/lib/governance-hooks";
+import { useConfirm } from "@/hooks/use-confirm";
 
 // Mirrors mapAgentStatus in src/lib/live/apply-event.ts (not exported there).
 // Handles BOTH vocabularies: the WS "agent.status" event carries the raw
@@ -1018,6 +1019,7 @@ export function AgentToolAccessPanel({
   const logins = useMcpLogins();
   const { data: connections = [] } = useMcpConnections();
   const createLogin = useCreateMcpLogin();
+  const { confirm, ConfirmDialog } = useConfirm();
   const frame = agent.departmentFrameTools;
   const effective = agent.effectiveTools;
   const frameKeys = Object.keys(frame).filter((k) => frame[k]?.enabled);
@@ -1091,6 +1093,48 @@ export function AgentToolAccessPanel({
     );
   }
 
+  // Only ever called on an agent-only key: a frame-inherited tile isn't
+  // stored in this agent's own narrowing at all (persist's `tools` payload
+  // only ever carries keys from `allKeys`, which is frame keys + agent-only
+  // keys derived from `effective` -- see the comment above `agentOnlyKeys`),
+  // so there is nothing here for the agent to remove; disabling it via the
+  // existing Toggle is the department-governed equivalent.
+  async function removeTool(key: string) {
+    const ok = await confirm({
+      title: t("Remove this tool?", "Dieses Tool entfernen?"),
+      description: t(
+        `Remove "${key}" from this agent? It can be added again later.`,
+        `„${key}" von diesem Agenten entfernen? Kann später wieder hinzugefügt werden.`,
+      ),
+      confirmLabel: t("Remove", "Entfernen"),
+      cancelLabel: t("Cancel", "Abbrechen"),
+    });
+    if (!ok) return;
+    const keys = new Set(allKeys);
+    keys.delete(key);
+    const tools: Record<string, unknown> = {};
+    for (const k of keys) {
+      const src = effective[k] ?? frame[k];
+      tools[k] = {
+        enabled: !!src?.enabled,
+        read: !!src?.read,
+        write: !!src?.write,
+        send: !!src?.send,
+        approval_eur: src?.approvalEur ?? null,
+        approval_actions: src?.approvalActions ?? [],
+        only: src?.only ?? [],
+        connection_id: src?.connectionId ?? null,
+      };
+    }
+    update.mutate(
+      { narrowing: { tools } },
+      {
+        onSuccess: () => toast.success(t("Tool removed", "Tool entfernt"), { description: key }),
+        onError: () => toast.error(t("Couldn't remove tool", "Tool konnte nicht entfernt werden")),
+      },
+    );
+  }
+
   async function pinCredential(toolKey: string, credentialType: string, credentialId: string) {
     if (!credentialId) {
       persist({ [toolKey]: { connectionId: null } });
@@ -1126,6 +1170,7 @@ export function AgentToolAccessPanel({
 
   return (
     <Panel className="p-5">
+      {ConfirmDialog}
       <div className="mb-4 flex items-start justify-between gap-2">
         <ConfigSectionHeader
           hint={t(
@@ -1217,6 +1262,16 @@ export function AgentToolAccessPanel({
                     <span className="rounded-full border border-primary/40 bg-primary/10 px-1.5 py-0.5 text-[9px] uppercase tracking-widest text-primary">
                       {t("Agent only", "Nur dieser Agent")}
                     </span>
+                  )}
+                  {isAgentOnly && mayManage && (
+                    <button
+                      type="button"
+                      onClick={() => removeTool(key)}
+                      title={t("Remove tool", "Tool entfernen")}
+                      className="ml-auto inline-flex items-center rounded-md p-1 text-muted-foreground transition hover:text-destructive"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
                   )}
                   {!connected && (
                     <span className="rounded-full border border-border bg-background/40 px-1.5 py-0.5 text-[9px] text-muted-foreground">

@@ -317,6 +317,73 @@ describe("AgentToolAccessPanel", () => {
       expect(screen.getByRole("button", { name: /add tool/i })).toBeDisabled();
     });
 
+    it("shows no remove button on a frame-inherited tile", () => {
+      mcpConnectionsMock.mockReturnValue({ data: [PLAIN_CONNECTION, SALESFORCE_CONNECTION] });
+      renderPanel();
+
+      // Only Odoo (a frame tile) is on screen -- Add tool / Toggle are the
+      // only two buttons, neither is a remove action.
+      const buttons = screen.getAllByRole("button");
+      expect(buttons).toHaveLength(2);
+    });
+
+    it("removing an agent-exclusive tile asks for confirmation, then persists it dropped entirely", async () => {
+      mcpConnectionsMock.mockReturnValue({ data: [PLAIN_CONNECTION, SALESFORCE_CONNECTION] });
+      renderPanel({
+        ...ONE_TOOL_AGENT,
+        effectiveTools: {
+          ...ONE_TOOL_AGENT.effectiveTools,
+          Salesforce: { enabled: true, read: true, write: false, send: false, approvalEur: null },
+        },
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: /remove tool/i }));
+      // Confirming must not have persisted yet -- the dialog is a real gate,
+      // not a no-op wrapper around the click.
+      expect(updateNarrowingMock).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: /^remove$/i }));
+
+      await waitFor(() =>
+        expect(updateNarrowingMock).toHaveBeenCalledWith(
+          {
+            narrowing: {
+              tools: {
+                Odoo: {
+                  enabled: true,
+                  read: true,
+                  write: false,
+                  send: false,
+                  approval_eur: null,
+                  approval_actions: [],
+                  only: [],
+                  connection_id: null,
+                },
+              },
+            },
+          },
+          expect.anything(),
+        ),
+      );
+    });
+
+    it("cancelling the remove confirmation leaves the tile and never persists", () => {
+      mcpConnectionsMock.mockReturnValue({ data: [PLAIN_CONNECTION, SALESFORCE_CONNECTION] });
+      renderPanel({
+        ...ONE_TOOL_AGENT,
+        effectiveTools: {
+          ...ONE_TOOL_AGENT.effectiveTools,
+          Salesforce: { enabled: true, read: true, write: false, send: false, approvalEur: null },
+        },
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: /remove tool/i }));
+      fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+
+      expect(updateNarrowingMock).not.toHaveBeenCalled();
+      expect(screen.getByText("Salesforce")).toBeInTheDocument();
+    });
+
     it("marks an agent-exclusive tile 'Agent only', leaving frame tiles unmarked", () => {
       mcpConnectionsMock.mockReturnValue({ data: [PLAIN_CONNECTION, SALESFORCE_CONNECTION] });
       renderPanel({
