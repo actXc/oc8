@@ -513,6 +513,7 @@ async def run_agent(
         skill_tool_names = preamble.skill_tool_names
         contains_restricted = preamble.contains_restricted
         has_knowledge = preamble.has_knowledge
+        has_instruction_files = preamble.has_instruction_files
         tool_trace: list[dict[str, Any]] = []
         # Sub-runs created by delegate_task. run_agent must not publish them (see
         # _delegate); every return below hands them to execute_run instead.
@@ -569,6 +570,7 @@ async def run_agent(
                     active_skills=active_skills,
                     mcp_tools=tools,
                     has_knowledge=has_knowledge,
+                    has_instruction_files=has_instruction_files,
                 )
 
             steps = 0

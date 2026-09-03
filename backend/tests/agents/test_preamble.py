@@ -227,6 +227,79 @@ async def test_has_knowledge_is_true_once_a_kb_is_granted_to_the_department(
     assert pre.has_knowledge is True
 
 
+async def test_has_instruction_files_is_false_with_no_attachment(
+    app_session: AppSessionFactory,
+) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        dept = m.Department(tenant_id=tenant, name="Ops", frame={})
+        db.add(dept)
+        await db.flush()
+        agent = m.Agent(
+            tenant_id=tenant, department_id=dept.id, name="Solo", status="idle",
+            definition={}, presentation={},
+        )
+        db.add(agent)
+        await db.flush()
+
+        pre = await build_run_preamble(
+            db, agent=agent, tenant_id=tenant, task_text="mach was",
+            frame={}, model_locality="eu",
+        )
+
+    assert pre.has_instruction_files is False
+    joined = "\n".join(msg.content for msg in pre.messages if isinstance(msg.content, str))
+    assert "read_instruction_file" not in joined
+
+
+async def test_has_instruction_files_is_true_once_one_is_attached(
+    app_session: AppSessionFactory,
+) -> None:
+    """Gates whether offered_tools() offers read_instruction_file at all (see
+    oc8.agent.control_tools) -- and, per the design doc's Instructions
+    Attachment Flow §3, the Instructions text itself gets one line
+    auto-appended so the agent knows the tool exists, without the file's
+    actual content ever entering the standing prompt."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        dept = m.Department(tenant_id=tenant, name="Ops", frame={})
+        db.add(dept)
+        await db.flush()
+        agent = m.Agent(
+            tenant_id=tenant, department_id=dept.id, name="Solo", status="idle",
+            definition={}, presentation={},
+        )
+        db.add(agent)
+        await db.flush()
+        db.add(
+            m.FileAttachment(
+                tenant_id=tenant,
+                owner_type="agent_instructions",
+                owner_id=agent.id,
+                bucket_key="policy-attached",
+                filename="policy.pdf",
+                content_type="application/pdf",
+                size_bytes=10,
+                extracted_text="Refunds within 30 days.",
+                is_image=False,
+            )
+        )
+        await db.flush()
+
+        pre = await build_run_preamble(
+            db, agent=agent, tenant_id=tenant, task_text="mach was",
+            frame={}, model_locality="eu",
+        )
+
+    assert pre.has_instruction_files is True
+    joined = "\n".join(msg.content for msg in pre.messages if isinstance(msg.content, str))
+    assert "read_instruction_file" in joined
+    # The note nudges the agent toward the tool -- it must never carry the
+    # attachment's own content, or read_instruction_file's whole point (never
+    # auto-injecting file content into every run) is defeated.
+    assert "Refunds within 30 days." not in joined
+
+
 async def test_the_provenance_rule_precedes_anything_a_stranger_wrote(
     app_session: AppSessionFactory,
 ) -> None:

@@ -319,6 +319,7 @@ async def step(
         # run to a local model and keeps it out of the department cache.
         ctx["contains_restricted"] = preamble.contains_restricted
         ctx["has_knowledge"] = preamble.has_knowledge
+        ctx["has_instruction_files"] = preamble.has_instruction_files
         if conn is not None and not tool_schemas_raw:
             cfg = _mcp_params(conn)
             env = await _mcp_env(conn, db, run.tenant_id)
@@ -346,6 +347,7 @@ async def step(
     # False keeps a run already in flight (whose ctx predates this) working.
     contains_restricted = bool(ctx.get("contains_restricted", False))
     has_knowledge = bool(ctx.get("has_knowledge", False))
+    has_instruction_files = bool(ctx.get("has_instruction_files", False))
 
     tools = offered_tools(
         agent,
@@ -353,6 +355,7 @@ async def step(
         active_skills=active_skills,
         mcp_tools=mcp_tools,
         has_knowledge=has_knowledge,
+        has_instruction_files=has_instruction_files,
     )
 
     resolved_messages = _to_messages(transcript)

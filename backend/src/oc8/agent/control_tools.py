@@ -210,6 +210,24 @@ READ_REFERENCE_FILE = NeutralTool(
     },
 )
 
+READ_INSTRUCTION_FILE = NeutralTool(
+    name="read_instruction_file",
+    description=(
+        "Read the content of a file attached to your own standing "
+        "Instructions (not a skill's reference file). `filename` is the "
+        "exact filename shown in your Instructions. Only works for "
+        "text-extractable files (PDF, Word, Excel, CSV, plain text) -- "
+        "attached images are not readable through this tool."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "filename": {"type": "string", "description": "The attached file's exact filename."},
+        },
+        "required": ["filename"],
+    },
+)
+
 SEARCH_MEMORY = NeutralTool(
     name="search_memory",
     description=(
@@ -338,6 +356,7 @@ CONTROL_TOOL_SCHEMAS: dict[str, NeutralTool] = {
     RENDER_COMPONENT.name: RENDER_COMPONENT,
     PROPOSE_CHANGE.name: PROPOSE_CHANGE,
     READ_REFERENCE_FILE.name: READ_REFERENCE_FILE,
+    READ_INSTRUCTION_FILE.name: READ_INSTRUCTION_FILE,
 }
 CONTROL_TOOL_NAMES: frozenset[str] = frozenset(CONTROL_TOOL_SCHEMAS)
 
@@ -359,6 +378,7 @@ def offered_tools(
     active_skills: Sequence[LoadedSkill],
     mcp_tools: Sequence[NeutralTool],
     has_knowledge: bool = False,
+    has_instruction_files: bool = False,
 ) -> list[NeutralTool]:
     """The full tool list to offer the model this step.
 
@@ -408,6 +428,10 @@ def offered_tools(
     # a tool that can only ever answer "that skill has no reference files".
     if any(s.definition.reference_root for s in assigned_skills):
         offered.append(READ_REFERENCE_FILE)
+    # Same reasoning again: an agent with no file attached to its own
+    # Instructions has nothing read_instruction_file could ever resolve.
+    if has_instruction_files:
+        offered.append(READ_INSTRUCTION_FILE)
     offered.extend(skill_tool_schemas(assigned_skills))
 
     if active_skills:
@@ -874,6 +898,45 @@ async def execute_control_tool(
             message=f"Reading reference file: {rel_path}",
         )
         return ControlOutcome(output=text)
+
+    if tc.name == READ_INSTRUCTION_FILE.name:
+        # A sibling branch, not a fork of read_reference_file's above: that
+        # dispatch is intrinsically keyed by assigned_skills, and has no
+        # agent-level concept to hook into without forking its meaning (see
+        # docs/superpowers/specs/2026-09-03-chat-and-instruction-file-
+        # attachments-design.md's Instructions Attachment Flow §3).
+        filename = str(tc.arguments.get("filename", "")).strip()
+        if not filename:
+            return ControlOutcome(output="ERROR: read_instruction_file requires `filename`")
+        attachment = (
+            await db.execute(
+                select(m.FileAttachment).where(
+                    m.FileAttachment.tenant_id == tenant_id,
+                    m.FileAttachment.owner_type == "agent_instructions",
+                    m.FileAttachment.owner_id == agent.id,
+                    m.FileAttachment.filename == filename,
+                )
+            )
+        ).scalar_one_or_none()
+        if attachment is None:
+            return ControlOutcome(output=f"ERROR: no such file: {filename}")
+        if attachment.is_image:
+            return ControlOutcome(
+                output=(
+                    f"ERROR: '{filename}' is an image -- instruction attachments "
+                    "do not support vision, only chat attachments do."
+                )
+            )
+        text = attachment.extracted_text or "(could not read this file's content)"
+        truncated = text[:_MAX_REFERENCE_FILE_BYTES]
+        await record_activity(
+            db,
+            tenant_id=tenant_id,
+            agent_id=agent.id,
+            status="info",
+            message=f"Reading instruction file: {filename}",
+        )
+        return ControlOutcome(output=truncated)
 
     if tc.name == REQUEST_DECISION.name:
         question = str(tc.arguments.get("question", "")).strip()

@@ -17,7 +17,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from oc8 import models as m
@@ -67,6 +67,12 @@ class RunPreamble:
     #: precisely because a scheduled or blank-instruction run only learns its
     #: real topic mid-run, once it has read the record it was triggered for.
     has_knowledge: bool = False
+    #: Whether the agent has at least one file attached to its own standing
+    #: Instructions (FileAttachment(owner_type="agent_instructions")). Same
+    #: shape as has_knowledge above: read_instruction_file exists precisely
+    #: so that content is never auto-injected into every run's prompt, only
+    #: fetched on demand.
+    has_instruction_files: bool = False
 
 
 async def roster_block(db: AsyncSession, *, agent: m.Agent) -> str | None:
@@ -183,6 +189,35 @@ async def build_run_preamble(
         messages.append(NeutralMessage(role="system", content=kb_ctx))
     has_knowledge = bool(await granted_kb_ids(db, agent=agent))
 
+    instruction_file_count = (
+        await db.scalar(
+            select(func.count())
+            .select_from(m.FileAttachment)
+            .where(
+                m.FileAttachment.tenant_id == tenant_id,
+                m.FileAttachment.owner_type == "agent_instructions",
+                m.FileAttachment.owner_id == agent.id,
+            )
+        )
+        or 0
+    )
+    has_instruction_files = instruction_file_count > 0
+    if has_instruction_files:
+        # Not the file content itself -- that never enters the standing prompt
+        # (see read_instruction_file's own docstring in control_tools.py) --
+        # just enough of a nudge that the agent knows the tool exists and is
+        # worth calling.
+        messages.append(
+            NeutralMessage(
+                role="system",
+                content=(
+                    f"You have {instruction_file_count} attached reference "
+                    f"file{'s' if instruction_file_count != 1 else ''}; use "
+                    "read_instruction_file to read one by name."
+                ),
+            )
+        )
+
     if agent.is_team_lead:
         # Appended as its own system message (like memory/KB context) because
         # system_prompt is a pure sync function and this needs the DB.
@@ -217,4 +252,5 @@ async def build_run_preamble(
         skill_tool_names=frozenset(s.tool_name for s in assigned_skills),
         contains_restricted=contains_restricted,
         has_knowledge=has_knowledge,
+        has_instruction_files=has_instruction_files,
     )

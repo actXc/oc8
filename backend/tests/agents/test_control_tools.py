@@ -187,6 +187,7 @@ def test_control_tool_names_matches_the_schemas() -> None:
         "render_component",
         "propose_change",
         "read_reference_file",
+        "read_instruction_file",
     }
 
 
@@ -226,6 +227,33 @@ def test_search_knowledge_is_offered_once_a_knowledge_base_is_granted() -> None:
         )
     ]
     assert "search_knowledge" in names
+
+
+def test_read_instruction_file_is_withheld_without_any_attached_file() -> None:
+    """Same reasoning as search_knowledge above: an agent with no file
+    attached to its own Instructions has nothing this tool could resolve.
+    Defaults to withheld -- has_instruction_files defaults to False, matching
+    every pre-existing offered_tools() call site until it passes the real
+    value."""
+    names = [
+        t.name
+        for t in offered_tools(_agent(), assigned_skills=[], active_skills=[], mcp_tools=MCP_TOOLS)
+    ]
+    assert "read_instruction_file" not in names
+
+
+def test_read_instruction_file_is_offered_once_a_file_is_attached() -> None:
+    names = [
+        t.name
+        for t in offered_tools(
+            _agent(),
+            assigned_skills=[],
+            active_skills=[],
+            mcp_tools=MCP_TOOLS,
+            has_instruction_files=True,
+        )
+    ]
+    assert "read_instruction_file" in names
 
 
 # ------------------------------------------------------------------ execution
