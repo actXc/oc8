@@ -358,6 +358,66 @@ async def test_emptying_the_site_ids_stops_the_knowledge_source(
         oauth_http.set_transport_override(None)
 
 
+async def test_drive_ids_alone_create_the_knowledge_source(
+    app_session: AppSessionFactory,
+) -> None:
+    """OneDrive drives are configured through their own field, independent of
+    site_ids -- a tenant with no SharePoint sites at all must still be able to
+    index their OneDrive drives from this form."""
+    oauth_http.set_transport_override(_graph_transport())
+    tenant = uuid.uuid4()
+    try:
+        plugin_id = await _install_and_enable(app_session, tenant)
+        answer = await _submit(
+            plugin_id,
+            tenant,
+            {
+                "app": await _ms365_app_credential(app_session, tenant),
+                "drive_ids": "drive1, drive2",
+            },
+        )
+        assert answer.status_code == 200, answer.text
+
+        async with app_session(tenant) as db:
+            source = (
+                await db.execute(select(m.DataSource).where(m.DataSource.tenant_id == tenant))
+            ).scalar_one()
+            assert source.connected is True
+            assert source.config["driveIds"] == ["drive1", "drive2"]
+            assert source.config.get("siteIds") in (None, [])
+    finally:
+        oauth_http.set_transport_override(None)
+
+
+async def test_emptying_only_the_site_ids_leaves_a_configured_drive_connected(
+    app_session: AppSessionFactory,
+) -> None:
+    """site_ids and drive_ids are independent axes -- clearing one must not
+    disconnect a source that still has ids configured on the other."""
+    oauth_http.set_transport_override(_graph_transport())
+    tenant = uuid.uuid4()
+    try:
+        plugin_id = await _install_and_enable(app_session, tenant)
+        values = {
+            "app": await _ms365_app_credential(app_session, tenant),
+            "site_ids": "site1",
+            "drive_ids": "drive1",
+        }
+        assert (await _submit(plugin_id, tenant, values)).status_code == 200
+        second = await _submit(plugin_id, tenant, {**values, "site_ids": ""})
+        assert second.status_code == 200, second.text
+
+        async with app_session(tenant) as db:
+            source = (
+                await db.execute(select(m.DataSource).where(m.DataSource.tenant_id == tenant))
+            ).scalar_one()
+            assert source.connected is True
+            assert source.config["siteIds"] == []
+            assert source.config["driveIds"] == ["drive1"]
+    finally:
+        oauth_http.set_transport_override(None)
+
+
 async def test_an_app_registration_without_graph_permissions_is_refused(
     app_session: AppSessionFactory,
 ) -> None:
