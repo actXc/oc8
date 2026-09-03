@@ -1,8 +1,9 @@
-import { ArrowDown, Lock, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowDown, Lock, Plus, Search, ShieldCheck, Sparkles, Trash2, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Panel } from "@/components/app-shell";
 import { CredentialPicker } from "@/components/credential-picker";
+import { useConfirm } from "@/hooks/use-confirm";
 import type { Agent, Department } from "@/lib/mock-data";
 import {
   effectiveAgentPolicy,
@@ -71,6 +72,45 @@ export function PermissionsPanel(props: DeptProps | AgentProps) {
       if (mode === "department") props.onDepartmentPolicyChange?.(policy);
       return policy;
     });
+  }
+
+  // Department-mode-only "Add tool" / "Remove tool" flow, mirroring
+  // AgentToolAccessPanel (agents.$id.tsx): a tile exists only for a tool
+  // this department's frame actually names -- Object.keys(dPol) IS exactly
+  // that set, since fromDepartmentFrame (departments.$id.tsx) produces one
+  // PolicyMap entry per frame.tools key. Showing every tenant connection
+  // here (the old behaviour) made "which tools does this department
+  // actually use" unreadable once a tenant had more than a handful.
+  const { confirm, ConfirmDialog } = useConfirm();
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [toolSearch, setToolSearch] = useState("");
+  const addedTools = mode === "department" ? tools.filter((t) => t.id in dPol) : tools;
+  const addableTools = tools.filter((t) => !(t.id in dPol));
+
+  function addDeptTool(toolId: string) {
+    setDeptTool(toolId, {
+      enabled: true,
+      perms: { read: true, write: false, send: false },
+      approvalEUR: null,
+      defaultConnectionId: null,
+    });
+    setPickerOpen(false);
+  }
+
+  async function removeDeptTool(toolId: string, toolName: string) {
+    const ok = await confirm({
+      title: "Remove this tool?",
+      description: `Remove "${toolName}" from ${dept.name}? Every agent in this department loses it immediately. It can be added again later.`,
+      confirmLabel: "Remove",
+      cancelLabel: "Cancel",
+    });
+    if (!ok) return;
+    setDPol((prev) => {
+      const { [toolId]: _removed, ...policy } = prev;
+      if (mode === "department") props.onDepartmentPolicyChange?.(policy);
+      return policy;
+    });
+    toast.success(`${toolName} removed from ${dept.name}`);
   }
 
   // Resolves a picked/created credential to a login (McpConnection) and
@@ -167,21 +207,42 @@ export function PermissionsPanel(props: DeptProps | AgentProps) {
       <div className="grid gap-6 xl:grid-cols-2">
         {/* 1) MCP-Kacheln */}
         <Panel className="p-5">
-          <SectionHeader
-            title={mode === "agent" ? "Available interfaces" : "MCP interfaces"}
-            hint={
-              mode === "agent"
-                ? "inherited from the department — on/off for the agent only"
-                : "enable to grant to the department's agents"
-            }
-          />
+          {ConfirmDialog}
+          <div className="flex items-start justify-between gap-2">
+            <SectionHeader
+              title={mode === "agent" ? "Available interfaces" : "MCP interfaces"}
+              hint={
+                mode === "agent"
+                  ? "inherited from the department — on/off for the agent only"
+                  : "only tools added here are ever offered to this department's agents"
+              }
+            />
+            {mode === "department" && (
+              <button
+                type="button"
+                onClick={() => {
+                  setToolSearch("");
+                  setPickerOpen(true);
+                }}
+                disabled={addableTools.length === 0}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-background/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition hover:bg-background/70 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Plus className="h-3.5 w-3.5" /> Add tool
+              </button>
+            )}
+          </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            {tools.length === 0 && (
+            {mode === "department" && addedTools.length === 0 && (
+              <p className="col-span-full rounded-md border border-dashed border-border/70 bg-background/30 p-3 text-center text-xs text-muted-foreground">
+                No tools yet — add one to grant it to every agent in this department.
+              </p>
+            )}
+            {mode === "agent" && tools.length === 0 && (
               <p className="col-span-full text-xs text-muted-foreground">
                 No MCP connections yet. Add one under Capas to grant it here.
               </p>
             )}
-            {tools.map((tool) => {
+            {addedTools.map((tool) => {
               const dTool = dPol[tool.id];
               const eff = effective[tool.id];
               const deptAllows = dTool?.enabled;
@@ -199,6 +260,9 @@ export function PermissionsPanel(props: DeptProps | AgentProps) {
                   on={!!isOn}
                   disabled={mode === "agent" && !deptAllows}
                   restricted={!!restrictedByAgent}
+                  onRemove={
+                    mode === "department" ? () => removeDeptTool(tool.id, tool.name) : undefined
+                  }
                   onToggle={(next) => {
                     if (mode === "department") {
                       setDeptTool(tool.id, {
@@ -370,6 +434,77 @@ export function PermissionsPanel(props: DeptProps | AgentProps) {
           </div>
         </Panel>
       </div>
+
+      {mode === "department" &&
+        pickerOpen &&
+        (() => {
+          const searchTerm = toolSearch.trim().toLowerCase();
+          const filtered = searchTerm
+            ? addableTools.filter((t) => t.name.toLowerCase().includes(searchTerm))
+            : addableTools;
+          return (
+            <div
+              className="fixed inset-0 z-40 grid place-items-center bg-black/60 p-4 backdrop-blur-sm"
+              onClick={() => setPickerOpen(false)}
+            >
+              <div
+                className="w-full max-w-lg overflow-hidden rounded-xl border border-border bg-panel shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between border-b border-border px-5 py-4">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-widest text-muted-foreground">
+                      Tenant connections
+                    </div>
+                    <h2 className="font-serif text-xl">Add tool</h2>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPickerOpen(false)}
+                    className="grid h-8 w-8 place-items-center rounded-md border border-border text-muted-foreground transition hover:text-foreground"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="relative border-b border-border px-5 py-3">
+                  <Search className="pointer-events-none absolute left-8 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    value={toolSearch}
+                    onChange={(e) => setToolSearch(e.target.value)}
+                    placeholder="Search tools…"
+                    className="w-full rounded-md border border-border bg-background/40 py-2 pl-8 pr-3 text-sm outline-none focus:border-primary/50"
+                  />
+                </div>
+                <div className="max-h-[60vh] divide-y divide-border overflow-y-auto">
+                  {filtered.length === 0 && (
+                    <div className="p-6 text-center text-sm text-muted-foreground">
+                      {addableTools.length === 0
+                        ? "Every tenant connection already has a tile here."
+                        : "No tools match your search."}
+                    </div>
+                  )}
+                  {filtered.map((tool) => {
+                    const Icon = tool.icon;
+                    return (
+                      <button
+                        key={tool.id}
+                        type="button"
+                        onClick={() => addDeptTool(tool.id)}
+                        className="flex w-full items-center gap-3 px-5 py-3 text-left transition hover:bg-primary/5"
+                      >
+                        <Icon className="h-4 w-4 shrink-0 text-primary" />
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                          {tool.name}
+                        </span>
+                        <Plus className="h-4 w-4 text-muted-foreground" />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
     </div>
   );
 }
@@ -389,6 +524,7 @@ function ToolTile({
   disabled,
   restricted,
   onToggle,
+  onRemove,
   children,
 }: {
   tool: McpTool;
@@ -396,6 +532,7 @@ function ToolTile({
   disabled?: boolean;
   restricted?: boolean;
   onToggle: (next: boolean) => void;
+  onRemove?: () => void;
   children?: React.ReactNode;
 }) {
   const Icon = tool.icon;
@@ -412,6 +549,19 @@ function ToolTile({
             : "border-border bg-background/40 hover:border-primary/40",
       )}
     >
+      {onRemove && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove();
+          }}
+          title="Remove tool"
+          className="absolute right-2 top-2 z-10 rounded-md p-1 text-muted-foreground opacity-0 transition hover:text-destructive group-hover:opacity-100"
+        >
+          <Trash2 className="h-3 w-3" />
+        </button>
+      )}
       <button
         type="button"
         onClick={() => !disabled && onToggle(!on)}
