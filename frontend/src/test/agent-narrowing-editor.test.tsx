@@ -51,6 +51,9 @@ const AGENT: AgentDetail = {
   departmentFrameTools: {
     Odoo: { enabled: true, read: true, write: false, send: false, approvalEur: null },
   },
+  narrowingTools: {
+    Odoo: { enabled: true, read: true, write: false, send: false, approvalEur: null },
+  },
   runtimeRef: null,
   currentRunId: null,
 };
@@ -114,7 +117,7 @@ describe("NarrowingEditor (permissions only)", () => {
   it("saving preserves the tool's existing enabled state and connection_id untouched", () => {
     renderEditor({
       ...AGENT,
-      effectiveTools: {
+      narrowingTools: {
         Odoo: {
           enabled: true,
           read: true,
@@ -141,6 +144,48 @@ describe("NarrowingEditor (permissions only)", () => {
               approval_actions: [],
               only: [],
               connection_id: "login-1",
+            },
+          },
+        },
+      },
+      expect.anything(),
+    );
+  });
+
+  it("saving does not bake in a role-rights dip in effectiveTools -- narrowing/frame stay the source of truth", () => {
+    // Regression test: effectiveTools = role_rights ∩ frame ∩ narrowing, so a
+    // bad/missing role reference can zero out read/write/send there even
+    // though the agent's own stored narrowing (and the department frame) are
+    // both still clean. Saving must never resave that degraded value -- doing
+    // so previously baked a transient role problem into narrowing forever.
+    renderEditor({
+      ...AGENT,
+      effectiveTools: {
+        Odoo: { enabled: true, read: false, write: false, send: false, approvalEur: null },
+      },
+      departmentFrameTools: {
+        Odoo: { enabled: true, read: true, write: true, send: true, approvalEur: null },
+      },
+      narrowingTools: {
+        Odoo: { enabled: true, read: true, write: true, send: true, approvalEur: null },
+      },
+    });
+
+    screen.getByRole("button", { name: /^save$/i }).click();
+
+    expect(updateNarrowingMock).toHaveBeenCalledWith(
+      {
+        narrowing: {
+          tools: {
+            Odoo: {
+              enabled: true,
+              read: true,
+              write: true,
+              send: true,
+              approval_eur: null,
+              approval_actions: [],
+              only: [],
+              connection_id: null,
             },
           },
         },

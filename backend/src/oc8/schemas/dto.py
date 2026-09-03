@@ -540,6 +540,15 @@ class AgentDetailDTO(AgentDTO):
     department_name: str | None = None
     effective_tools: dict[str, ToolPolicyDTO] = {}
     department_frame_tools: dict[str, ToolPolicyDTO] = {}
+    #: The agent's own `narrowing["tools"]` row, verbatim -- NOT intersected
+    #: with `role_rights` the way `effective_tools` is. The Configuration and
+    #: Guardrails tabs must resave whichever fields they don't own (read/
+    #: write/send/approval_eur/approval_actions/only) from THIS, never from
+    #: `effective_tools`: a role_rights dip (a bad role reference, a role
+    #: mid-edit) would otherwise get silently baked into the agent's stored
+    #: narrowing forever the next time either tab saves, since a save always
+    #: rewrites the full `tools` payload including fields it isn't editing.
+    narrowing_tools: dict[str, ToolPolicyDTO] = {}
     runtime_ref: str | None = None
     #: The run this agent is on right now, whoever started it. Without it the
     #: detail screen can only show a live log for a run started in that same

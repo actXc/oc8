@@ -34,7 +34,7 @@ from oc8.agents.repo import visible_agent, visible_agents
 from oc8.api.deps import DbSession, require_departmental
 from oc8.api.v1._serializers import agent_to_dto
 from oc8.authz.authority import authority_for_principal, tenant_wide_read
-from oc8.authz.pdp import agent_tool_rights, effective_tool_policies
+from oc8.authz.pdp import ToolPolicy, agent_tool_rights, effective_tool_policies
 from oc8.authz.permissions import AGENT, VIEW, perm
 from oc8.authz.scope import HumanActor
 from oc8.runtime.states import TERMINAL
@@ -178,6 +178,16 @@ async def _agent_detail_dto(db: DbSession, agent: m.Agent) -> AgentDetailDTO:
         frame, agent.narrowing, role_rights=await agent_tool_rights(db, agent)
     )
     frame_tools = {k: ToolPolicyDTO(**v) for k, v in _frame_tools_json(frame).items()}
+    # Same normalization `narrowing_within_frame`/`effective_tool_policies`
+    # already apply to this same raw dict -- a stored narrowing row can be
+    # partial (only the keys a given save actually touched), so this must
+    # default missing read/write/send the same way, not require them present.
+    raw_narrowing_tools = (agent.narrowing or {}).get("tools", {})
+    narrowing_tools = {
+        k: ToolPolicyDTO(**ToolPolicy.from_json(v).to_json())
+        for k, v in raw_narrowing_tools.items()
+        if isinstance(v, dict)
+    }
     base = agent_to_dto(agent).model_dump(by_alias=False)
     # The newest run that has not finished. Newest, because a run abandoned by a
     # dead worker can sit in `running` indefinitely and the one worth watching is
@@ -203,6 +213,7 @@ async def _agent_detail_dto(db: DbSession, agent: m.Agent) -> AgentDetailDTO:
         department_name=dept_name,
         effective_tools={k: ToolPolicyDTO(**p.to_json()) for k, p in effective.items()},
         department_frame_tools=frame_tools,
+        narrowing_tools=narrowing_tools,
         runtime_ref=agent.runtime_ref,
         current_run_id=str(current_run) if current_run else None,
     )

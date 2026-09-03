@@ -38,6 +38,7 @@ const AGENT: AgentDetail = {
   departmentName: "Vertrieb",
   effectiveTools: {},
   departmentFrameTools: {},
+  narrowingTools: {},
   runtimeRef: null,
   currentRunId: null,
 };

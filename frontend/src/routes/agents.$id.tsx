@@ -1022,6 +1022,14 @@ export function AgentToolAccessPanel({
   const { confirm, ConfirmDialog } = useConfirm();
   const frame = agent.departmentFrameTools;
   const effective = agent.effectiveTools;
+  // The agent's own stored narrowing, used (never `effective`) as the
+  // resave source for fields this panel doesn't itself edit -- `effective`
+  // is role_rights ∩ frame ∩ narrowing, so a role dip (bad/missing role
+  // reference) zeroes read/write/send there without touching the agent's
+  // actual narrowing row. Reading `effective` as that source bakes the dip
+  // into narrowing permanently on the next save, since every save rewrites
+  // the full tools payload including fields it isn't changing.
+  const narrowing = agent.narrowingTools;
   const frameKeys = Object.keys(frame).filter((k) => frame[k]?.enabled);
   // Agent-exclusive grants: tools this agent has directly, that the
   // department never put in its frame -- backend/src/oc8/authz/pdp.py's
@@ -1065,7 +1073,7 @@ export function AgentToolAccessPanel({
     const keys = new Set([...allKeys, ...Object.keys(patch)]);
     const tools: Record<string, unknown> = {};
     for (const k of keys) {
-      const src = effective[k] ?? frame[k];
+      const src = narrowing[k] ?? frame[k];
       const p = patch[k];
       tools[k] = {
         enabled: p?.enabled ?? !!src?.enabled,
@@ -1114,7 +1122,7 @@ export function AgentToolAccessPanel({
     keys.delete(key);
     const tools: Record<string, unknown> = {};
     for (const k of keys) {
-      const src = effective[k] ?? frame[k];
+      const src = narrowing[k] ?? frame[k];
       tools[k] = {
         enabled: !!src?.enabled,
         read: !!src?.read,
@@ -1469,6 +1477,11 @@ export function NarrowingEditor({
   const { data: connections = [] } = useMcpConnections();
   const frame = agent.departmentFrameTools;
   const effective = agent.effectiveTools;
+  // See the matching comment in AgentToolAccessPanel above: the agent's own
+  // stored narrowing, not `effective` (role_rights ∩ frame ∩ narrowing), is
+  // the correct resave source for whatever this save doesn't itself edit --
+  // otherwise a role_rights dip gets baked into narrowing permanently.
+  const narrowing = agent.narrowingTools;
   const frameKeys = Object.keys(frame).filter((k) => frame[k]?.enabled);
   const enabledKeys = frameKeys.filter((k) => effective[k]?.enabled);
   // Per-tool-key policy edits (read/write/send/approvalEur/approvalActions/
@@ -1484,14 +1497,14 @@ export function NarrowingEditor({
   }
 
   // What the picker for tool `k` starts from: any local edit, else the
-  // agent's current effective policy (which already reflects prior
-  // narrowing merged with the department frame), else the frame's own
-  // policy. Deliberately NOT `frame[k]` alone -- that would silently reset
+  // agent's own stored narrowing (not `effective` -- see the comment above
+  // `narrowing`), else the frame's own policy. Deliberately NOT `frame[k]`
+  // alone -- that would silently reset
   // an already-narrowed approvalActions/only back to the department's wider
   // default the moment the picker first renders.
   function valueFor(k: string): GuardrailValue {
     if (edited[k]) return edited[k];
-    const src = effective[k] ?? frame[k];
+    const src = narrowing[k] ?? frame[k];
     return {
       read: !!src?.read,
       write: !!src?.write,
@@ -1507,7 +1520,7 @@ export function NarrowingEditor({
     for (const k of frameKeys) {
       const val = valueFor(k);
       tools[k] = {
-        enabled: !!effective[k]?.enabled,
+        enabled: !!(narrowing[k] ?? frame[k])?.enabled,
         read: val.read,
         write: val.write,
         send: val.send,
@@ -1516,7 +1529,7 @@ export function NarrowingEditor({
         approval_eur: val.approvalEur ?? null,
         approval_actions: val.approvalActions,
         only: val.only,
-        connection_id: effective[k]?.connectionId ?? null,
+        connection_id: (narrowing[k] ?? frame[k])?.connectionId ?? null,
       };
     }
     update.mutate(

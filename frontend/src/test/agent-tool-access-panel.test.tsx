@@ -59,6 +59,9 @@ const ONE_TOOL_AGENT: AgentDetail = {
   departmentFrameTools: {
     Odoo: { enabled: true, read: true, write: false, send: false, approvalEur: null },
   },
+  narrowingTools: {
+    Odoo: { enabled: true, read: true, write: false, send: false, approvalEur: null },
+  },
   runtimeRef: null,
   currentRunId: null,
 };
@@ -231,6 +234,54 @@ describe("AgentToolAccessPanel", () => {
         },
         expect.anything(),
       ),
+    );
+  });
+
+  it("toggling off does not bake in a role-rights dip in effectiveTools -- narrowing/frame stay the source of truth", () => {
+    // Regression test: effectiveTools = role_rights ∩ frame ∩ narrowing, so a
+    // bad/missing role reference can zero out read/write/send there even
+    // though the agent's own stored narrowing (and the department frame) are
+    // both still clean. Toggling enabled off must never resave that degraded
+    // value for the fields this panel doesn't itself edit -- doing so
+    // previously baked a transient role problem into narrowing forever.
+    mcpConnectionsMock.mockReturnValue({ data: [PLAIN_CONNECTION] });
+    renderPanel({
+      ...ONE_TOOL_AGENT,
+      effectiveTools: {
+        Odoo: { enabled: true, read: false, write: false, send: false, approvalEur: null },
+      },
+      departmentFrameTools: {
+        Odoo: { enabled: true, read: true, write: true, send: true, approvalEur: null },
+      },
+      narrowingTools: {
+        Odoo: { enabled: true, read: true, write: true, send: true, approvalEur: null },
+      },
+    });
+
+    const toggle = screen
+      .getAllByRole("button")
+      .find((b) => !/add tool/i.test(b.textContent ?? ""));
+    if (!toggle) throw new Error("toggle button not found");
+    fireEvent.click(toggle);
+
+    expect(updateNarrowingMock).toHaveBeenCalledWith(
+      {
+        narrowing: {
+          tools: {
+            Odoo: {
+              enabled: false,
+              read: true,
+              write: true,
+              send: true,
+              approval_eur: null,
+              approval_actions: [],
+              only: [],
+              connection_id: null,
+            },
+          },
+        },
+      },
+      expect.anything(),
     );
   });
 

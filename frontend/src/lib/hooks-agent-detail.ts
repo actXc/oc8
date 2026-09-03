@@ -31,6 +31,12 @@ export interface AgentDetail {
   departmentName: string | null;
   effectiveTools: Record<string, ToolPolicy>;
   departmentFrameTools: Record<string, ToolPolicy>;
+  // The agent's own narrowing["tools"] row, verbatim -- not intersected with
+  // role_rights the way effectiveTools is. Use this (falling back to
+  // departmentFrameTools), never effectiveTools, when resaving fields a
+  // panel doesn't itself edit: effectiveTools dips whenever role_rights
+  // does, and re-persisting that dip bakes it into narrowing permanently.
+  narrowingTools: Record<string, ToolPolicy>;
   runtimeRef: string | null;
   // The run this agent is on right now, whoever started it. Without it the live
   // log can only follow a run started in this browser tab, so a scheduled run
