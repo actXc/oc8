@@ -773,6 +773,15 @@ class ChatMessageDTO(CamelModel):
     created_at: str
 
 
+class FileAttachmentDTO(CamelModel):
+    id: str
+    filename: str
+    content_type: str
+    size_bytes: int
+    is_image: bool
+    created_at: str
+
+
 class ReportDTO(CamelModel):
     """One finished run that rendered at least one component -- the "My
     work" Reports list reads this, not `RunDTO` directly, since a report is
