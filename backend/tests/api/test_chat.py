@@ -787,3 +787,106 @@ async def test_a_second_turn_reuses_the_task_the_first_one_opened(
             (await db.execute(select(m.Task).where(m.Task.tenant_id == tenant))).scalars().all()
         )
         assert len(tasks) == 1
+
+
+# --- Task 6: attachment_ids wiring (oc8.api.v1.files, chat/service.py) ---
+
+
+async def test_send_message_with_a_text_attachment_appends_extracted_text_and_repoints_it(
+    app_session: AppSessionFactory, redis_url: str, minio_url: str
+) -> None:
+    """A file uploaded before the message is sent is owned by the
+    `ChatSession` (`owner_id == session.id`); sending the message that
+    references it must both (a) fold its extracted text into the run's
+    `task`, labelled with its filename, and (b) re-point `owner_id` to the
+    new `ChatMessage`, matching `chat/service.py::send_message`'s docstring."""
+    tenant = uuid.uuid4()
+    agent_id = await _seed_agent(app_session, tenant)
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            session_id = (
+                await c.post(
+                    "/api/v1/chat/sessions",
+                    json={"agentId": str(agent_id)},
+                    headers=_headers(tenant),
+                )
+            ).json()["id"]
+
+            upload_r = await c.post(
+                f"/api/v1/chat/sessions/{session_id}/attachments",
+                files={"file": ("notes.txt", b"the quarterly numbers", "text/plain")},
+                headers=_headers(tenant),
+            )
+            assert upload_r.status_code == 201, upload_r.text
+            attachment_id = upload_r.json()["id"]
+
+            send_r = await c.post(
+                f"/api/v1/chat/sessions/{session_id}/messages",
+                json={"message": "see attached", "attachmentIds": [attachment_id]},
+                headers=_headers(tenant),
+            )
+            assert send_r.status_code == 201, send_r.text
+            user_message_id = send_r.json()["id"]
+            run_id = send_r.json()["runId"]
+
+    async with app_session(tenant) as db:
+        run = await db.get(m.AgentRun, uuid.UUID(run_id))
+        assert run is not None
+        assert "[Attached file: notes.txt]" in run.context["task"]
+        assert "the quarterly numbers" in run.context["task"]
+        assert "task_images" not in run.context
+
+        att = await db.get(m.FileAttachment, uuid.UUID(attachment_id))
+        assert att is not None
+        assert att.owner_type == "chat_message"
+        assert str(att.owner_id) == user_message_id
+
+
+async def test_send_message_with_an_image_attachment_populates_task_images(
+    app_session: AppSessionFactory, redis_url: str, minio_url: str
+) -> None:
+    """An image attachment must not be inlined into `task` text (no
+    extractable text exists for it) -- instead it lands in
+    `context["task_images"]` as a `{bucket_key, content_type}` pointer, left
+    for the run-preamble step (Task 7) to fetch the actual bytes."""
+    tenant = uuid.uuid4()
+    agent_id = await _seed_agent(app_session, tenant)
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            session_id = (
+                await c.post(
+                    "/api/v1/chat/sessions",
+                    json={"agentId": str(agent_id)},
+                    headers=_headers(tenant),
+                )
+            ).json()["id"]
+
+            upload_r = await c.post(
+                f"/api/v1/chat/sessions/{session_id}/attachments",
+                files={"file": ("photo.png", b"\x89PNG\r\n\x1a\n" + b"fake", "image/png")},
+                headers=_headers(tenant),
+            )
+            assert upload_r.status_code == 201, upload_r.text
+            attachment_id = upload_r.json()["id"]
+            assert upload_r.json()["isImage"] is True
+
+            send_r = await c.post(
+                f"/api/v1/chat/sessions/{session_id}/messages",
+                json={"message": "what's this?", "attachmentIds": [attachment_id]},
+                headers=_headers(tenant),
+            )
+            assert send_r.status_code == 201, send_r.text
+            run_id = send_r.json()["runId"]
+
+    async with app_session(tenant) as db:
+        run = await db.get(m.AgentRun, uuid.UUID(run_id))
+        assert run is not None
+        assert "[Attached file:" not in run.context["task"]
+
+        att = await db.get(m.FileAttachment, uuid.UUID(attachment_id))
+        assert att is not None
+        assert run.context["task_images"] == [
+            {"bucket_key": att.bucket_key, "content_type": "image/png"}
+        ]

@@ -32,6 +32,7 @@ class CreateChatSessionRequest(CamelModel):
 
 class SendChatMessageRequest(CamelModel):
     message: str = Field(min_length=1, max_length=20_000)
+    attachment_ids: list[uuid.UUID] = []
 
 
 class CreateAgentRequest(CamelModel):

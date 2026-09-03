@@ -221,6 +221,7 @@ async def post_message(
         session=session,
         tenant_id=actor.principal.tenant_id,
         message=body.message,
+        attachment_ids=body.attachment_ids,
         originating_operator=actor.principal.subject,
         # The token's role claim, recorded on the run: a member with no
         # ASSIGNED role resolves to `permissions_for(token.role)` everywhere

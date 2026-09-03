@@ -25,7 +25,7 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from oc8 import models as m
@@ -130,6 +130,7 @@ async def send_message(
     session: m.ChatSession,
     tenant_id: uuid.UUID,
     message: str,
+    attachment_ids: list[uuid.UUID] | None = None,
     originating_operator: str | None,
     operator_role: str | None = None,
     telegram_external_id: str | None = None,
@@ -141,6 +142,14 @@ async def send_message(
     can still resolve what the human behind this chat could reach. See
     `control_tools._acting_token_role`. None for a Telegram sender: that door
     carries no token, and its authority is the binding row.
+
+    `attachment_ids` are `FileAttachment` rows uploaded via
+    `POST /chat/sessions/{id}/attachments` while still owned by this
+    `ChatSession` (`owner_id == session.id`) -- re-pointed here to this turn's
+    new `ChatMessage` (`owner_id == user_message.id`), matching the design
+    doc's "temporarily the ChatSession.id ... then updated" Data Model note.
+    From this call onward `api/v1/files.py`'s `_owned_attachment` resolves
+    them through the message's session rather than the session directly.
 
     Returns `(user_message, None)` without enqueueing a run when the tenant's
     Assistant refuses the message outright (see the secret-blindness gate
@@ -156,6 +165,29 @@ async def send_message(
     )
     db.add(user_message)
     await db.flush()
+
+    attachments: list[m.FileAttachment] = []
+    if attachment_ids:
+        attachments = list(
+            (
+                await db.execute(
+                    select(m.FileAttachment).where(
+                        m.FileAttachment.tenant_id == tenant_id,
+                        m.FileAttachment.id.in_(attachment_ids),
+                        m.FileAttachment.owner_type == "chat_message",
+                    )
+                )
+            ).scalars()
+        )
+        await db.execute(
+            update(m.FileAttachment)
+            .where(
+                m.FileAttachment.tenant_id == tenant_id,
+                m.FileAttachment.id.in_(attachment_ids),
+                m.FileAttachment.owner_type == "chat_message",
+            )
+            .values(owner_id=user_message.id)
+        )
 
     # The tenant's unified Assistant is secret-blind by design (carried over
     # from the retired raw-completion Copilot path, oc8.copilot.redaction):
@@ -186,10 +218,28 @@ async def send_message(
         return user_message, None
 
     task_text = _build_task_text(history, message)
+    for att in attachments:
+        if att.is_image:
+            continue
+        label = f"\n\n[Attached file: {att.filename}]\n"
+        label += (
+            att.extracted_text if att.extracted_text else "(could not read this file's content)"
+        )
+        task_text += label
+
     context: dict[str, object] = {
         "task": task_text,
         "chat_session_id": str(session.id),
     }
+    image_attachments = [att for att in attachments if att.is_image]
+    if image_attachments:
+        # Raw bytes are fetched at run-preamble time (Task 7), not here -- to
+        # avoid holding large binary blobs in the run's persisted `context`
+        # JSONB.
+        context["task_images"] = [
+            {"bucket_key": att.bucket_key, "content_type": att.content_type}
+            for att in image_attachments
+        ]
     if originating_operator is not None:
         context["originating_operator"] = originating_operator
     if operator_role is not None:
