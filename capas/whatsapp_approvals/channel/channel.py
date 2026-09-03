@@ -209,7 +209,7 @@ class WhatsAppChannel:
             supports_options=True,
         )
 
-    def verify_inbound(self, *, headers: Mapping[str, str], body: bytes) -> bool:
+    async def verify_inbound(self, *, headers: Mapping[str, str], body: bytes) -> bool:
         return verify_signature(headers=headers, body=body, app_secret=self._app_secret)
 
     def parse_inbound(self, update: Mapping[str, Any]) -> ChannelDecision | ChannelLink | None:
