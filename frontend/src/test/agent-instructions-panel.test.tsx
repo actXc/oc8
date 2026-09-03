@@ -591,6 +591,17 @@ describe("AgentInstructionsPanel", () => {
       expect(await screen.findByText("runbook.pdf")).toBeInTheDocument();
     });
 
+    it("shows an error instead of silently rendering empty when the list fails to load", async () => {
+      // Regression: a view-only caller used to 403 on this query with no
+      // error branch in the UI, so the section just looked empty -- worse
+      // than an explicit "couldn't load" message. Covers any other failure
+      // mode too (network error, 500, etc.), not just the auth-gate bug.
+      listInstructionFilesMock.mockRejectedValue(new Error("forbidden"));
+      renderWithClient(<AgentInstructionsPanel agentId="agent-1" mission="" mayManage={true} />);
+      expect(await screen.findByText(/couldn't load attached files/i)).toBeInTheDocument();
+      expect(screen.queryByText(/no files attached yet/i)).not.toBeInTheDocument();
+    });
+
     it("uploading a file sends it for this agent and adds it to the list", async () => {
       let uploaded = false;
       uploadInstructionFileMock.mockImplementation(async (agentId: string, file: File) => {

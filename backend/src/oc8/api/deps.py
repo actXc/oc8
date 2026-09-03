@@ -371,8 +371,20 @@ def require_departmental(permission: str) -> Callable[..., Awaitable[HumanActor]
 
 
 def require_agent_write() -> Callable[..., Awaitable[HumanActor]]:
-    """The coarse door for the six `agent:manage`-parity write routes (decision 1):
-    `POST /agents` and the five `agents_write.py` mutations.
+    """The coarse door for `agent:manage`-parity write routes. Decision 1
+    originally named exactly six: `POST /agents` plus five `agents_write.py`
+    mutations (lifecycle, narrowing, runtime, model-config, skills) --
+    `test_every_route_is_governed.py::_AGENT_WRITE_ROUTES` still pins that
+    original six by name. Every genuine mutation added to `agents_write.py`
+    since (instructions, memory delete, agent delete/restore, and Task 11's
+    `upload_instruction_file`) sits behind this same door too, just outside
+    that pinned set -- so "six" names decision 1's original list, not the
+    door's current total traffic. The sibling GET, `list_instruction_files`,
+    is a plain read and does NOT sit behind this door: it lives in
+    `agents.py` behind `require_departmental(perm(AGENT, VIEW))` instead --
+    see that function's own docstring, and `files.py`'s `_owned_attachment`
+    for why a list read must not be gated more strictly than downloading or
+    deleting one of the same files by id already is.
 
     Admits a caller who may write SOME agent SOMEWHERE -- tenant-wide
     `agent:manage`, or a live seat whose `agent_manage` column is TRUE in at

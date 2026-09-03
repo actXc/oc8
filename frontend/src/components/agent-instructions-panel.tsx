@@ -506,6 +506,14 @@ export function AgentInstructionsPanel({
           {files.isLoading && (
             <p className="mt-3 text-xs text-muted-foreground">{t("Loading…", "Wird geladen…")}</p>
           )}
+          {files.isError && (
+            <p className="mt-3 text-xs text-destructive">
+              {t(
+                "Couldn't load attached files.",
+                "Angehängte Dateien konnten nicht geladen werden.",
+              )}
+            </p>
+          )}
           {files.isSuccess && files.data.length === 0 && (
             <p className="mt-3 text-xs text-muted-foreground">
               {t("No files attached yet.", "Noch keine Dateien angehängt.")}

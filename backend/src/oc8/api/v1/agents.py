@@ -33,6 +33,7 @@ from oc8 import models as m
 from oc8.agents.repo import visible_agent, visible_agents
 from oc8.api.deps import DbSession, require_departmental
 from oc8.api.v1._serializers import agent_to_dto
+from oc8.api.v1.files import _attachment_dto
 from oc8.authz.authority import authority_for_principal, tenant_wide_read
 from oc8.authz.pdp import ToolPolicy, agent_tool_rights, effective_tool_policies
 from oc8.authz.permissions import AGENT, VIEW, perm
@@ -43,6 +44,7 @@ from oc8.schemas.dto import (
     AgentDTO,
     AgentInstructionHistoryDTO,
     AgentInstructionRevisionDTO,
+    FileAttachmentDTO,
     ToolPolicyDTO,
 )
 from oc8.schemas.paging import Page
@@ -158,6 +160,48 @@ async def get_agent_instruction_history(
         total_count=total_count,
         next_before_seq=next_before_seq,
     )
+
+
+@router.get(
+    "/agents/{agent_id}/instruction-files",
+    response_model=list[FileAttachmentDTO],
+)
+async def list_instruction_files(
+    agent_id: uuid.UUID,
+    request: Request,
+    db: DbSession,
+    actor: Annotated[HumanActor, Depends(require_departmental(perm(AGENT, VIEW)))],
+) -> list[FileAttachmentDTO]:
+    """Files attached to this agent's standing Instructions
+    (`FileAttachment(owner_type="agent_instructions")`, Task 11) -- gated the
+    same view-level way as this file's other read routes, not write-narrowed:
+    the upload endpoint (`agents_write.py::upload_instruction_file`) is a
+    mutation and belongs behind `authorize_agent_write`, but this is a plain
+    list read, and `files.py`'s own `_owned_attachment` already applies this
+    exact `visible_agent` check to GET/DELETE `/files/{id}` for the same
+    owner type -- a caller who can already download or delete an individual
+    file by id must not get a 403 for merely listing them."""
+    authority = await authority_for_principal(request, db, actor.principal)
+    tenant_wide = tenant_wide_read(authority, perm(AGENT, VIEW))
+    agent = await visible_agent(db, scope=actor.scope, tenant_wide=tenant_wide, agent_id=agent_id)
+    if agent is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "agent not found")
+    rows = (
+        (
+            await db.execute(
+                select(m.FileAttachment)
+                .where(
+                    m.FileAttachment.tenant_id == actor.principal.tenant_id,
+                    m.FileAttachment.owner_type == "agent_instructions",
+                    m.FileAttachment.owner_id == agent.id,
+                )
+                .order_by(m.FileAttachment.created_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [_attachment_dto(row) for row in rows]
 
 
 async def _agent_detail_dto(db: DbSession, agent: m.Agent) -> AgentDetailDTO:

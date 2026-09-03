@@ -488,40 +488,13 @@ async def upload_instruction_file(
     return _attachment_dto(row)
 
 
-@router.get(
-    "/agents/{agent_id}/instruction-files",
-    response_model=list[FileAttachmentDTO],
-)
-async def list_instruction_files(
-    agent_id: uuid.UUID,
-    db: DbSession,
-    request: Request,
-    actor: Annotated[HumanActor, Depends(require_agent_write())],
-) -> list[FileAttachmentDTO]:
-    agent = await _load_agent(db, agent_id)
-    await authorize_agent_write(
-        request,
-        db,
-        actor,
-        agent.department_id,
-        not_found=HTTPException(status.HTTP_404_NOT_FOUND, "agent not found"),
-    )
-    rows = (
-        (
-            await db.execute(
-                select(m.FileAttachment)
-                .where(
-                    m.FileAttachment.tenant_id == actor.principal.tenant_id,
-                    m.FileAttachment.owner_type == "agent_instructions",
-                    m.FileAttachment.owner_id == agent.id,
-                )
-                .order_by(m.FileAttachment.created_at.desc())
-            )
-        )
-        .scalars()
-        .all()
-    )
-    return [_attachment_dto(row) for row in rows]
+# `list_instruction_files` (GET /agents/{agent_id}/instruction-files) lives in
+# `api/v1/agents.py`, not here: it's a read, and this file's own door
+# (`require_agent_write`) is for `agent:manage`-parity mutations only. See
+# that module's docstring, and `_owned_attachment` in `files.py`, which
+# applies the identical view-level check to the SAME owner type
+# ("agent_instructions") for GET/DELETE /files/{id} -- listing must not be
+# more restrictive than downloading or deleting an individual file by id.
 
 
 @router.delete(
