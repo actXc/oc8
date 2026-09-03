@@ -558,3 +558,31 @@ async def test_a_large_imported_file_is_truncated_not_refused(app_session: Any) 
     assert outcome is not None
     assert "[truncated" in outcome.output
     assert len(outcome.output) < 70_000
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_imported_reference_root_is_a_plain_error(
+    app_session: Any,
+) -> None:
+    tenant = uuid.uuid4()
+    skill = _skill("Imported One", reference_root="imported:not-a-uuid")
+    async with app_session(tenant) as db:
+        agent, task = await _dept_agent_task(db, tenant)
+        outcome = await execute_control_tool(
+            db,
+            tenant_id=tenant,
+            agent=agent,
+            task=task,
+            tc=ToolCall(
+                id="c1",
+                name="read_reference_file",
+                arguments={"skill": "Imported One", "path": "references/checklist.md"},
+            ),
+            decision=Decision(Effect.ALLOW),
+            assigned_skills=[skill],
+            active_skills=[],
+            mcp_conn=None,
+            originating_operator=None,
+        )
+    assert outcome is not None
+    assert outcome.output.startswith("ERROR")

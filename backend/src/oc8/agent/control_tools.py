@@ -819,9 +819,14 @@ async def execute_control_tool(
                 )
             )
         if skill.definition.reference_root.startswith("imported:"):
-            skill_version_id = uuid.UUID(
-                skill.definition.reference_root.removeprefix("imported:")
-            )
+            try:
+                skill_version_id = uuid.UUID(
+                    skill.definition.reference_root.removeprefix("imported:")
+                )
+            except ValueError:
+                return ControlOutcome(
+                    output=f"ERROR: '{skill_name}' has a malformed reference_root"
+                )
             row = (
                 await db.execute(
                     select(m.ImportedSkillFile).where(
