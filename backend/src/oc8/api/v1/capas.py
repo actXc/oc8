@@ -806,6 +806,10 @@ def _build_delegated_identity_config(
     return env, secret_env
 
 
+def _parse_id_list(raw: str) -> list[str]:
+    return [part for part in (piece.strip() for piece in raw.split(",")) if part]
+
+
 async def _provision_from_setup(
     db: DbSession,
     *,
@@ -839,8 +843,6 @@ async def _provision_from_setup(
         return oauth_conn.id
 
     config_key = provision.source_ids_config_key
-    site_ids = [part.strip() for part in values.get(provision.site_ids_field, "").split(",")]
-    site_ids = [part for part in site_ids if part]
     existing = (
         await db.execute(
             select(m.DataSource).where(
@@ -851,27 +853,34 @@ async def _provision_from_setup(
         )
     ).scalar_one_or_none()
 
-    if not site_ids:
-        # Emptying the field is the only way an admin has to say "stop indexing
-        # this" -- the form's own help text invites it ("leave empty to skip the
-        # knowledge base for now"). Guarding the whole block on a non-empty list
-        # made that a no-op: the source kept its old sites and kept syncing.
-        # Disconnected, not deleted: `tombstone_source` owns deletion, and a
-        # retired source's ingested documents are still accounted for by the row.
-        if existing is not None and provision.site_ids_field in submitted:
-            existing.config = {**dict(existing.config or {}), config_key: []}
+    # Re-submitting the form is how an admin adds or removes a site/drive, so
+    # each id list is replaced, not merged -- but the rest of the config
+    # (maxFiles, whatever else a connector defines) is the operator's and
+    # stays. site_ids and drive_ids are independent: emptying one leaves the
+    # other's ids, and this connector's config, untouched.
+    config = dict(existing.config or {}) if existing else {}
+    touched = False
+    if provision.site_ids_field in submitted:
+        config[config_key] = _parse_id_list(values.get(provision.site_ids_field, ""))
+        touched = True
+    if provision.drive_ids_field and provision.drive_ids_field in submitted:
+        config["driveIds"] = _parse_id_list(values.get(provision.drive_ids_field, ""))
+        touched = True
+
+    if not (config.get(config_key) or config.get("driveIds")):
+        # Emptying every id field is the only way an admin has to say "stop
+        # indexing this" -- the form's own help text invites it ("leave empty
+        # to skip the knowledge base for now"). Guarding the whole block on a
+        # non-empty list made that a no-op: the source kept its old ids and
+        # kept syncing. Disconnected, not deleted: `tombstone_source` owns
+        # deletion, and a retired source's ingested documents are still
+        # accounted for by the row.
+        if existing is not None and touched:
+            existing.config = config
             existing.connected = False
             await db.flush()
         return oauth_conn.id
 
-    # Re-submitting the form is how an admin adds or removes a site, so the list
-    # is replaced, not merged -- but the rest of the config (drive ids, maxFiles,
-    # whatever a connector defines) is the operator's and stays.
-    config = (
-        {**dict(existing.config or {}), config_key: site_ids}
-        if existing
-        else {config_key: site_ids}
-    )
     # The same two checks POST /knowledge/sources runs, for the same reason:
     # a connector_type no plugin contributes would otherwise become a dead row,
     # and validate() is what actually proves the credentials reach the far

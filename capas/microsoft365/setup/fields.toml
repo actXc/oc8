@@ -40,3 +40,10 @@ label = "SharePoint site IDs to index (comma-separated)"
 kind = "text"
 required = false
 help = "Leave empty to skip the knowledge base for now — the Mail/Calendar/Teams/Office tools still work; add site IDs later to enable SharePoint/OneDrive sync."
+
+[[fields]]
+key = "drive_ids"
+label = "OneDrive drive IDs to index (comma-separated)"
+kind = "text"
+required = false
+help = "OneDrive for Business drives, indexed alongside any SharePoint sites above. Leave empty to skip."

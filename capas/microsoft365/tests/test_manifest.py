@@ -157,10 +157,12 @@ def test_the_setup_form_survived_the_split_intact() -> None:
         "department",
         "default_user",
         "site_ids",
+        "drive_ids",
     ]
     assert manifest.setup.oauth_provision is not None
     assert manifest.setup.oauth_provision.provider == "microsoft"
     assert manifest.setup.oauth_provision.connector_type == "microsoft365_files"
+    assert manifest.setup.oauth_provision.drive_ids_field == "drive_ids"
 
 
 def test_the_five_presets_and_five_library_entries_survived_the_split() -> None:

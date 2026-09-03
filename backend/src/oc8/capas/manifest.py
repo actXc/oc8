@@ -396,6 +396,15 @@ class SetupOAuthProvision(BaseModel):
     # submission would 422 with "knowledge source rejected" (the connector's
     # own validate() sees no `sharedDriveIds` key at all).
     source_ids_config_key: str = "siteIds"
+    # Optional second id list, independent of site_ids_field -- microsoft365's
+    # connector indexes SharePoint sites AND OneDrive drives in one DataSource,
+    # under two separate config keys (`siteIds`/`driveIds`), so the form needs
+    # two fields rather than one. Always written under the connector's own
+    # "driveIds" key -- unlike source_ids_config_key there is no per-connector
+    # override, since only microsoft365 declares this field at all. Left empty
+    # (the default), `_provision_from_setup` behaves exactly as before this
+    # existed: single id list, single config key.
+    drive_ids_field: str = ""
     # Domain-wide-delegation-style setup: a comma-separated setup field naming
     # one or more identities this connection should mint a SEPARATE, per-identity
     # delegated token for (agent/mcp_env.py's "oauth-delegated:" convention,

@@ -5,3 +5,4 @@
 provider = "microsoft"
 connector_type = "microsoft365_files"
 site_ids_field = "site_ids"
+drive_ids_field = "drive_ids"
