@@ -134,6 +134,7 @@ EXEMPT: dict[str, str] = {
     "handoff_type.name": "dispatch-matched identifier, not customer content, design spec §6c",
     "handoff_type.payload_schema": "not individually named in spec section 6; structural/config/identifier column, not customer free text -- see design spec §6",
     "handoff_type.classification": "structural enum-like column (status/state/kind/classification/...), CHECK-constrained, not content, design spec §6c",
+    "imported_skill_file.rel_path": "a relative path under references/assets/scripts (e.g. 'references/checklist.md'), derived from the source archive's own directory structure and validated at read time against a fixed subdirectory allowlist -- structural/identifier column, not customer free text -- see design spec §6",
     "ingestion_job.status": "structural enum-like column (status/state/kind/classification/...), CHECK-constrained, not content, design spec §6c",
     "ingestion_job.stats": "counter/catalog/config field with no free-text content, design spec §6c",
     "integration.key": "counter/catalog/config field with no free-text content, design spec §6c",
