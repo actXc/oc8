@@ -16,6 +16,7 @@ import pytest
 
 from oc8 import models as m
 from oc8.agent.preamble import build_run_preamble
+from oc8.modelrouter.types import ImagePart
 from tests.conftest import AppSessionFactory
 
 pytestmark = pytest.mark.asyncio
@@ -251,3 +252,55 @@ async def test_the_provenance_rule_precedes_anything_a_stranger_wrote(
         )
     systems = [msg.content for msg in pre.messages if msg.role == "system"]
     assert RULE in systems
+
+
+async def _solo_agent(db: Any, tenant: uuid.UUID) -> m.Agent:
+    dept = m.Department(tenant_id=tenant, name="Vertrieb", frame={})
+    db.add(dept)
+    await db.flush()
+    agent = m.Agent(
+        tenant_id=tenant, department_id=dept.id, name="Nora", status="idle",
+        definition={}, presentation={},
+    )
+    db.add(agent)
+    await db.flush()
+    return agent
+
+
+async def test_preamble_appends_image_content_when_supported(
+    app_session: AppSessionFactory,
+) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        agent = await _solo_agent(db, tenant)
+
+        pre = await build_run_preamble(
+            db, agent=agent, tenant_id=tenant, task_text="What's in this?",
+            frame={}, model_locality="cloud",
+            task_images=[ImagePart(data=b"fake-png-bytes", content_type="image/png")],
+            supports_vision=True,
+        )
+
+    last = pre.messages[-1]
+    assert last.role == "user"
+    assert isinstance(last.content, list)
+    assert any(isinstance(p, ImagePart) for p in last.content)
+
+
+async def test_preamble_falls_back_to_a_text_note_when_vision_unsupported(
+    app_session: AppSessionFactory,
+) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        agent = await _solo_agent(db, tenant)
+
+        pre = await build_run_preamble(
+            db, agent=agent, tenant_id=tenant, task_text="What's in this?",
+            frame={}, model_locality="cloud",
+            task_images=[ImagePart(data=b"fake-png-bytes", content_type="image/png")],
+            supports_vision=False,
+        )
+
+    last = pre.messages[-1]
+    assert isinstance(last.content, str)
+    assert "cannot process images" in last.content

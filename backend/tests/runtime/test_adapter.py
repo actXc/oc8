@@ -34,6 +34,7 @@ async def test_oc8_agent_runtime_delegates_to_run_agent(
         inbox_check: Any = None,
         pre_decided: Any = None,
         originating_operator: Any = None,
+        task_images_raw: Any = None,
     ) -> RunResult:
         captured["agent"] = agent
         captured["task_text"] = task_text

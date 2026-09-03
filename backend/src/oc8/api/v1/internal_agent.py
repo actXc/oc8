@@ -15,6 +15,7 @@ stateless and the container carries only the loop, never the data.
 
 from __future__ import annotations
 
+import base64
 import datetime as dt
 import uuid
 from typing import Any
@@ -67,11 +68,12 @@ from oc8.modelrouter import (
 from oc8.modelrouter.accumulate import accumulate_stream
 from oc8.modelrouter.keys import resolve_model_base_url
 from oc8.modelrouter.sampling import bumped_for_length_retry, resolve_params
-from oc8.modelrouter.types import ModelParams
+from oc8.modelrouter.types import ImagePart, ModelParams, TextPart
 from oc8.realtime.emit import note_focus, publish_run_token_delta, publish_run_tool_call
 from oc8.runtime.approval_resume import pre_decided_map
 from oc8.runtime.run_context import append_tool_call
 from oc8.skills.runtime import load_assigned_skills
+from oc8.storage import s3
 
 router = APIRouter()
 
@@ -95,13 +97,52 @@ async def _run_for_token(
 # --------------------------------------------------------------------- serde
 
 
+def _content_to_json(content: str | list[Any]) -> str | list[dict[str, Any]]:
+    """`NeutralMessage.content` round-trips through the run's JSONB `context`
+    between every step of this endpoint's split /step + /tool request cycle
+    (there is no in-memory loop here to hold it across calls, unlike the
+    in-process engine). A list `content` can hold an `ImagePart`, whose `data`
+    is raw `bytes` -- not JSON-serializable, and neither is the dataclass
+    itself -- so it must become a plain, JSON-safe dict here before `ctx` is
+    committed, and be reversed by `_content_from_json` below."""
+    if isinstance(content, str):
+        return content
+    parts: list[dict[str, Any]] = []
+    for part in content:
+        if isinstance(part, ImagePart):
+            parts.append(
+                {
+                    "type": "image",
+                    "data": base64.b64encode(part.data).decode(),
+                    "content_type": part.content_type,
+                }
+            )
+        else:
+            parts.append({"type": "text", "text": part.text})
+    return parts
+
+
+def _content_from_json(content: Any) -> str | list[Any]:
+    if isinstance(content, list):
+        parts: list[Any] = []
+        for p in content:
+            if p.get("type") == "image":
+                parts.append(
+                    ImagePart(data=base64.b64decode(p["data"]), content_type=p["content_type"])
+                )
+            else:
+                parts.append(TextPart(text=p.get("text", "")))
+        return parts
+    return str(content or "")
+
+
 def _to_messages(raw: list[dict[str, Any]]) -> list[NeutralMessage]:
     out: list[NeutralMessage] = []
     for d in raw:
         out.append(
             NeutralMessage(
                 role=d["role"],
-                content=d.get("content", ""),
+                content=_content_from_json(d.get("content", "")),
                 tool_calls=[
                     ToolCall(id=t["id"], name=t["name"], arguments=t.get("arguments", {}))
                     for t in d.get("tool_calls", [])
@@ -114,7 +155,7 @@ def _to_messages(raw: list[dict[str, Any]]) -> list[NeutralMessage]:
 
 
 def _from_message(msg: NeutralMessage) -> dict[str, Any]:
-    d: dict[str, Any] = {"role": msg.role, "content": msg.content}
+    d: dict[str, Any] = {"role": msg.role, "content": _content_to_json(msg.content)}
     if msg.tool_calls:
         d["tool_calls"] = [
             {"id": t.id, "name": t.name, "arguments": t.arguments} for t in msg.tool_calls
@@ -238,6 +279,28 @@ async def step(
         # skills catalog -- via the shared preamble. Seeding only the system prompt
         # (as this endpoint used to) left an isolated agent unable to name a
         # colleague to delegate to or a skill to invoke.
+        #
+        # Task 7 (chat/instruction-file-attachments): this endpoint calls
+        # build_run_preamble directly rather than duplicating its logic, so
+        # threading task_images/supports_vision through is a one-line addition
+        # here, not a second copy of the branch in preamble.py. This IS the
+        # second real call site the in-process engine.py doesn't cover --
+        # DockerIsolatedRuntime.execute (runtime/isolated.py) never calls
+        # build_run_preamble itself, it just forwards run.context (which
+        # already carries "task_images") to the container, which lands here.
+        task_images_raw = ctx.get("task_images", [])
+        task_images = [
+            ImagePart(
+                data=await s3.get_object(entry["bucket_key"]),
+                content_type=entry["content_type"],
+            )
+            for entry in task_images_raw
+        ]
+        supports_vision = (
+            bool(model_config.params.get("supports_vision", False))
+            if model_config is not None
+            else False
+        )
         preamble = await build_run_preamble(
             db,
             agent=agent,
@@ -245,6 +308,8 @@ async def step(
             task_text=str(ctx.get("task", "")),
             frame=frame,
             model_locality=model_locality,
+            task_images=task_images,
+            supports_vision=supports_vision,
         )
         transcript = [_from_message(msg) for msg in preamble.messages]
         assigned_skills = preamble.assigned_skills

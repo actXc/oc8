@@ -25,6 +25,7 @@ from oc8.agent.provenance import RULE as PROVENANCE_RULE
 from oc8.knowledge.retrieval import granted_kb_ids, retrieve_kb_context
 from oc8.memory.router import retrieve_context
 from oc8.modelrouter import NeutralMessage
+from oc8.modelrouter.types import ImagePart, TextPart
 from oc8.skills.runtime import LoadedSkill, catalog_block, load_assigned_skills
 
 
@@ -146,6 +147,8 @@ async def build_run_preamble(
     task_text: str,
     frame: dict[str, Any],
     model_locality: str,
+    task_images: list[ImagePart] | None = None,
+    supports_vision: bool = False,
 ) -> RunPreamble:
     """Seed a run's conversation: system context first, the task last.
 
@@ -192,7 +195,18 @@ async def build_run_preamble(
     if catalog:
         messages.append(NeutralMessage(role="system", content=catalog))
 
-    messages.append(NeutralMessage(role="user", content=task_text))
+    if task_images and supports_vision:
+        messages.append(
+            NeutralMessage(role="user", content=[TextPart(text=task_text), *task_images])
+        )
+    else:
+        note = ""
+        if task_images and not supports_vision:
+            note = (
+                "\n\n(An image was attached to this message, but this agent's "
+                "model cannot process images.)"
+            )
+        messages.append(NeutralMessage(role="user", content=task_text + note))
 
     return RunPreamble(
         messages=messages,

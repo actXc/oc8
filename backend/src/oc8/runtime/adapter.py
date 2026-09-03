@@ -31,6 +31,7 @@ class RuntimeAdapter(Protocol):
         inbox_check: InboxCheck | None = None,
         pre_decided: dict[str, str] | None = None,
         originating_operator: str | None = None,
+        task_images_raw: list[dict[str, str]] | None = None,
     ) -> RunResult: ...
 
 
@@ -80,6 +81,7 @@ class Oc8AgentRuntime:
         inbox_check: InboxCheck | None = None,
         pre_decided: dict[str, str] | None = None,
         originating_operator: str | None = None,
+        task_images_raw: list[dict[str, str]] | None = None,
     ) -> RunResult:
         return await run_agent(
             db,
@@ -96,6 +98,7 @@ class Oc8AgentRuntime:
             inbox_check=inbox_check,
             pre_decided=pre_decided,
             originating_operator=originating_operator,
+            task_images_raw=task_images_raw,
         )
 
 
@@ -119,6 +122,7 @@ class EchoRuntimeStub:
         inbox_check: InboxCheck | None = None,
         pre_decided: dict[str, str] | None = None,
         originating_operator: str | None = None,
+        task_images_raw: list[dict[str, str]] | None = None,
     ) -> RunResult:
         return RunResult(
             task_id=uuid.uuid4(),

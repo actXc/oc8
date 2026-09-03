@@ -688,6 +688,11 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
                 await merge_context(db, run, {"mcp_connection_id": str(mcp_conn.id)})
 
             task_text = str(run.context.get("task", ""))
+            # Raw {bucket_key, content_type} pointers only (Task 6) -- the actual
+            # bytes are fetched one layer down, at run-preamble time, so this
+            # module (which drives runs generically) never has to import
+            # oc8.storage.s3 itself.
+            task_images_raw = run.context.get("task_images", [])
             clarifications = run.context.get("clarifications", [])
             if clarifications:
                 lines = "\n".join(f"- Q: {c['question']} A: {c['answer']}" for c in clarifications)
@@ -772,6 +777,7 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
                         originating_operator=(
                             str(originating_operator) if originating_operator else None
                         ),
+                        task_images_raw=task_images_raw,
                     )
             except Exception as exc:  # persist failure, never crash the worker
                 run_error = repr(exc)

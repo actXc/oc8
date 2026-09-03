@@ -80,7 +80,7 @@ from oc8.modelrouter import (
 from oc8.modelrouter.accumulate import accumulate_stream
 from oc8.modelrouter.keys import resolve_model_base_url
 from oc8.modelrouter.sampling import bumped_for_length_retry, resolve_params
-from oc8.modelrouter.types import ModelParams
+from oc8.modelrouter.types import ImagePart, ModelParams
 from oc8.observability import get_tracer, record_budget_exceeded, record_tool_call
 from oc8.realtime.emit import (
     note_focus,
@@ -94,6 +94,7 @@ from oc8.runtime.supervision_hook import maybe_checkpoint, maybe_create_anchor
 from oc8.skills.runtime import (
     LoadedSkill,
 )
+from oc8.storage import s3
 
 logger = logging.getLogger(__name__)
 
@@ -362,6 +363,7 @@ async def run_agent(
     inbox_check: InboxCheck | None = None,
     pre_decided: dict[str, str] | None = None,
     originating_operator: str | None = None,
+    task_images_raw: list[dict[str, str]] | None = None,
 ) -> RunResult:
     async def _run() -> RunResult:
         settings = get_settings()
@@ -378,6 +380,23 @@ async def run_agent(
             provider = (agent.presentation or {}).get("provider", settings.default_model_provider)
             model = settings.default_model
             model_locality = locality_for_provider(provider)
+        # Gate on the CONFIGURED model, not the provider generally -- an
+        # agent's model_config is what actually receives the completion
+        # request, so that is what decides whether an attached image can be
+        # sent along with it. Resolved here, right alongside the same
+        # model_config lookup, rather than deep inside build_run_preamble.
+        supports_vision = (
+            bool(model_config.params.get("supports_vision", False))
+            if model_config is not None
+            else False
+        )
+        task_images = [
+            ImagePart(
+                data=await s3.get_object(entry["bucket_key"]),
+                content_type=entry["content_type"],
+            )
+            for entry in (task_images_raw or [])
+        ]
         department = await db.get(m.Department, agent.department_id)
         frame: dict[str, Any] = department.frame if department is not None else {}
         tool_policies = effective_tool_policies(
@@ -486,6 +505,8 @@ async def run_agent(
             task_text=task_text,
             frame=frame,
             model_locality=model_locality,
+            task_images=task_images,
+            supports_vision=supports_vision,
         )
         messages: list[NeutralMessage] = list(preamble.messages)
         assigned_skills = preamble.assigned_skills
