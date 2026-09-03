@@ -3,6 +3,7 @@ container round-trip is exercised live (needs Docker), not here."""
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
@@ -10,6 +11,7 @@ import pytest
 
 from oc8.api.v1.internal_agent import RUN_SCOPE, _from_message, _to_messages
 from oc8.modelrouter import NeutralMessage, ToolCall, chunk_from_result
+from oc8.modelrouter.types import ImagePart, TextPart
 
 
 def _as_stream(fake_complete: Any) -> Any:
@@ -41,6 +43,41 @@ def test_transcript_serde_round_trips() -> None:
     assert back[2].tool_calls[0].name == "search_records"
     assert back[2].tool_calls[0].arguments == {"model": "crm.lead"}
     assert back[3].tool_call_id == "c1" and back[3].name == "search_records"
+
+
+def test_transcript_serde_round_trips_image_content_through_real_json() -> None:
+    """A vision-enabled first step's transcript can hold list `content` mixing
+    text and image parts -- this must survive an ACTUAL json.dumps/json.loads
+    round trip (not just calling the serde helpers back-to-back in Python),
+    since that's exactly what committing the transcript to the run's JSONB
+    `context` column does between every /step + /tool request in this
+    endpoint's stateless loop. `ImagePart.data` is raw bytes, which plain
+    json.dumps cannot serialize at all without the base64 encode/decode in
+    `_content_to_json`/`_content_from_json`."""
+    image_bytes = bytes(range(256))
+    msgs = [
+        NeutralMessage(role="system", content="sys"),
+        NeutralMessage(
+            role="user",
+            content=[
+                TextPart(text="what's in this image?"),
+                ImagePart(data=image_bytes, content_type="image/png"),
+            ],
+        ),
+    ]
+    raw = [_from_message(m) for m in msgs]
+    # The real persist path: an actual JSON round trip, standing in for the
+    # JSONB `context` commit/reload -- not just re-calling the helpers.
+    persisted = json.loads(json.dumps(raw))
+    back = _to_messages(persisted)
+
+    assert back[0].role == "system"
+    assert back[0].content == "sys"
+    assert back[1].role == "user"
+    assert back[1].content == [
+        TextPart(text="what's in this image?"),
+        ImagePart(data=image_bytes, content_type="image/png"),
+    ]
 
 
 def test_run_scope_is_the_exact_run() -> None:
