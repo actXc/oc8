@@ -8,6 +8,7 @@ from oc8.authz.pdp import (
     classification_rule,
     effective_cleared_classes,
     effective_tool_policies,
+    narrowing_within_frame,
 )
 
 
@@ -170,3 +171,60 @@ def test_narrowing_can_add_a_tool_name_approval_requirement_the_frame_lacked() -
     assert "crm" in eff["crm"].approval_actions
     decision = authorize_tool(frame, narrowing, tool_key="crm", action="send")
     assert decision.effect is Effect.REQUIRE_APPROVAL
+
+
+# ---------- Agent-exclusive grants (tool key absent from the frame) ----------
+
+
+def test_narrowing_within_frame_does_not_flag_a_tool_absent_from_the_frame() -> None:
+    frame = _frame()  # only "crm"
+    narrowing = {"tools": {"salesforce": {"enabled": True, "read": True}}}
+    assert narrowing_within_frame(frame, narrowing) == []
+
+
+def test_narrowing_within_frame_still_flags_a_frame_tool_widened_beyond_it() -> None:
+    frame = _frame(write=False)
+    narrowing = {"tools": {"crm": {"enabled": True, "read": True, "write": True}}}
+    violations = narrowing_within_frame(frame, narrowing)
+    assert any(v.tool_key == "crm" for v in violations)
+
+
+def test_effective_tool_policies_grants_an_agent_exclusive_tool() -> None:
+    # "salesforce" is nowhere in the frame -- no sibling agent inheriting
+    # this frame would ever see it.
+    frame = _frame()
+    narrowing = {
+        "tools": {
+            "salesforce": {
+                "enabled": True,
+                "read": True,
+                "write": True,
+                "send": False,
+                "connection_id": "conn-1",
+            }
+        }
+    }
+    eff = effective_tool_policies(frame, narrowing)
+    assert eff["salesforce"].enabled is True
+    assert eff["salesforce"].read is True
+    assert eff["salesforce"].write is True
+    assert eff["salesforce"].send is False
+    assert eff["salesforce"].connection_id == "conn-1"
+    # The frame's own tool is unaffected by the agent-exclusive addition.
+    assert "crm" in eff
+    assert eff["crm"].enabled is True
+
+
+def test_effective_tool_policies_agent_exclusive_tool_still_masked_by_role_rights() -> None:
+    frame = _frame()
+    narrowing = {"tools": {"salesforce": {"enabled": True, "read": True, "write": True}}}
+    eff = effective_tool_policies(frame, narrowing, role_rights=frozenset({"read"}))
+    assert eff["salesforce"].read is True
+    assert eff["salesforce"].write is False
+
+
+def test_effective_tool_policies_agent_exclusive_tool_disabled_stays_disabled() -> None:
+    frame = _frame()
+    narrowing = {"tools": {"salesforce": {"enabled": False, "read": True}}}
+    eff = effective_tool_policies(frame, narrowing)
+    assert eff["salesforce"].enabled is False

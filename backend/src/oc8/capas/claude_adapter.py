@@ -156,12 +156,17 @@ def _read_plugin_json(folder: Path) -> dict[str, Any]:
     return {}
 
 
-def skill_from_md(path: Path) -> SkillTemplateSpec:
-    """Parse one Claude ``SKILL.md`` into oc8 skill fields."""
-    return _skill_from_md(path)
+def skill_from_md(path: Path, *, reference_root: str | None = None) -> SkillTemplateSpec:
+    """Parse one Claude ``SKILL.md`` into oc8 skill fields.
+
+    ``reference_root`` is the skill's own on-disk directory, relative to the
+    CAPA root -- the caller's to compute, since only it knows where the capa
+    root actually is. See ``SkillTemplateSpec.reference_root``.
+    """
+    return _skill_from_md(path, reference_root=reference_root)
 
 
-def _skill_from_md(path: Path) -> SkillTemplateSpec:
+def _skill_from_md(path: Path, *, reference_root: str | None = None) -> SkillTemplateSpec:
     candidate = parse_skill(path.read_text(encoding="utf-8"), path=str(path), budget_tokens=0)
     if candidate is None:
         raise ManifestError(f"{path}: not a valid SKILL.md")
@@ -169,6 +174,7 @@ def _skill_from_md(path: Path) -> SkillTemplateSpec:
         name=candidate.name,
         description=candidate.description,
         instruction=candidate.instruction,
+        reference_root=reference_root,
     )
 
 
@@ -189,24 +195,33 @@ def _collect_skills(folder: Path, manifest: dict[str, Any]) -> list[SkillTemplat
 
     root_skill = folder / "SKILL.md"
     if root_skill.is_file():
-        add(_skill_from_md(root_skill))
+        # "" -- this skill's own directory IS the capa root.
+        add(_skill_from_md(root_skill, reference_root=""))
 
     custom = manifest.get("skills")
     if custom is not None:
         for skills_root in _resolve_paths(folder, custom, folder / "__missing__"):
             if skills_root.is_file() and skills_root.name == "SKILL.md":
-                add(_skill_from_md(skills_root))
+                add(
+                    _skill_from_md(
+                        skills_root, reference_root=str(skills_root.parent.relative_to(folder))
+                    )
+                )
                 continue
             if not skills_root.is_dir():
                 continue
             direct = skills_root / "SKILL.md"
             if direct.is_file():
-                add(_skill_from_md(direct))
+                add(
+                    _skill_from_md(
+                        direct, reference_root=str(skills_root.relative_to(folder))
+                    )
+                )
                 continue
             for sub in sorted(skills_root.iterdir()):
                 skill_md = sub / "SKILL.md"
                 if sub.is_dir() and skill_md.is_file():
-                    add(_skill_from_md(skill_md))
+                    add(_skill_from_md(skill_md, reference_root=str(sub.relative_to(folder))))
 
     for commands_root in _resolve_paths(folder, manifest.get("commands"), folder / COMMANDS_DIR):
         if commands_root.is_file() and commands_root.suffix == ".md":

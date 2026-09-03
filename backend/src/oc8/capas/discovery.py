@@ -235,7 +235,7 @@ def _read_skills_folder(folder: Path) -> list[SkillTemplateSpec]:
     for sub in sorted(p for p in skills_dir.iterdir() if p.is_dir()):
         skill_md = sub / "SKILL.md"
         if skill_md.is_file():
-            spec = skill_from_md(skill_md)
+            spec = skill_from_md(skill_md, reference_root=str(sub.relative_to(folder)))
             if spec.name in seen:
                 raise ManifestError(f"{skills_dir}: duplicate skill name {spec.name!r}")
             seen.add(spec.name)

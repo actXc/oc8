@@ -186,6 +186,7 @@ def test_control_tool_names_matches_the_schemas() -> None:
         "search_memory",
         "render_component",
         "propose_change",
+        "read_reference_file",
     }
 
 

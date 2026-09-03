@@ -53,6 +53,11 @@ class SkillDefinition:
     requires_kbs: tuple[str, ...]
     guardrails: tuple[Guardrail, ...]
     prose_guardrails: tuple[str, ...]
+    #: "<capa_name>/<skill_subpath>" this skill's references/assets/scripts
+    #: live under, or None when it has no on-disk directory to serve from --
+    #: see capas.manifest.SkillTemplateSpec.reference_root, which this is
+    #: derived from at materialise time (capas/materialise.py).
+    reference_root: str | None = None
 
 
 def _requirement(raw: Any) -> SkillRequirement | None:
@@ -138,6 +143,13 @@ def parse_definition(data: Mapping[str, Any]) -> SkillDefinition:
             else:
                 logger.warning("dropping malformed skill guardrail: %r", g)
 
+    reference_root_raw = data.get("reference_root")
+    reference_root = (
+        reference_root_raw
+        if isinstance(reference_root_raw, str) and reference_root_raw
+        else None
+    )
+
     return SkillDefinition(
         schema_version=_schema_version(data.get("oc8_skill", 1)),
         slug=str(data.get("id", "")),
@@ -147,4 +159,5 @@ def parse_definition(data: Mapping[str, Any]) -> SkillDefinition:
         requires_kbs=kbs,
         guardrails=tuple(structured),
         prose_guardrails=tuple(prose),
+        reference_root=reference_root,
     )

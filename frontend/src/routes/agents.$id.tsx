@@ -9,6 +9,7 @@ import {
   Copy,
   Crown,
   FileText,
+  Lock,
   MessageSquare,
   Play,
   Repeat,
@@ -16,6 +17,7 @@ import {
   Search,
   Shield,
   ShieldCheck,
+  StopCircle,
   Timer,
   Trash2,
   UserCheck,
@@ -32,14 +34,17 @@ import { LineChart, Line, XAxis, CartesianGrid } from "recharts";
 import {
   useActivity,
   useAgentKpis,
+  useAgentMemory,
   useAgents,
   useAgentSupervisor,
   useAgentTriggers,
   useAgentWorkspaceFile,
   useAgentWorkspaceFiles,
   useAnswerRun,
+  useCancelRun,
   useCreateAgentTrigger,
   useCreateGrant,
+  useDeleteAgentMemory,
   useDeleteAgentTrigger,
   useKnowledgeBases,
   useRun,
@@ -84,12 +89,14 @@ import { ChatWindow } from "@/components/chat-window";
 import { ComponentGrantPanel } from "@/components/component-grant-panel";
 import { AgentInstructionsPanel } from "@/components/agent-instructions-panel";
 import { KnowledgeAssignment } from "@/components/knowledge-assignment";
+import { MemoryPanel } from "@/components/memory-panel";
 import { RUN_COMPONENT_REGISTRY } from "@/components/run-record-card";
 import { StatCard } from "@/components/stat-card";
 import { formatMs } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import { useMayManageAgent } from "@/lib/governance-hooks";
+import { useConfirm } from "@/hooks/use-confirm";
 
 // Mirrors mapAgentStatus in src/lib/live/apply-event.ts (not exported there).
 // Handles BOTH vocabularies: the WS "agent.status" event carries the raw
@@ -402,6 +409,9 @@ function AgentDetail() {
           <div className="md:col-span-2">
             <SupervisorPanel agent={agent} />
           </div>
+          <div className="md:col-span-2">
+            <AgentToolAccessPanel agent={agent} mayManage={mayManage} />
+          </div>
           <Panel className="p-5">
             <ConfigSectionHeader
               hint={t("agent identity", "Agenten-Identität")}
@@ -445,7 +455,12 @@ function AgentDetail() {
       )}
 
       {tab === "instructions" && (
-        <AgentInstructionsPanel agentId={agent.id} mission={agent.mission} mayManage={mayManage} />
+        <AgentInstructionsPanel
+          agentId={agent.id}
+          agentName={agent.name}
+          mission={agent.mission}
+          mayManage={mayManage}
+        />
       )}
 
       {tab === "guardrails" && agent.departmentId && (
@@ -460,17 +475,7 @@ function AgentDetail() {
         </Panel>
       )}
 
-      {tab === "memory" && (
-        <Panel className="p-10 text-center">
-          <BookOpen className="mx-auto mb-3 h-6 w-6 text-muted-foreground/60" />
-          <p className="text-sm text-muted-foreground">
-            {t(
-              "Agent memory browsing is not yet available.",
-              "Das Durchsuchen des Agent-Gedächtnisses ist noch nicht verfügbar.",
-            )}
-          </p>
-        </Panel>
-      )}
+      {tab === "memory" && <AgentMemoryTab agentId={agent.id} mayManage={mayManage} />}
 
       {tab === "history" && (
         <Panel className="p-10 text-center">
@@ -721,6 +726,37 @@ function AgentKnowledgeSection({
   );
 }
 
+function AgentMemoryTab({ agentId, mayManage }: { agentId: string; mayManage: boolean }) {
+  const t = useT();
+  const memory = useAgentMemory(agentId);
+  const deleteMemory = useDeleteAgentMemory(agentId);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  function handleDelete(recordId: string) {
+    setDeletingId(recordId);
+    deleteMemory.mutate(recordId, {
+      onSuccess: () => toast.success(t("Memory deleted", "Erinnerung gelöscht")),
+      onError: () =>
+        toast.error(t("Couldn't delete memory", "Erinnerung konnte nicht gelöscht werden")),
+      onSettled: () => setDeletingId(null),
+    });
+  }
+
+  return (
+    <MemoryPanel
+      records={memory.data?.records}
+      isLoading={memory.isLoading}
+      mayManage={mayManage}
+      onDelete={handleDelete}
+      deletingId={deletingId}
+      emptyLabel={t(
+        "This agent hasn't written any memories yet.",
+        "Dieser Agent hat noch keine Erinnerungen gespeichert.",
+      )}
+    />
+  );
+}
+
 function AgentSkillsTab({
   agentId,
   agentName,
@@ -957,6 +993,390 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void 
   );
 }
 
+// ---------- Configuration tab: tool access ----------
+
+// Which of the department's frame tools this agent may use, plus its login
+// pin -- the enable/disable half of the old combined NarrowingEditor,
+// pulled into its own panel in the Configuration tab so it's discoverable
+// where a user actually looks for "which tools can this agent use" (mirrors
+// the Department page's Integrations tab: same tile grid, same "MCP
+// interfaces active" copy). Fine-grained permissions (read/write/send/
+// approval-€/presets) stay on the Guardrails tab -- see NarrowingEditor
+// below, which now only edits those for tools already enabled here.
+// Every toggle/credential change persists immediately via
+// PUT /agents/{id}/narrowing (full REPLACE), rebuilding the payload from
+// agent.effectiveTools so a field this panel doesn't own (read/write/send/
+// approval_eur/approval_actions/only) survives untouched.
+export function AgentToolAccessPanel({
+  agent,
+  mayManage,
+}: {
+  agent: AgentDetailData;
+  mayManage: boolean;
+}) {
+  const t = useT();
+  const update = useUpdateNarrowing(agent.id);
+  const logins = useMcpLogins();
+  const { data: connections = [] } = useMcpConnections();
+  const createLogin = useCreateMcpLogin();
+  const { confirm, ConfirmDialog } = useConfirm();
+  const frame = agent.departmentFrameTools;
+  const effective = agent.effectiveTools;
+  const frameKeys = Object.keys(frame).filter((k) => frame[k]?.enabled);
+  // Agent-exclusive grants: tools this agent has directly, that the
+  // department never put in its frame -- backend/src/oc8/authz/pdp.py's
+  // second loop in effective_tool_policies. Derived from `effective` (not
+  // `agent.narrowing`, which isn't on this DTO) since that function now
+  // includes every such key regardless of its enabled state, so a toggled-
+  // off agent-only tool still keeps its tile instead of vanishing.
+  const agentOnlyKeys = Object.keys(effective).filter((k) => !(k in frame));
+  const allKeys = [...frameKeys, ...agentOnlyKeys];
+  const connectionByName = new Map(connections.map((c) => [c.name, c] as const));
+  const loginsByKey: Record<string, McpLoginDTO[]> = {};
+  for (const login of logins.data ?? []) {
+    (loginsByKey[login.name] ??= []).push(login);
+  }
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [toolSearch, setToolSearch] = useState("");
+  // Every tenant connection not already a tile here, deduped by name (same
+  // convention as `connectionByName`) -- AND not a key the department frame
+  // already mentions at all, even disabled. backend/src/oc8/authz/pdp.py's
+  // narrowing_within_frame keys off presence in frame_tools, not its enabled
+  // flag: a tool the department explicitly turned off is still governed by
+  // it and stays narrow-only, never agent-exclusive -- offering it here
+  // would just 422 on save.
+  const frameToolKeys = Object.keys(frame);
+  const addableNames = Array.from(new Set(connections.map((c) => c.name))).filter(
+    (name) => !allKeys.includes(name) && !frameToolKeys.includes(name),
+  );
+
+  function persist(
+    patch: Record<
+      string,
+      Partial<{
+        enabled: boolean;
+        connectionId: string | null;
+        read: boolean;
+        write: boolean;
+        send: boolean;
+      }>
+    >,
+  ) {
+    const keys = new Set([...allKeys, ...Object.keys(patch)]);
+    const tools: Record<string, unknown> = {};
+    for (const k of keys) {
+      const src = effective[k] ?? frame[k];
+      const p = patch[k];
+      tools[k] = {
+        enabled: p?.enabled ?? !!src?.enabled,
+        read: p?.read ?? !!src?.read,
+        write: p?.write ?? !!src?.write,
+        send: p?.send ?? !!src?.send,
+        approval_eur: src?.approvalEur ?? null,
+        approval_actions: src?.approvalActions ?? [],
+        only: src?.only ?? [],
+        connection_id: p && "connectionId" in p ? p.connectionId : (src?.connectionId ?? null),
+      };
+    }
+    update.mutate(
+      { narrowing: { tools } },
+      {
+        onSuccess: () =>
+          toast.success(t("Tool access updated", "Tool-Zugriff aktualisiert"), {
+            description: agent.name,
+          }),
+        onError: () =>
+          toast.error(
+            t("Couldn't update tool access", "Tool-Zugriff konnte nicht aktualisiert werden"),
+          ),
+      },
+    );
+  }
+
+  // Only ever called on an agent-only key: a frame-inherited tile isn't
+  // stored in this agent's own narrowing at all (persist's `tools` payload
+  // only ever carries keys from `allKeys`, which is frame keys + agent-only
+  // keys derived from `effective` -- see the comment above `agentOnlyKeys`),
+  // so there is nothing here for the agent to remove; disabling it via the
+  // existing Toggle is the department-governed equivalent.
+  async function removeTool(key: string) {
+    const ok = await confirm({
+      title: t("Remove this tool?", "Dieses Tool entfernen?"),
+      description: t(
+        `Remove "${key}" from this agent? It can be added again later.`,
+        `„${key}" von diesem Agenten entfernen? Kann später wieder hinzugefügt werden.`,
+      ),
+      confirmLabel: t("Remove", "Entfernen"),
+      cancelLabel: t("Cancel", "Abbrechen"),
+    });
+    if (!ok) return;
+    const keys = new Set(allKeys);
+    keys.delete(key);
+    const tools: Record<string, unknown> = {};
+    for (const k of keys) {
+      const src = effective[k] ?? frame[k];
+      tools[k] = {
+        enabled: !!src?.enabled,
+        read: !!src?.read,
+        write: !!src?.write,
+        send: !!src?.send,
+        approval_eur: src?.approvalEur ?? null,
+        approval_actions: src?.approvalActions ?? [],
+        only: src?.only ?? [],
+        connection_id: src?.connectionId ?? null,
+      };
+    }
+    update.mutate(
+      { narrowing: { tools } },
+      {
+        onSuccess: () => toast.success(t("Tool removed", "Tool entfernt"), { description: key }),
+        onError: () => toast.error(t("Couldn't remove tool", "Tool konnte nicht entfernt werden")),
+      },
+    );
+  }
+
+  async function pinCredential(toolKey: string, credentialType: string, credentialId: string) {
+    if (!credentialId) {
+      persist({ [toolKey]: { connectionId: null } });
+      return;
+    }
+    const existing = (loginsByKey[toolKey] ?? []).find((l) => l.credentialId === credentialId);
+    if (existing) {
+      persist({ [toolKey]: { connectionId: existing.id } });
+      return;
+    }
+    try {
+      const login = await createLogin.mutateAsync({
+        name: toolKey,
+        credentialType,
+        credentialId,
+        scopes: [],
+      });
+      persist({ [toolKey]: { connectionId: login.id } });
+    } catch (err) {
+      toast.error(
+        t("Could not link this credential", "Anmeldedaten konnten nicht verknüpft werden"),
+        { description: err instanceof Error ? err.message : String(err) },
+      );
+    }
+  }
+
+  const activeCount = allKeys.filter((k) => effective[k]?.enabled).length;
+
+  function addTool(name: string) {
+    persist({ [name]: { enabled: true, read: true, write: false, send: false } });
+    setPickerOpen(false);
+  }
+
+  return (
+    <Panel className="p-5">
+      {ConfirmDialog}
+      <div className="mb-4 flex items-start justify-between gap-2">
+        <ConfigSectionHeader
+          hint={t(
+            "inherited from the department — on/off for the agent only",
+            "vom Department geerbt — nur an/aus für diesen Agenten",
+          )}
+          title={t("Available interfaces", "Verfügbare Schnittstellen")}
+        />
+        <div className="flex shrink-0 items-center gap-2">
+          {allKeys.length > 0 && (
+            <span className="rounded-full border border-border bg-background/40 px-2 py-1 text-[11px] text-muted-foreground">
+              {t(
+                `${activeCount} of ${allKeys.length} MCP interfaces active`,
+                `${activeCount} von ${allKeys.length} MCP-Schnittstellen aktiv`,
+              )}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              setToolSearch("");
+              setPickerOpen(true);
+            }}
+            disabled={!mayManage || addableNames.length === 0}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition hover:bg-background/70 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Plus className="h-3.5 w-3.5" /> {t("Add tool", "Tool hinzufügen")}
+          </button>
+        </div>
+      </div>
+      {allKeys.length === 0 ? (
+        <p className="rounded-md border border-dashed border-border/70 bg-background/30 p-3 text-center text-xs text-muted-foreground">
+          {t(
+            "No tools yet — add one directly for this agent, or grant it to the whole department first.",
+            "Noch keine Tools — direkt für diesen Agenten hinzufügen oder zuerst der ganzen Abteilung gewähren.",
+          )}
+        </p>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {allKeys.map((key) => {
+            const isAgentOnly = agentOnlyKeys.includes(key);
+            const connection = connectionByName.get(key);
+            const connected = !!connection?.connected;
+            const isOn = !!effective[key]?.enabled;
+            const credentialType = connection?.credentialType;
+            const pickedCredentialId =
+              (loginsByKey[key] ?? []).find((l) => l.id === effective[key]?.connectionId)
+                ?.credentialId ?? "";
+            return (
+              <div
+                key={key}
+                className={cn(
+                  "flex flex-col items-start gap-2 rounded-lg border p-3 text-left transition",
+                  !connected
+                    ? "border-dashed border-border/60 bg-background/20 text-muted-foreground/70"
+                    : isOn
+                      ? "border-primary/50 bg-primary/[0.06]"
+                      : "border-border bg-background/40",
+                )}
+              >
+                <div className="flex w-full items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div
+                      className={cn(
+                        "grid h-8 w-8 place-items-center rounded-md",
+                        isOn && connected
+                          ? "bg-primary/15 text-primary"
+                          : "bg-background/60 text-muted-foreground",
+                      )}
+                    >
+                      <Wrench className="h-4 w-4" />
+                    </div>
+                    <div className="font-medium text-foreground">{key}</div>
+                  </div>
+                  {!connected ? (
+                    <Lock
+                      className="h-3.5 w-3.5 text-muted-foreground"
+                      aria-label={t("Not connected yet", "Noch nicht verbunden")}
+                    />
+                  ) : (
+                    <Toggle
+                      on={isOn}
+                      onChange={(next) => mayManage && persist({ [key]: { enabled: next } })}
+                    />
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {isAgentOnly && (
+                    <span className="rounded-full border border-primary/40 bg-primary/10 px-1.5 py-0.5 text-[9px] uppercase tracking-widest text-primary">
+                      {t("Agent only", "Nur dieser Agent")}
+                    </span>
+                  )}
+                  {isAgentOnly && mayManage && (
+                    <button
+                      type="button"
+                      onClick={() => removeTool(key)}
+                      title={t("Remove tool", "Tool entfernen")}
+                      className="ml-auto inline-flex items-center rounded-md p-1 text-muted-foreground transition hover:text-destructive"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  )}
+                  {!connected && (
+                    <span className="rounded-full border border-border bg-background/40 px-1.5 py-0.5 text-[9px] text-muted-foreground">
+                      {t(
+                        "not connected yet — connect under Capas",
+                        "noch nicht verbunden — unter Capas verbinden",
+                      )}
+                    </span>
+                  )}
+                </div>
+                {connected && isOn && credentialType && mayManage && (
+                  <div className="w-full min-w-0 border-t border-border/60 pt-2">
+                    <div className="mb-1 text-[10px] uppercase tracking-widest text-muted-foreground">
+                      {t("Login", "Login")}
+                    </div>
+                    <CredentialPicker
+                      credentialType={credentialType}
+                      value={pickedCredentialId}
+                      onChange={(credentialId) => pinCredential(key, credentialType, credentialId)}
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <p className="mt-3 text-[11px] text-muted-foreground">
+        {t(
+          "Fine-grained permissions (read/write/send, approval threshold) live on the Guardrails tab. “Agent only” tools are exclusive to this agent — sibling agents in the same department never get them.",
+          "Feinabstufung der Berechtigungen (Lesen/Schreiben/Senden, Freigabe-Schwelle) findest du im Guardrails-Tab. „Nur dieser Agent“-Tools sind exklusiv für diesen Agenten — andere Agenten derselben Abteilung bekommen sie nie.",
+        )}
+      </p>
+
+      {pickerOpen &&
+        (() => {
+          const searchTerm = toolSearch.trim().toLowerCase();
+          const filtered = searchTerm
+            ? addableNames.filter((name) => name.toLowerCase().includes(searchTerm))
+            : addableNames;
+          return (
+            <div
+              className="fixed inset-0 z-40 grid place-items-center bg-black/60 p-4 backdrop-blur-sm"
+              onClick={() => setPickerOpen(false)}
+            >
+              <div
+                className="w-full max-w-lg overflow-hidden rounded-xl border border-border bg-panel shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between border-b border-border px-5 py-4">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-widest text-muted-foreground">
+                      {t("Tenant connections", "Tenant-Verbindungen")}
+                    </div>
+                    <h2 className="font-serif text-xl">{t("Add tool", "Tool hinzufügen")}</h2>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPickerOpen(false)}
+                    className="grid h-8 w-8 place-items-center rounded-md border border-border text-muted-foreground transition hover:text-foreground"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="relative border-b border-border px-5 py-3">
+                  <Search className="pointer-events-none absolute left-8 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    value={toolSearch}
+                    onChange={(e) => setToolSearch(e.target.value)}
+                    placeholder={t("Search tools…", "Tools durchsuchen…")}
+                    className="w-full rounded-md border border-border bg-background/40 py-2 pl-8 pr-3 text-sm outline-none focus:border-primary/50"
+                  />
+                </div>
+                <div className="max-h-[60vh] divide-y divide-border overflow-y-auto">
+                  {filtered.length === 0 && (
+                    <div className="p-6 text-center text-sm text-muted-foreground">
+                      {addableNames.length === 0
+                        ? t(
+                            "Every tenant connection already has a tile here.",
+                            "Jede Tenant-Verbindung hat hier bereits eine Kachel.",
+                          )
+                        : t("No tools match your search.", "Keine Tools passen zur Suche.")}
+                    </div>
+                  )}
+                  {filtered.map((name) => (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => addTool(name)}
+                      className="flex w-full items-center gap-3 px-5 py-3 text-left transition hover:bg-primary/5"
+                    >
+                      <Wrench className="h-4 w-4 shrink-0 text-primary" />
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
+                      <Plus className="h-4 w-4 text-muted-foreground" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+    </Panel>
+  );
+}
+
 // ---------- Guardrails / tool narrowing ----------
 
 // The agent's Assigned-LLM panel. Its own component (rather than inline in
@@ -1029,10 +1449,13 @@ export function AssignedModelPanel({
   );
 }
 
-// Real tool-narrowing editor. The department frame is the ceiling; an agent may
-// only *disable* frame tools (never widen). Persists via PUT /agents/{id}/narrowing
-// (useUpdateNarrowing) as { narrowing: { tools: { <key>: {...} } } }. Only tools
-// enabled in the frame are shown, so toggles always stay within the frame.
+// Permission editor for tools already enabled on the Configuration tab's
+// AgentToolAccessPanel above. That panel owns enable/disable and the login
+// pin; this one only tightens read/write/send/approval-€/presets for tools
+// that panel has switched on -- an agent may narrow permissions below the
+// department frame, never widen them. Persists via PUT /agents/{id}/narrowing
+// (useUpdateNarrowing) as { narrowing: { tools: { <key>: {...} } } },
+// preserving each tool's enabled state and connection_id untouched.
 export function NarrowingEditor({
   agent,
   mayManage,
@@ -1047,80 +1470,17 @@ export function NarrowingEditor({
   const frame = agent.departmentFrameTools;
   const effective = agent.effectiveTools;
   const frameKeys = Object.keys(frame).filter((k) => frame[k]?.enabled);
-  // Only a tool with a live MCP connection is actually usable -- a
-  // department can enable a tool in its frame before anyone connected it
-  // (e.g. Hubspot, Jira granted but never set up), and showing those
-  // inline read as if they were already active. `frameKeys` still drives
-  // `save()` below (every frame tool's enabled state is sent either way);
-  // this narrows only what's OFFERED in the UI.
-  const connectedNames = new Set(connections.filter((c) => c.connected).map((c) => c.name));
-  const connectedFrameKeys = frameKeys.filter((k) => connectedNames.has(k));
-  const [enabled, setEnabled] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(frameKeys.map((k) => [k, !!effective[k]?.enabled])),
-  );
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [toolSearch, setToolSearch] = useState("");
+  const enabledKeys = frameKeys.filter((k) => effective[k]?.enabled);
   // Per-tool-key policy edits (read/write/send/approvalEur/approvalActions/
-  // only), keyed the same way as `enabled` -- not fed back from `effective`
-  // on every render, same reason DepartmentToolsPanel's `edited` state isn't
-  // either: a click on a preset or a free-text chip must not get clobbered by
-  // a refetch mid-edit.
+  // only) -- not fed back from `effective` on every render, same reason
+  // DepartmentToolsPanel's `edited` state isn't either: a click on a preset
+  // or a free-text chip must not get clobbered by a refetch mid-edit.
   const [edited, setEdited] = useState<Record<string, GuardrailValue>>({});
-  // Per-tool-key login pin, keyed the same way as `enabled`. Seeded from any
-  // pin the backend already resolved for this agent (if the DTO ever carries
-  // one); absent means "no pin yet", not "unpin".
-  const [connectionId, setConnectionId] = useState<Record<string, string>>(() =>
-    Object.fromEntries(
-      frameKeys.map((k) => [k, effective[k]?.connectionId ?? ""]).filter(([, v]) => !!v),
-    ),
-  );
-  // A login is available FOR tool key `k` exactly when `login.name === k` —
-  // `McpConnection.name` IS the tool key, the by-name convention this whole
-  // feature relies on (Tasks 3/4/6). One unfiltered fetch, grouped client-side,
-  // rather than N network calls for a handful of tool keys.
+  // Read-only display of which login is pinned -- editing that pin lives on
+  // the Configuration tab's AgentToolAccessPanel now.
   const loginsByKey: Record<string, McpLoginDTO[]> = {};
   for (const login of logins.data ?? []) {
     (loginsByKey[login.name] ??= []).push(login);
-  }
-  // Picking (or creating) a login happens inline via CredentialPicker -- the
-  // same "select or create new" control the Capa setup form uses, not a
-  // stacked modal, and no free-text scopes field (live user feedback: asking
-  // for raw tool-call names "das bekommt doch kein mitarbeiter hin"). A login
-  // is a Credential paired 1:1 with a tenant-global McpConnection
-  // (POST /mcp/logins), so picking a credential still needs one created/
-  // reused behind the scenes -- pinCredential below does that.
-  const createLogin = useCreateMcpLogin();
-
-  async function pinCredential(toolKey: string, credentialType: string, credentialId: string) {
-    if (!credentialId) {
-      setConnectionId((s) => {
-        const next = { ...s };
-        delete next[toolKey];
-        return next;
-      });
-      return;
-    }
-    const existing = (loginsByKey[toolKey] ?? []).find((l) => l.credentialId === credentialId);
-    if (existing) {
-      setConnectionId((s) => ({ ...s, [toolKey]: existing.id }));
-      return;
-    }
-    try {
-      const login = await createLogin.mutateAsync({
-        name: toolKey,
-        credentialType,
-        credentialId,
-        scopes: [],
-      });
-      setConnectionId((s) => ({ ...s, [toolKey]: login.id }));
-    } catch (err) {
-      toast.error(
-        t("Could not link this credential", "Anmeldedaten konnten nicht verknüpft werden"),
-        {
-          description: err instanceof Error ? err.message : String(err),
-        },
-      );
-    }
   }
 
   // What the picker for tool `k` starts from: any local edit, else the
@@ -1146,13 +1506,8 @@ export function NarrowingEditor({
     const tools: Record<string, unknown> = {};
     for (const k of frameKeys) {
       const val = valueFor(k);
-      if (enabled[k] && (loginsByKey[k]?.length ?? 0) > 0 && !connectionId[k]) {
-        toast.error(t("Pick a login before saving", "Login vor dem Speichern auswählen"), {
-          description: k,
-        });
-      }
       tools[k] = {
-        enabled: enabled[k],
+        enabled: !!effective[k]?.enabled,
         read: val.read,
         write: val.write,
         send: val.send,
@@ -1161,7 +1516,7 @@ export function NarrowingEditor({
         approval_eur: val.approvalEur ?? null,
         approval_actions: val.approvalActions,
         only: val.only,
-        connection_id: connectionId[k] || null,
+        connection_id: effective[k]?.connectionId ?? null,
       };
     }
     update.mutate(
@@ -1189,111 +1544,52 @@ export function NarrowingEditor({
     <Panel className="p-5">
       <div className="mb-4 flex items-start justify-between gap-2">
         <ConfigSectionHeader
-          hint={t("tool narrowing", "Tool-Einschränkung")}
-          title={t("Guardrails & tool access", "Guardrails & Tool-Zugriff")}
+          hint={t("fine-grained permissions", "Feinabstufung der Berechtigungen")}
+          title={t("Guardrails", "Guardrails")}
         />
-        <button
-          type="button"
-          onClick={() => {
-            setToolSearch("");
-            setPickerOpen(true);
-          }}
-          disabled={!mayManage || connectedFrameKeys.length === 0}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-background/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition hover:bg-background/70 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <Plus className="h-3.5 w-3.5" /> {t("Assign tool", "Tool zuweisen")}
-        </button>
       </div>
-      {connectedFrameKeys.length === 0 ? (
-        <p className="rounded-md border border-dashed border-border/70 bg-background/30 p-3 text-center text-xs text-muted-foreground">
-          {frameKeys.length === 0
-            ? t(
-                "No department frame — this agent has no narrowable tools.",
-                "Kein Abteilungsrahmen — dieser Agent hat keine einschränkbaren Tools.",
-              )
-            : t(
-                "None of the department's tools are connected yet — connect one under Capas first.",
-                "Keines der Tools der Abteilung ist bereits verbunden — zuerst unter Capas verbinden.",
-              )}
-        </p>
-      ) : connectedFrameKeys.filter((k) => enabled[k]).length === 0 ? (
+      {enabledKeys.length === 0 ? (
         <p className="rounded-md border border-dashed border-border/70 bg-background/30 p-3 text-center text-xs text-muted-foreground">
           {t(
-            "No tools assigned yet. Click ‘Assign tool’ to grant this agent one of the department's connected tools.",
-            "Noch keine Tools zugewiesen. Klicke „Tool zuweisen“, um diesem Agenten eines der verbundenen Tools der Abteilung zu geben.",
+            "No tools enabled yet. Turn one on under Configuration → Available interfaces first.",
+            "Noch keine Tools aktiviert. Zuerst unter Konfiguration → Verfügbare Schnittstellen eines einschalten.",
           )}
         </p>
       ) : (
         <ul className="space-y-3">
-          {connectedFrameKeys
-            .filter((k) => enabled[k])
-            .map((k) => {
-              const connection = connections.find((c) => c.name === k);
-              return (
-                <li key={k} className="rounded-md border border-border bg-background/30 p-3">
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                    <div className="flex min-w-0 flex-1 items-center gap-2">
-                      <Shield className="h-3.5 w-3.5 shrink-0 text-primary" />
-                      <span className="min-w-0 flex-1 truncate text-sm">{k}</span>
-                    </div>
-                    <span
-                      className={cn(
-                        "hidden text-[10px] sm:inline",
-                        enabled[k] ? "text-[color:var(--status-running)]" : "text-muted-foreground",
-                      )}
-                    >
-                      {enabled[k] ? t("enabled", "aktiv") : t("disabled", "aus")}
-                    </span>
-                    {(() => {
-                      const credentialType = connection?.credentialType;
-                      if (!credentialType) return null;
-                      const pickedCredentialId =
-                        (loginsByKey[k] ?? []).find((l) => l.id === connectionId[k])
-                          ?.credentialId ?? "";
-                      if (!mayManage) {
-                        const pinnedName = (loginsByKey[k] ?? []).find(
-                          (l) => l.id === connectionId[k],
-                        )?.name;
-                        return pinnedName ? (
-                          <span className="shrink-0 text-[11px] text-muted-foreground">
-                            {pinnedName}
-                          </span>
-                        ) : null;
-                      }
-                      return (
-                        <div className="min-w-[220px] shrink-0">
-                          <CredentialPicker
-                            credentialType={credentialType}
-                            value={pickedCredentialId}
-                            onChange={(credentialId) =>
-                              pinCredential(k, credentialType, credentialId)
-                            }
-                          />
-                        </div>
-                      );
-                    })()}
-                    <Toggle
-                      on={!!enabled[k]}
-                      onChange={(v) => setEnabled((s) => ({ ...s, [k]: v }))}
+          {enabledKeys.map((k) => {
+            const connection = connections.find((c) => c.name === k);
+            const pinnedName = (loginsByKey[k] ?? []).find(
+              (l) => l.id === effective[k]?.connectionId,
+            )?.name;
+            return (
+              <li key={k} className="rounded-md border border-border bg-background/30 p-3">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                    <Shield className="h-3.5 w-3.5 shrink-0 text-primary" />
+                    <span className="min-w-0 flex-1 truncate text-sm">{k}</span>
+                  </div>
+                  {pinnedName && (
+                    <span className="shrink-0 text-[11px] text-muted-foreground">{pinnedName}</span>
+                  )}
+                </div>
+                {mayManage && connection && (
+                  <div className="mt-3 border-t border-border/70 pt-3">
+                    <GuardrailPresetPicker
+                      presets={connection.guardrailPresets}
+                      guardrailLibrary={connection.guardrailLibrary}
+                      hasValueSpec={connection.hasValueSpec}
+                      value={valueFor(k)}
+                      onChange={(next) => setEdited((prev) => ({ ...prev, [k]: next }))}
                     />
                   </div>
-                  {mayManage && connection && (
-                    <div className="mt-3 border-t border-border/70 pt-3">
-                      <GuardrailPresetPicker
-                        presets={connection.guardrailPresets}
-                        guardrailLibrary={connection.guardrailLibrary}
-                        hasValueSpec={connection.hasValueSpec}
-                        value={valueFor(k)}
-                        onChange={(next) => setEdited((prev) => ({ ...prev, [k]: next }))}
-                      />
-                    </div>
-                  )}
-                </li>
-              );
-            })}
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
-      {frameKeys.length > 0 && (
+      {enabledKeys.length > 0 && (
         <div className="mt-4 flex justify-end">
           <button
             type="button"
@@ -1307,82 +1603,10 @@ export function NarrowingEditor({
       )}
       <p className="mt-3 text-[11px] text-muted-foreground">
         {t(
-          "Disable tools to narrow this agent below the department frame. You can only tighten, never widen.",
-          "Deaktiviere Tools, um diesen Agenten unter den Abteilungsrahmen einzuschränken. Nur Einschränken möglich, kein Erweitern.",
+          "Permissions here can only tighten what's enabled under Configuration, never widen it.",
+          "Berechtigungen hier können das unter Konfiguration Aktivierte nur einschränken, nie erweitern.",
         )}
       </p>
-
-      {pickerOpen &&
-        (() => {
-          const assignable = connectedFrameKeys.filter((k) => !enabled[k]);
-          const searchTerm = toolSearch.trim().toLowerCase();
-          const filtered = searchTerm
-            ? assignable.filter((k) => k.toLowerCase().includes(searchTerm))
-            : assignable;
-          return (
-            <div
-              className="fixed inset-0 z-40 grid place-items-center bg-black/60 p-4 backdrop-blur-sm"
-              onClick={() => setPickerOpen(false)}
-            >
-              <div
-                className="w-full max-w-lg overflow-hidden rounded-xl border border-border bg-panel shadow-2xl"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="flex items-center justify-between border-b border-border px-5 py-4">
-                  <div>
-                    <div className="text-[11px] uppercase tracking-widest text-muted-foreground">
-                      {t("Connected tools", "Verbundene Tools")}
-                    </div>
-                    <h2 className="font-serif text-xl">{t("Assign tool", "Tool zuweisen")}</h2>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setPickerOpen(false)}
-                    className="grid h-8 w-8 place-items-center rounded-md border border-border text-muted-foreground transition hover:text-foreground"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-                <div className="relative border-b border-border px-5 py-3">
-                  <Search className="pointer-events-none absolute left-8 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                  <input
-                    value={toolSearch}
-                    onChange={(e) => setToolSearch(e.target.value)}
-                    placeholder={t("Search tools…", "Tools durchsuchen…")}
-                    className="w-full rounded-md border border-border bg-background/40 py-2 pl-8 pr-3 text-sm outline-none focus:border-primary/50"
-                  />
-                </div>
-                <div className="max-h-[60vh] divide-y divide-border overflow-y-auto">
-                  {filtered.length === 0 && (
-                    <div className="p-6 text-center text-sm text-muted-foreground">
-                      {assignable.length === 0
-                        ? t(
-                            "All connected tools are already assigned.",
-                            "Alle verbundenen Tools sind bereits zugewiesen.",
-                          )
-                        : t("No tools match your search.", "Keine Tools passen zur Suche.")}
-                    </div>
-                  )}
-                  {filtered.map((k) => (
-                    <button
-                      key={k}
-                      type="button"
-                      onClick={() => {
-                        setEnabled((s) => ({ ...s, [k]: true }));
-                        setPickerOpen(false);
-                      }}
-                      className="flex w-full items-center gap-3 px-5 py-3 text-left transition hover:bg-primary/5"
-                    >
-                      <Wrench className="h-4 w-4 shrink-0 text-primary" />
-                      <span className="min-w-0 flex-1 truncate text-sm font-medium">{k}</span>
-                      <Plus className="h-4 w-4 text-muted-foreground" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          );
-        })()}
     </Panel>
   );
 }
@@ -2129,6 +2353,15 @@ function LiveLog({ agentId, runId }: { agentId: string; runId: string | null }) 
   const agentActivity = activity.data ?? [];
   const mayHaveMore = agentActivity.length >= feedLimit;
   const live = !!runId && !!run.data && !isTerminalRunState(run.data.state);
+  const cancelRun = useCancelRun(runId ?? "");
+  // Cancel is cooperative (§7.2): a successful call doesn't flip `run.state`
+  // itself, it only records intent -- the run stops at its next step
+  // boundary and `state` eventually reads "interrupted" on its own. Track
+  // "already asked" locally, keyed to THIS run, so the button disables
+  // right away instead of inviting a second click while waiting; a run
+  // change (new runId) clears it naturally since the comparison fails.
+  const [cancelledRunId, setCancelledRunId] = useState<string | null>(null);
+  const alreadyRequestedCancel = !!runId && cancelledRunId === runId;
 
   return (
     <div className="space-y-4">
@@ -2149,7 +2382,37 @@ function LiveLog({ agentId, runId }: { agentId: string; runId: string | null }) 
               {t("Live Log · current run", "Live-Log · aktueller Lauf")}
             </div>
           </div>
-          {run.data && <RunStateBadge state={run.data.state} />}
+          <div className="flex items-center gap-2">
+            {live && (
+              <button
+                type="button"
+                onClick={() =>
+                  cancelRun.mutate(undefined, {
+                    onSuccess: () => {
+                      setCancelledRunId(runId);
+                      toast.success(t("Cancel requested", "Abbruch angefordert"), {
+                        description: t(
+                          "The run will stop at its next step boundary.",
+                          "Der Lauf stoppt beim nächsten Schritt.",
+                        ),
+                      });
+                    },
+                    onError: () =>
+                      toast.error(t("Couldn't cancel run", "Lauf konnte nicht abgebrochen werden")),
+                  })
+                }
+                disabled={cancelRun.isPending || alreadyRequestedCancel}
+                title={t("Stop this run", "Diesen Lauf abbrechen")}
+                className="inline-flex items-center gap-1.5 rounded-md border border-[color:var(--status-error)]/40 px-2.5 py-1.5 text-xs font-medium text-[color:var(--status-error)] transition hover:bg-[color:var(--status-error)]/10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <StopCircle className="h-3.5 w-3.5" />
+                {alreadyRequestedCancel
+                  ? t("Cancelling…", "Wird abgebrochen…")
+                  : t("Stop", "Abbrechen")}
+              </button>
+            )}
+            {run.data && <RunStateBadge state={run.data.state} />}
+          </div>
         </div>
         {runId ? (
           <RunTranscript run={run.data} pending={run.isPending} />

@@ -161,3 +161,25 @@ def test_explicit_empty_rights_stays_empty() -> None:
         {**SEEDED, "requires": {"tools": [{"tool": "odoo", "rights": []}]}}
     )
     assert d.requires_tools[0].rights == ()
+
+
+def test_reference_root_round_trips() -> None:
+    d = parse_definition({**SEEDED, "reference_root": "my-capa/skills/thai-compliance"})
+    assert d.reference_root == "my-capa/skills/thai-compliance"
+
+
+def test_absent_reference_root_is_none() -> None:
+    d = parse_definition(SEEDED)
+    assert d.reference_root is None
+
+
+def test_empty_string_reference_root_is_treated_as_none() -> None:
+    d = parse_definition({**SEEDED, "reference_root": ""})
+    assert d.reference_root is None
+
+
+def test_non_string_reference_root_is_dropped_not_raised() -> None:
+    # Tolerant on the way in, same as every other field here -- a malformed
+    # value must not cost a run that is otherwise fine.
+    d = parse_definition({**SEEDED, "reference_root": 42})
+    assert d.reference_root is None

@@ -5,9 +5,17 @@ Pure functions over the department frame (the ceiling) and the agent narrowing
 
     effective = department_frame ∩ agent_narrowing
 
-An agent narrowing may only *remove* tools/rights or *lower* an approval
-threshold — never widen. `narrowing_within_frame` enforces that at write time;
-`authorize_tool` enforces it again at decision time (defense in depth).
+For a tool key the frame grants, an agent narrowing may only *remove*
+tools/rights or *lower* an approval threshold — never widen. `narrowing_within_frame`
+enforces that at write time; `authorize_tool` enforces it again at decision
+time (defense in depth).
+
+A tool key the frame does NOT grant is a different case: an agent may still
+be given that tool directly (an agent-exclusive grant, invisible to sibling
+agents in the same department), since there is no frame policy to widen
+beyond -- the narrowing entry simply becomes that tool's whole policy. See
+`effective_tool_policies`'s second loop and `narrowing_within_frame`'s
+`key not in frame_tools` branch.
 
 Frame / narrowing JSON shape (stored on ``department.frame`` / ``agent.narrowing``):
 
@@ -182,6 +190,26 @@ def effective_tool_policies(
             # `f.connection_id` to consider.
             connection_id=no.connection_id if no else None,
         )
+    # Agent-exclusive grants: a narrowing key with no frame counterpart at
+    # all. There is nothing to intersect against, so the narrowing term IS
+    # the policy outright -- only role_rights still applies, same as every
+    # tool above. `narrowing_within_frame` is what allows this key to reach
+    # here in the first place (its `key not in frame_tools` branch no longer
+    # flags it); this loop is where that grant actually takes effect.
+    for key, raw in narrow_tools.items():
+        if key in frame_tools:
+            continue
+        exclusive = ToolPolicy.from_json(raw)
+        out[key] = ToolPolicy(
+            enabled=exclusive.enabled,
+            read=exclusive.read and may_read,
+            write=exclusive.write and may_write,
+            send=exclusive.send and may_send,
+            approval_eur=exclusive.approval_eur,
+            approval_actions=exclusive.approval_actions,
+            only=exclusive.only,
+            connection_id=exclusive.connection_id,
+        )
     return out
 
 
@@ -317,16 +345,18 @@ class SubsetViolation:
 def narrowing_within_frame(
     frame: dict[str, Any], narrowing: dict[str, Any]
 ) -> list[SubsetViolation]:
-    """Return violations where the narrowing widens beyond the frame (empty = ok)."""
+    """Return violations where the narrowing widens a FRAME tool beyond what
+    the frame grants (empty = ok). A key absent from the frame entirely is
+    not a violation -- it's an agent-exclusive grant (see module docstring
+    and `effective_tool_policies`'s second loop), which has no frame policy
+    to widen beyond."""
     frame_tools = _tools(frame)
     violations: list[SubsetViolation] = []
     for key, raw in _tools(narrowing).items():
+        if key not in frame_tools:
+            continue
         n = ToolPolicy.from_json(raw)
         f = ToolPolicy.from_json(frame_tools.get(key))
-        if key not in frame_tools:
-            if n.enabled:
-                violations.append(SubsetViolation(key, "tool not present in department frame"))
-            continue
         if n.enabled and not f.enabled:
             violations.append(SubsetViolation(key, "tool disabled in department frame"))
         for right in RIGHTS:

@@ -67,10 +67,139 @@ def test_tools_an_oc8_agent_does_not_have_are_flagged() -> None:
 
 
 def test_bundled_files_are_flagged() -> None:
+    # A direct import (this module's own flow) never gets a reference_root --
+    # only capas/materialise.py sets one, for a skill installed via an actual
+    # capa on disk (see capas/manifest.py's SkillTemplateSpec.reference_root).
+    # So read_reference_file can never serve one imported this way, whatever
+    # oc8 supports for a properly-installed capa's own skills.
     text = "---\nname: x\n---\n\nLies references/details.md und dann scripts/run.sh."
     c = parse_skill(text, path="x/SKILL.md", budget_tokens=1000)
     assert c is not None
-    assert any("Dateisystem" in w for w in c.warnings)
+    assert any("read_reference_file" in w for w in c.warnings)
+
+
+def _tar_with_paths(entries: dict[str, str | bytes]) -> bytes:
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        for name, content in entries.items():
+            data = content if isinstance(content, bytes) else content.encode()
+            info = tarfile.TarInfo(name=name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+    return buf.getvalue()
+
+
+def test_bundled_files_under_a_nested_skill_are_captured_relative_to_its_own_dir() -> None:
+    blob = _tar_with_paths(
+        {
+            "repo-abc/skills/one/SKILL.md": SMALL,
+            "repo-abc/skills/one/references/checklist.md": "1. Check VAT ID.\n",
+            "repo-abc/skills/one/scripts/run.sh": "echo hi\n",
+            # A file belonging to a DIFFERENT skill must never leak in here.
+            "repo-abc/skills/two/references/other.md": "not this skill's file\n",
+        }
+    )
+    found = read_archive(blob, budget_tokens=1000, with_bundles=True)
+    assert len(found) == 1
+    assert found[0].bundled_files == {
+        "references/checklist.md": b"1. Check VAT ID.\n",
+        "scripts/run.sh": b"echo hi\n",
+    }
+
+
+def test_bundled_files_at_the_archive_root_are_captured_too() -> None:
+    blob = _tar_with_paths(
+        {
+            "repo-abc/SKILL.md": SMALL,
+            "repo-abc/references/checklist.md": "root-level reference\n",
+        }
+    )
+    found = read_archive(blob, budget_tokens=1000, with_bundles=True)
+    assert len(found) == 1
+    assert found[0].bundled_files == {"references/checklist.md": b"root-level reference\n"}
+
+
+def test_a_skill_with_no_bundled_files_gets_an_empty_dict() -> None:
+    blob = _tar_with_paths({"repo-abc/skills/one/SKILL.md": SMALL})
+    found = read_archive(blob, budget_tokens=1000, with_bundles=True)
+    assert found[0].bundled_files == {}
+
+
+def test_bundled_files_are_not_serialised_into_the_preview_json() -> None:
+    blob = _tar_with_paths(
+        {
+            "repo-abc/skills/one/SKILL.md": SMALL,
+            "repo-abc/skills/one/references/checklist.md": "x\n",
+        }
+    )
+    found = read_archive(blob, budget_tokens=1000, with_bundles=True)
+    assert "bundled_files" not in found[0].to_json()
+
+
+def test_without_with_bundles_the_second_pass_never_runs() -> None:
+    """Finding 1: preview must not pay to read bundled file bytes it will
+    immediately discard -- to_json() never includes them. Confirm the DEFAULT
+    (no with_bundles kwarg, what preview_import calls) skips collection
+    entirely rather than collecting and then hiding the result."""
+    blob = _tar_with_paths(
+        {
+            "repo-abc/skills/one/SKILL.md": SMALL,
+            "repo-abc/skills/one/references/checklist.md": "1. Check VAT ID.\n",
+        }
+    )
+    found = read_archive(blob, budget_tokens=1000)
+    assert found[0].bundled_files == {}
+
+
+def test_an_oversized_bundled_file_is_skipped_not_refused() -> None:
+    blob = _tar_with_paths(
+        {
+            "repo-abc/skills/one/SKILL.md": SMALL,
+            "repo-abc/skills/one/references/huge.md": "x" * 250_000,
+            "repo-abc/skills/one/references/small.md": "kept\n",
+        }
+    )
+    found = read_archive(blob, budget_tokens=1000, with_bundles=True)
+    assert found[0].verdict == "fits"  # the skill itself still imports fine
+    assert "references/huge.md" not in found[0].bundled_files
+    assert found[0].bundled_files["references/small.md"] == b"kept\n"
+
+
+def test_the_total_bundle_size_is_capped_per_skill() -> None:
+    # Eleven files at exactly the 200_000-byte PER-FILE cap (_MAX_BUNDLED_FILE_BYTES)
+    # -- none individually oversized, so the per-file check never rejects one.
+    # Eleven of them total 2_200_000, over the 2_000_000 total cap
+    # (_MAX_BUNDLED_TOTAL_BYTES). Collection stops once the running total would
+    # exceed that cap; files are read in the archive's own member order, so
+    # exactly ten are kept here (10 * 200_000 = 2_000_000, the eleventh would
+    # push it to 2_200_000).
+    entries: dict[str, str | bytes] = {"repo-abc/skills/one/SKILL.md": SMALL}
+    for i in range(11):
+        entries[f"repo-abc/skills/one/references/f{i}.md"] = "x" * 200_000
+    blob = _tar_with_paths(entries)
+    found = read_archive(blob, budget_tokens=1000, with_bundles=True)
+    total = sum(len(v) for v in found[0].bundled_files.values())
+    assert total <= 2_000_000
+    assert len(found[0].bundled_files) == 10
+
+
+def test_two_skill_md_matching_files_in_the_same_directory_both_survive() -> None:
+    """Finding 2: the member filter is a SUFFIX match ("skill.md"), so a
+    directory holding both SKILL.md and OTHER-SKILL.md must produce two
+    candidates, not one silently overwriting the other. Both still see the
+    bundled file they share a directory with."""
+    blob = _tar_with_paths(
+        {
+            "repo-abc/one/SKILL.md": SMALL,
+            "repo-abc/one/OTHER-SKILL.md": SMALL.replace("Sauber übergeben", "Andere Übergabe"),
+            "repo-abc/one/references/checklist.md": "shared reference\n",
+        }
+    )
+    found = read_archive(blob, budget_tokens=1000, with_bundles=True)
+    assert len(found) == 2
+    assert {c.name for c in found} == {"Sauber übergeben", "Andere Übergabe"}
+    for c in found:
+        assert c.bundled_files == {"references/checklist.md": b"shared reference\n"}
 
 
 def test_something_that_is_not_a_skill_is_not_one() -> None:
@@ -168,6 +297,303 @@ async def test_an_imported_skill_is_a_real_row_marked_as_foreign(
         assert skill.trust_level == "community", "an import is never first_party"
         assert skill.author == "https://github.com/o/r", "the source travels with it"
         assert skill.current_version_id is not None
+
+
+@pytest.mark.asyncio
+async def test_an_imported_skill_with_bundled_files_gets_a_reference_root(
+    app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The whole point: import a skill whose body tells the agent to read a
+    references/ file, and confirm the file actually lands somewhere
+    read_reference_file (agent/control_tools.py) can serve it from."""
+    import uuid as _uuid
+
+    from asgi_lifespan import LifespanManager
+    from httpx import ASGITransport, AsyncClient
+    from sqlalchemy import select
+
+    from oc8 import models as m
+    from oc8.auth import get_identity_provider
+    from oc8.main import create_app
+
+    blob = _tar_with_paths(
+        {
+            "repo-abc/skills/one/SKILL.md": SMALL,
+            "repo-abc/skills/one/references/checklist.md": "1. Check VAT ID.\n",
+        }
+    )
+
+    async def _fake_fetch(url: str, **kw: object) -> bytes:
+        return blob
+
+    monkeypatch.setattr("oc8.skills.importer.safe_fetch_bytes", _fake_fetch)
+
+    tenant = _uuid.uuid4()
+    token = get_identity_provider().mint(tenant_id=tenant, subject="op", role="org_admin")
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.post(
+                "/api/v1/skills/import",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"source": "https://github.com/o/r", "names": ["Sauber übergeben"]},
+            )
+    assert r.status_code == 201, r.text
+
+    async with app_session(tenant) as db:
+        skill = (
+            await db.execute(select(m.Skill).where(m.Skill.name == "Sauber übergeben"))
+        ).scalar_one()
+        version = await db.get(m.SkillVersion, skill.current_version_id)
+        assert version is not None
+        reference_root = version.definition.get("reference_root")
+        assert reference_root == f"imported:{version.id}"
+
+        stored = (
+            await db.execute(
+                select(m.ImportedSkillFile).where(
+                    m.ImportedSkillFile.skill_version_id == version.id
+                )
+            )
+        ).scalars().all()
+        assert len(stored) == 1
+        assert stored[0].rel_path == "references/checklist.md"
+        assert stored[0].content == b"1. Check VAT ID.\n"
+
+
+@pytest.mark.asyncio
+async def test_publishing_a_new_version_carries_reference_root_forward(
+    app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST /skills/{id}/versions is the generic, pre-existing authoring path --
+    unrelated to import, no archive involved -- and it never mentions
+    reference_root. Without carrying the CURRENT version's value forward,
+    publishing through it would silently strand every ImportedSkillFile row (or
+    capa path) the skill already has: an operator who then re-assigns to the new
+    version gets "has no reference files" for a skill that still has real files
+    sitting in storage."""
+    import uuid as _uuid
+
+    from asgi_lifespan import LifespanManager
+    from httpx import ASGITransport, AsyncClient
+    from sqlalchemy import select
+
+    from oc8 import models as m
+    from oc8.auth import get_identity_provider
+    from oc8.main import create_app
+
+    blob = _tar_with_paths(
+        {
+            "repo-abc/skills/one/SKILL.md": SMALL,
+            "repo-abc/skills/one/references/checklist.md": "1. Check VAT ID.\n",
+        }
+    )
+
+    async def _fake_fetch(url: str, **kw: object) -> bytes:
+        return blob
+
+    monkeypatch.setattr("oc8.skills.importer.safe_fetch_bytes", _fake_fetch)
+
+    tenant = _uuid.uuid4()
+    token = get_identity_provider().mint(tenant_id=tenant, subject="op", role="org_admin")
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.post(
+                "/api/v1/skills/import",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"source": "https://github.com/o/r", "names": ["Sauber übergeben"]},
+            )
+            assert r.status_code == 201, r.text
+            skill_id = r.json()["imported"][0]["id"]
+
+            r2 = await c.post(
+                f"/api/v1/skills/{skill_id}/versions",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"semver": "1.1.0", "instructions": "Do the thing, differently."},
+            )
+            assert r2.status_code == 201, r2.text
+
+    async with app_session(tenant) as db:
+        versions = (
+            await db.execute(
+                select(m.SkillVersion).where(m.SkillVersion.skill_id == _uuid.UUID(skill_id))
+            )
+        ).scalars().all()
+        by_semver = {v.semver: v for v in versions}
+        old_reference_root = by_semver["1.0.0"].definition.get("reference_root")
+        new_reference_root = by_semver["1.1.0"].definition.get("reference_root")
+        assert old_reference_root is not None
+        assert new_reference_root == old_reference_root
+
+
+@pytest.mark.asyncio
+async def test_the_full_round_trip_reads_real_content_through_read_reference_file(
+    app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The spec's own Testing Strategy asks for exactly this chain, end to end:
+    import via the real HTTP endpoint, assign to a real agent, and read the
+    bundled file back through the SAME control tool an agent calls at runtime.
+    The `imported:<uuid>` reference_root shape is pinned by a hardcoded literal
+    independently in skills_write.py (write side) and control_tools.py (read
+    side) -- nothing before this test exercised both together, so a
+    normalization change on either side (e.g. a leading `./` in a stored
+    rel_path) could silently break the other with nothing in CI to catch it."""
+    import uuid as _uuid
+
+    from asgi_lifespan import LifespanManager
+    from httpx import ASGITransport, AsyncClient
+
+    from oc8 import models as m
+    from oc8.agent.control_tools import READ_REFERENCE_FILE, execute_control_tool
+    from oc8.auth import get_identity_provider
+    from oc8.authz.pdp import Decision, Effect
+    from oc8.main import create_app
+    from oc8.modelrouter import ToolCall
+    from oc8.skills.runtime import load_assigned_skills
+
+    blob = _tar_with_paths(
+        {
+            "repo-abc/skills/one/SKILL.md": (
+                "---\nname: Compliance Checker\ndescription: checks things\n---\n\n"
+                "Read references/checklist.md before doing anything.\n"
+            ),
+            "repo-abc/skills/one/references/checklist.md": (
+                "1. Check VAT ID.\n2. Check address.\n"
+            ),
+        }
+    )
+
+    async def _fake_fetch(url: str, **kw: object) -> bytes:
+        return blob
+
+    monkeypatch.setattr("oc8.skills.importer.safe_fetch_bytes", _fake_fetch)
+
+    tenant = _uuid.uuid4()
+    token = get_identity_provider().mint(tenant_id=tenant, subject="op", role="org_admin")
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.post(
+                "/api/v1/skills/import",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"source": "https://github.com/o/r", "names": ["Compliance Checker"]},
+            )
+    assert r.status_code == 201, r.text
+    skill_id = _uuid.UUID(r.json()["imported"][0]["id"])
+
+    async with app_session(tenant) as db:
+        skill = await db.get(m.Skill, skill_id)
+        assert skill is not None
+        version_id = skill.current_version_id
+        assert version_id is not None
+
+        dept = m.Department(tenant_id=tenant, name="Compliance", frame={})
+        db.add(dept)
+        await db.flush()
+        agent = m.Agent(
+            tenant_id=tenant,
+            department_id=dept.id,
+            name="Nora",
+            status="running",
+            definition={},
+            presentation={},
+            narrowing={},
+        )
+        db.add(agent)
+        await db.flush()
+        task = m.Task(
+            tenant_id=tenant,
+            department_id=dept.id,
+            assigned_agent_id=agent.id,
+            title="Check compliance",
+            state="in_progress",
+            delegation_depth=0,
+        )
+        db.add(task)
+        await db.flush()
+        db.add(
+            m.SkillAssignment(
+                tenant_id=tenant,
+                agent_id=agent.id,
+                department_id=None,
+                skill_version_id=version_id,
+                enabled=True,
+                overrides={},
+            )
+        )
+        await db.flush()
+        # Neither a commit nor a fresh session here: `app.tenant_id` is set
+        # LOCAL to this session's transaction (app_session fixture), so
+        # committing mid-test would unbind RLS for everything queried after.
+
+        assigned = await load_assigned_skills(db, agent=agent, tenant_id=tenant)
+        assert len(assigned) == 1
+        loaded_skill = assigned[0]
+        assert loaded_skill.definition.reference_root == f"imported:{version_id}"
+
+        outcome = await execute_control_tool(
+            db,
+            tenant_id=tenant,
+            agent=agent,
+            task=task,
+            tc=ToolCall(
+                id="c1",
+                name=READ_REFERENCE_FILE.name,
+                arguments={"skill": loaded_skill.name, "path": "references/checklist.md"},
+            ),
+            decision=Decision(Effect.ALLOW),
+            assigned_skills=assigned,
+            active_skills=[],
+            mcp_conn=None,
+            originating_operator=None,
+        )
+    assert outcome is not None
+    assert "Check VAT ID" in outcome.output
+
+
+@pytest.mark.asyncio
+async def test_an_imported_skill_with_no_bundled_files_gets_no_reference_root(
+    app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unremarkable case, worth asserting explicitly: nothing about a plain
+    import (no bundled files) should start writing reference_root or rows."""
+    import uuid as _uuid
+
+    from asgi_lifespan import LifespanManager
+    from httpx import ASGITransport, AsyncClient
+    from sqlalchemy import select
+
+    from oc8 import models as m
+    from oc8.auth import get_identity_provider
+    from oc8.main import create_app
+
+    blob = _tar_with_paths({"repo-abc/skills/one/SKILL.md": SMALL})
+
+    async def _fake_fetch(url: str, **kw: object) -> bytes:
+        return blob
+
+    monkeypatch.setattr("oc8.skills.importer.safe_fetch_bytes", _fake_fetch)
+
+    tenant = _uuid.uuid4()
+    token = get_identity_provider().mint(tenant_id=tenant, subject="op", role="org_admin")
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.post(
+                "/api/v1/skills/import",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"source": "https://github.com/o/r", "names": ["Sauber übergeben"]},
+            )
+    assert r.status_code == 201, r.text
+
+    async with app_session(tenant) as db:
+        skill = (
+            await db.execute(select(m.Skill).where(m.Skill.name == "Sauber übergeben"))
+        ).scalar_one()
+        version = await db.get(m.SkillVersion, skill.current_version_id)
+        assert version is not None
+        assert version.definition.get("reference_root") is None
 
 
 @pytest.mark.asyncio

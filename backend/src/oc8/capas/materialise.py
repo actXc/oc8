@@ -95,6 +95,16 @@ async def _materialise_one_skill(
             "knowledge": list(spec.requires_kbs),
             "guardrails": list(spec.guardrails),
         },
+        # capa_name/skill_subpath, self-sufficient for agent/control_tools.py's
+        # read_reference_file to resolve at runtime via
+        # capas.discovery.find_plugin(capa_name).path -- None when this skill
+        # has no on-disk directory to serve from (spec.reference_root's own
+        # docstring explains the three cases).
+        "reference_root": (
+            f"{manifest.name}/{spec.reference_root}".rstrip("/")
+            if spec.reference_root is not None
+            else None
+        ),
     }
     try:
         parse_definition(definition)
@@ -159,7 +169,7 @@ async def _materialise_flow(db: AsyncSession, *, tenant_id: uuid.UUID, manifest:
 #: are read, and which of its tools reach a person. Everything else -- the
 #: command, the URL, the database, the credentials -- is the operator's, and a
 #: plugin upgrade must not touch it.
-DECLARED_SEAMS = ("focus_spec", "value_spec", "outward_tools", "tool_notes")
+DECLARED_SEAMS = ("focus_spec", "value_spec", "outward_tools", "outward_skip_spec", "tool_notes")
 
 
 def _refresh_declared_seams(existing: m.McpConnection, conn: ToolPackConnection) -> None:

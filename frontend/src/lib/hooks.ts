@@ -1054,6 +1054,49 @@ export function useAgentInstructionHistory(agentId: string) {
   });
 }
 
+export interface MemoryRecord {
+  id: string;
+  content: string;
+  status: string;
+  createdAt: string;
+  writtenBy: string;
+}
+
+export interface MemoryList {
+  records: MemoryRecord[];
+}
+
+export function useAgentMemory(agentId: string) {
+  return useQuery({
+    queryKey: ["agents", agentId, "memory"],
+    queryFn: () => api.get<MemoryList>(`/agents/${agentId}/memory`),
+  });
+}
+
+export function useDeleteAgentMemory(agentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (recordId: string) => api.delete<void>(`/agents/${agentId}/memory/${recordId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["agents", agentId, "memory"] }),
+  });
+}
+
+export function useDepartmentMemory(departmentId: string) {
+  return useQuery({
+    queryKey: ["departments", departmentId, "memory"],
+    queryFn: () => api.get<MemoryList>(`/departments/${departmentId}/memory`),
+  });
+}
+
+export function useDeleteDepartmentMemory(departmentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (recordId: string) =>
+      api.delete<void>(`/departments/${departmentId}/memory/${recordId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["departments", departmentId, "memory"] }),
+  });
+}
+
 export function useCreateMcpConnection() {
   const qc = useQueryClient();
   return useMutation({
@@ -1086,6 +1129,18 @@ export function useUpdateMcpConnection(id: string) {
   return useMutation({
     mutationFn: (body: Record<string, unknown>) =>
       api.patch<McpConnection>(`/mcp/connections/${id}`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.mcp }),
+  });
+}
+
+// Same "id per mutate() call" shape as useTestMcpConnectionById -- a caller
+// rendering a LIST of connections (the Capa detail modal's "Connection"
+// section, one row per McpConnection) needs one shared mutation object, not
+// a fresh hook instance per row's id.
+export function useDeleteMcpConnectionById() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete<void>(`/mcp/connections/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.mcp }),
   });
 }
@@ -1192,6 +1247,20 @@ export function useAnswerRun(runId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (answer: string) => api.post<RunDTO>(`/runs/${runId}/answer`, { answer }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["run", runId] }),
+  });
+}
+
+// Cooperative cancel (§7.2, POST /runs/{id}/cancel): records the operator's
+// intent, doesn't stop the run synchronously -- a `queued` run is skipped
+// before start, a `running` one stops at its next step boundary. The
+// returned DTO's `state` may therefore still read "running" right after a
+// successful call; invalidating re-fetches it and the live WS patch (or the
+// next poll) carries the eventual "interrupted" transition through.
+export function useCancelRun(runId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<RunDTO>(`/runs/${runId}/cancel`, {}),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["run", runId] }),
   });
 }

@@ -231,4 +231,185 @@ describe("PermissionsPanel", () => {
       ),
     );
   });
+
+  describe("Add tool / Remove tool (department mode only shows explicitly-added connections)", () => {
+    const HUBSPOT_CONNECTION = {
+      id: "conn-hubspot",
+      name: "Hubspot",
+      transport: "stdio",
+      serverUrl: "",
+      command: "",
+      args: [],
+      departmentId: null,
+      connected: true,
+      scopes: [],
+      health: {},
+      guardrailPresets: [],
+      guardrailLibrary: null,
+      hasValueSpec: false,
+      credentialType: null,
+    };
+    const ODOO_CONNECTION = { ...HUBSPOT_CONNECTION, id: "conn-odoo", name: "Odoo" };
+
+    it("only tiles tools already in the department frame, not every tenant connection", async () => {
+      getConnections.mockResolvedValue([ODOO_CONNECTION, HUBSPOT_CONNECTION]);
+      const deptPolicy = {
+        Odoo: {
+          enabled: true,
+          perms: { read: true, write: false, send: false },
+          approvalEUR: null,
+        },
+      };
+      renderWithClient(
+        <PermissionsPanel
+          mode="department"
+          dept={dept}
+          deptPolicy={deptPolicy}
+          members={[] as Agent[]}
+          agentOverrides={{}}
+        />,
+      );
+
+      expect((await screen.findAllByText("Odoo")).length).toBeGreaterThan(0);
+      // Hubspot is a real tenant connection but was never added to this
+      // department's frame -- it must not get a tile.
+      expect(screen.queryByText("Hubspot")).not.toBeInTheDocument();
+    });
+
+    it("shows the empty state and no tiles when the department frame is empty", async () => {
+      getConnections.mockResolvedValue([ODOO_CONNECTION]);
+      renderWithClient(
+        <PermissionsPanel
+          mode="department"
+          dept={dept}
+          deptPolicy={{}}
+          members={[] as Agent[]}
+          agentOverrides={{}}
+        />,
+      );
+
+      expect(await screen.findByText(/no tools yet.*add one to grant it/i)).toBeInTheDocument();
+      expect(screen.queryByText("Odoo")).not.toBeInTheDocument();
+    });
+
+    it("Add tool lists only tenant connections not already a tile, and adding one persists it enabled read-only", async () => {
+      getConnections.mockResolvedValue([ODOO_CONNECTION, HUBSPOT_CONNECTION]);
+      const deptPolicy = {
+        Odoo: {
+          enabled: true,
+          perms: { read: true, write: false, send: false },
+          approvalEUR: null,
+        },
+      };
+      const onChange = vi.fn();
+      renderWithClient(
+        <PermissionsPanel
+          mode="department"
+          dept={dept}
+          deptPolicy={deptPolicy}
+          members={[] as Agent[]}
+          agentOverrides={{}}
+          onDepartmentPolicyChange={onChange}
+        />,
+      );
+
+      await screen.findAllByText("Odoo");
+      fireEvent.click(screen.getByRole("button", { name: /add tool/i }));
+
+      // Odoo already has a tile -- the picker must offer only Hubspot.
+      expect(screen.getAllByText("Hubspot").length).toBeGreaterThan(0);
+      fireEvent.click(screen.getByText("Hubspot"));
+
+      expect(onChange).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Hubspot: expect.objectContaining({
+            enabled: true,
+            perms: { read: true, write: false, send: false },
+          }),
+        }),
+      );
+    });
+
+    it("Add tool is disabled once every tenant connection already has a tile", async () => {
+      getConnections.mockResolvedValue([ODOO_CONNECTION]);
+      const deptPolicy = {
+        Odoo: {
+          enabled: true,
+          perms: { read: true, write: false, send: false },
+          approvalEUR: null,
+        },
+      };
+      renderWithClient(
+        <PermissionsPanel
+          mode="department"
+          dept={dept}
+          deptPolicy={deptPolicy}
+          members={[] as Agent[]}
+          agentOverrides={{}}
+        />,
+      );
+
+      await screen.findAllByText("Odoo");
+      expect(screen.getByRole("button", { name: /add tool/i })).toBeDisabled();
+    });
+
+    it("removing a tool asks for confirmation, then persists it dropped from the frame entirely", async () => {
+      getConnections.mockResolvedValue([ODOO_CONNECTION]);
+      const deptPolicy = {
+        Odoo: {
+          enabled: true,
+          perms: { read: true, write: false, send: false },
+          approvalEUR: null,
+        },
+      };
+      const onChange = vi.fn();
+      renderWithClient(
+        <PermissionsPanel
+          mode="department"
+          dept={dept}
+          deptPolicy={deptPolicy}
+          members={[] as Agent[]}
+          agentOverrides={{}}
+          onDepartmentPolicyChange={onChange}
+        />,
+      );
+
+      await screen.findAllByText("Odoo");
+      fireEvent.click(screen.getByRole("button", { name: /remove tool/i }));
+      expect(onChange).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: /^remove$/i }));
+
+      await waitFor(() => expect(onChange).toHaveBeenCalledWith({}));
+    });
+
+    it("cancelling the remove confirmation leaves the tile and never persists", async () => {
+      getConnections.mockResolvedValue([ODOO_CONNECTION]);
+      const deptPolicy = {
+        Odoo: {
+          enabled: true,
+          perms: { read: true, write: false, send: false },
+          approvalEUR: null,
+        },
+      };
+      const onChange = vi.fn();
+      renderWithClient(
+        <PermissionsPanel
+          mode="department"
+          dept={dept}
+          deptPolicy={deptPolicy}
+          members={[] as Agent[]}
+          agentOverrides={{}}
+          onDepartmentPolicyChange={onChange}
+        />,
+      );
+
+      await screen.findAllByText("Odoo");
+      fireEvent.click(screen.getByRole("button", { name: /remove tool/i }));
+      fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+
+      expect(onChange).not.toHaveBeenCalled();
+      expect(screen.getAllByText("Odoo").length).toBeGreaterThan(0);
+    });
+  });
 });

@@ -15,6 +15,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
@@ -26,6 +27,7 @@ from oc8.agent.components import COMPONENT_CATALOG
 from oc8.approvals import raise_approval
 from oc8.audit import append_event
 from oc8.authz.pdp import Decision, Effect
+from oc8.capas.discovery import find_plugin
 from oc8.knowledge.retrieval import retrieve_kb_context
 from oc8.memory.router import retrieve_context, write_memory
 from oc8.modelrouter import NeutralTool, ToolCall
@@ -167,6 +169,47 @@ SEARCH_KNOWLEDGE = NeutralTool(
 )
 
 
+#: Where a skill's own reference material may live -- matches
+#: skills.importer.parse_skill's detection regex and capas.manifest
+#: .SkillTemplateSpec.reference_root's own docstring. Nothing outside these
+#: three names is ever served, whatever a skill's on-disk layout otherwise
+#: contains (its plugin.toml, guardrails/, setup/ forms, secrets, ...).
+_REFERENCE_SUBDIRS = frozenset({"references", "assets", "scripts"})
+
+#: ~15k tokens' worth of text -- generous for a real reference document,
+#: small enough that one read cannot blow the model's context window on its
+#: own. A file over this is served truncated, never refused outright: partial
+#: material the model can say is partial beats an opaque error.
+_MAX_REFERENCE_FILE_BYTES = 60_000
+
+READ_REFERENCE_FILE = NeutralTool(
+    name="read_reference_file",
+    description=(
+        "Read a file one of your active skills bundles under its own "
+        "references/, assets/, or scripts/ directory -- exactly the material "
+        "a skill's own instructions point you at (e.g. 'see "
+        "references/checklist.md'). `skill` is that skill's name, exactly as "
+        "given when it activated; `path` is the file's path exactly as the "
+        "instruction named it, starting with references/, assets/, or "
+        "scripts/. Only works for a skill assigned to you that ships such "
+        "files -- most do not, and this tool errors plainly when one doesn't."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "skill": {
+                "type": "string",
+                "description": "The skill's name, exactly as given when it activated.",
+            },
+            "path": {
+                "type": "string",
+                "description": "The file's path, e.g. references/checklist.md.",
+            },
+        },
+        "required": ["skill", "path"],
+    },
+)
+
 SEARCH_MEMORY = NeutralTool(
     name="search_memory",
     description=(
@@ -294,6 +337,7 @@ CONTROL_TOOL_SCHEMAS: dict[str, NeutralTool] = {
     SEARCH_MEMORY.name: SEARCH_MEMORY,
     RENDER_COMPONENT.name: RENDER_COMPONENT,
     PROPOSE_CHANGE.name: PROPOSE_CHANGE,
+    READ_REFERENCE_FILE.name: READ_REFERENCE_FILE,
 }
 CONTROL_TOOL_NAMES: frozenset[str] = frozenset(CONTROL_TOOL_SCHEMAS)
 
@@ -359,6 +403,11 @@ def offered_tools(
         offered.append(PROPOSE_CHANGE)
     if has_knowledge:
         offered.append(SEARCH_KNOWLEDGE)
+    # Same reasoning as has_knowledge above: offering read_reference_file to
+    # an agent whose assigned skills carry no reference_root at all would be
+    # a tool that can only ever answer "that skill has no reference files".
+    if any(s.definition.reference_root for s in assigned_skills):
+        offered.append(READ_REFERENCE_FILE)
     offered.extend(skill_tool_schemas(assigned_skills))
 
     if active_skills:
@@ -743,6 +792,88 @@ async def execute_control_tool(
                 )
             )
         return ControlOutcome(output=context)
+
+    if tc.name == READ_REFERENCE_FILE.name:
+        skill_name = str(tc.arguments.get("skill", "")).strip()
+        rel_path = str(tc.arguments.get("path", "")).strip()
+        if not skill_name or not rel_path:
+            return ControlOutcome(
+                output="ERROR: read_reference_file requires both `skill` and `path`"
+            )
+        # Only a skill actually assigned to THIS agent, never any skill in the
+        # system -- the model names a skill it already saw activate.
+        skill = next((s for s in assigned_skills if s.name == skill_name), None)
+        if skill is None:
+            return ControlOutcome(
+                output=f"ERROR: '{skill_name}' is not one of your assigned skills"
+            )
+        if not skill.definition.reference_root:
+            return ControlOutcome(output=f"ERROR: '{skill_name}' has no reference files")
+        normalized = rel_path.replace("\\", "/").lstrip("/")
+        segments = normalized.split("/")
+        if segments[0] not in _REFERENCE_SUBDIRS or ".." in segments:
+            return ControlOutcome(
+                output=(
+                    "ERROR: path must start with references/, assets/, or "
+                    "scripts/ and stay within the skill's own directory"
+                )
+            )
+        if skill.definition.reference_root.startswith("imported:"):
+            try:
+                skill_version_id = uuid.UUID(
+                    skill.definition.reference_root.removeprefix("imported:")
+                )
+            except ValueError:
+                return ControlOutcome(
+                    output=f"ERROR: '{skill_name}' has a malformed reference_root"
+                )
+            row = (
+                await db.execute(
+                    select(m.ImportedSkillFile).where(
+                        m.ImportedSkillFile.tenant_id == tenant_id,
+                        m.ImportedSkillFile.skill_version_id == skill_version_id,
+                        m.ImportedSkillFile.rel_path == normalized,
+                    )
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                return ControlOutcome(output=f"ERROR: no such file: {rel_path}")
+            content, size = row.content, len(row.content)
+        else:
+            capa_name, _, skill_subpath = skill.definition.reference_root.partition("/")
+            plugin = find_plugin(capa_name)
+            if plugin is None or not plugin.valid:
+                return ControlOutcome(
+                    output=f"ERROR: '{skill_name}'s capa is not installed here"
+                )
+            base = (Path(plugin.path) / skill_subpath).resolve()
+            target = (base / normalized).resolve()
+            try:
+                target.relative_to(base)
+            except ValueError:
+                # Cannot actually happen given the ".." check above, but a second,
+                # independent gate on the RESOLVED path costs nothing and a
+                # regression in the string check alone would still be caught here.
+                return ControlOutcome(output="ERROR: path escapes the skill's own directory")
+            if not target.is_file():
+                return ControlOutcome(output=f"ERROR: no such file: {rel_path}")
+            size = target.stat().st_size
+            content = target.read_bytes()
+        raw = content[:_MAX_REFERENCE_FILE_BYTES]
+        text = raw.decode("utf-8", errors="replace")
+        if size > _MAX_REFERENCE_FILE_BYTES:
+            text += (
+                f"\n\n[truncated -- file is {size} bytes, showing the first "
+                f"{_MAX_REFERENCE_FILE_BYTES}]"
+            )
+        await record_activity(
+            db,
+            tenant_id=tenant_id,
+            agent_id=agent.id,
+            status="info",
+            message=f"Reading reference file: {rel_path}",
+        )
+        return ControlOutcome(output=text)
 
     if tc.name == REQUEST_DECISION.name:
         question = str(tc.arguments.get("question", "")).strip()

@@ -2,12 +2,14 @@
 // Distinct from the mock integration catalog on the same page: this panel only
 // ever shows what the backend actually reported — an untested connection reads
 // "untested", never a fake "connected".
-import { ChevronDown, ChevronRight, Plus, RefreshCw, Server, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, RefreshCw, Server, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Panel } from "@/components/app-shell";
+import { useConfirm } from "@/hooks/use-confirm";
 import {
   useCreateMcpConnection,
+  useDeleteMcpConnectionById,
   useDepartments,
   useMcpConnections,
   useTestMcpConnection,
@@ -233,6 +235,13 @@ function McpConnectionCard({ connection }: { connection: McpConnection }) {
 export function McpConnectionBody({ connection }: { connection: McpConnection }) {
   const t = useT();
   const testConnection = useTestMcpConnection(connection.id);
+  const deleteConnection = useDeleteMcpConnectionById();
+  // Each McpConnectionBody is already its own component instance per row (one
+  // per `.map()` iteration in every caller, e.g. CapaDetailSheet's multi-
+  // connection Vorschau) -- a local useConfirm() here is one dialog per row,
+  // exactly what its own doc comment asks for, no lifting to a shared parent
+  // needed.
+  const { confirm, ConfirmDialog } = useConfirm();
   // Collapsed by default -- a connection with 40+ discovered tools otherwise
   // dominates the page's scroll height before the reader even reaches the
   // Capas below it.
@@ -245,20 +254,52 @@ export function McpConnectionBody({ connection }: { connection: McpConnection })
     typeof connection.health?.toolCount === "number" ? connection.health.toolCount : tools.length;
   const error = typeof connection.health?.error === "string" ? connection.health.error : null;
 
+  async function onDelete() {
+    const ok = await confirm({
+      title: t("Delete connection?", "Verbindung löschen?"),
+      description: t(
+        `Delete "${connection.name}"? Any agent whose tools still reference it will simply find nothing to connect to.`,
+        `„${connection.name}" löschen? Ein Agent, dessen Tools noch darauf verweisen, findet dann schlicht keine Verbindung mehr.`,
+      ),
+      confirmLabel: t("Delete", "Löschen"),
+      cancelLabel: t("Cancel", "Abbrechen"),
+    });
+    if (!ok) return;
+    deleteConnection.mutate(connection.id, {
+      onSuccess: () => toast.success(t("Deleted", "Gelöscht")),
+      onError: (e: unknown) =>
+        toast.error(
+          e instanceof Error ? e.message : t("Could not delete.", "Konnte nicht gelöscht werden."),
+        ),
+    });
+  }
+
   return (
     <div>
+      {ConfirmDialog}
       <div className="flex items-center justify-between">
         <HealthBadge status={status} />
-        <button
-          onClick={() => testConnection.mutate()}
-          disabled={testConnection.isPending}
-          className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
-        >
-          <RefreshCw className={cn("h-3 w-3", testConnection.isPending && "animate-spin")} />
-          {testConnection.isPending
-            ? t("Testing…", "Teste…")
-            : t("Test connection", "Verbindung testen")}
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={deleteConnection.isPending}
+            title={t("Delete connection", "Verbindung löschen")}
+            className="inline-flex items-center rounded-md border border-border p-1.5 text-muted-foreground hover:border-destructive/40 hover:text-destructive disabled:opacity-50"
+          >
+            <Trash2 className="h-3 w-3" />
+          </button>
+          <button
+            onClick={() => testConnection.mutate()}
+            disabled={testConnection.isPending}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+          >
+            <RefreshCw className={cn("h-3 w-3", testConnection.isPending && "animate-spin")} />
+            {testConnection.isPending
+              ? t("Testing…", "Teste…")
+              : t("Test connection", "Verbindung testen")}
+          </button>
+        </div>
       </div>
 
       {status === "ok" && tools.length > 0 && (
@@ -268,11 +309,7 @@ export function McpConnectionBody({ connection }: { connection: McpConnection })
             onClick={() => setToolsOpen((o) => !o)}
             className="mb-1 inline-flex items-center gap-1 text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground"
           >
-            {toolsOpen ? (
-              <ChevronDown className="h-3 w-3" />
-            ) : (
-              <ChevronRight className="h-3 w-3" />
-            )}
+            {toolsOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
             {t("Discovered tools", "Erkannte Tools")} ({toolCount})
           </button>
           {toolsOpen && (
