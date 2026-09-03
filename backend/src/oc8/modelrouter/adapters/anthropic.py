@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 from collections.abc import AsyncIterator
@@ -14,7 +15,9 @@ from oc8.modelrouter.types import (
     CompletionChunk,
     CompletionRequest,
     CompletionResult,
+    ImagePart,
     NeutralMessage,
+    TextPart,
     ToolCall,
     ToolCallDelta,
     Usage,
@@ -26,18 +29,46 @@ _API_URL = "https://api.anthropic.com/v1/messages"
 _VERSION = "2023-06-01"
 
 
+def _content_blocks(content: str | list[Any]) -> list[dict[str, Any]] | str:
+    if isinstance(content, str):
+        return content
+    blocks: list[dict[str, Any]] = []
+    for part in content:
+        if isinstance(part, TextPart):
+            blocks.append({"type": "text", "text": part.text})
+        elif isinstance(part, ImagePart):
+            blocks.append(
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": part.content_type,
+                        "data": base64.b64encode(part.data).decode(),
+                    },
+                }
+            )
+    return blocks
+
+
 def _to_anthropic_messages(messages: list[NeutralMessage]) -> tuple[str, list[dict[str, Any]]]:
     system_parts: list[str] = []
     out: list[dict[str, Any]] = []
     for msg in messages:
         if msg.role == "system":
+            # System messages never carry images in this design -- Anthropic's
+            # system param is text-only.
+            assert isinstance(msg.content, str)
             system_parts.append(msg.content)
         elif msg.role == "user":
-            out.append({"role": "user", "content": msg.content})
+            out.append({"role": "user", "content": _content_blocks(msg.content)})
         elif msg.role == "assistant":
             blocks: list[dict[str, Any]] = []
             if msg.content:
-                blocks.append({"type": "text", "text": msg.content})
+                content_blocks = _content_blocks(msg.content)
+                if isinstance(content_blocks, str):
+                    blocks.append({"type": "text", "text": content_blocks})
+                else:
+                    blocks.extend(content_blocks)
             for tc in msg.tool_calls:
                 blocks.append(
                     {"type": "tool_use", "id": tc.id, "name": tc.name, "input": tc.arguments}

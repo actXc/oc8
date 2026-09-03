@@ -17,9 +17,23 @@ class ToolCall:
 
 
 @dataclass
+class TextPart:
+    text: str
+
+
+@dataclass
+class ImagePart:
+    data: bytes
+    content_type: str  # e.g. "image/png"
+
+
+ContentPart = TextPart | ImagePart
+
+
+@dataclass
 class NeutralMessage:
     role: Role
-    content: str = ""
+    content: str | list[ContentPart] = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
     tool_call_id: str | None = None  # set on role="tool" results
     name: str | None = None  # tool name on role="tool"
