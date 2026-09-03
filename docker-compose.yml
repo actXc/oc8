@@ -33,6 +33,14 @@ x-backend-env: &backend-env
   OC8_DATABASE_URL: postgresql+asyncpg://oc8_app:oc8@postgres:5432/oc8
   OC8_MIGRATION_URL: postgresql+psycopg://oc8_migrate:oc8@postgres:5432/oc8
   OC8_REDIS_URL: redis://redis:6379/0
+  # Bundled S3-compatible object storage (file attachments). Bundled-by-default,
+  # switchable via env: point these at any S3-compatible endpoint (AWS S3, R2,
+  # etc.) in production instead of the bundled `minio` service above.
+  OC8_S3_ENDPOINT: ${OC8_S3_ENDPOINT:-http://minio:9000}
+  OC8_S3_ACCESS_KEY: ${OC8_S3_ACCESS_KEY:-oc8-minio}
+  OC8_S3_SECRET_KEY: ${OC8_S3_SECRET_KEY:?set OC8_S3_SECRET_KEY in .env}
+  OC8_S3_BUCKET: ${OC8_S3_BUCKET:-oc8-uploads}
+  OC8_S3_REGION: ${OC8_S3_REGION:-us-east-1}
   OC8_JWT_SECRET: ${OC8_JWT_SECRET:?set OC8_JWT_SECRET in .env}
   OC8_SECRET_KEK: ${OC8_SECRET_KEK:?set OC8_SECRET_KEK in .env}
   # Externally reachable base URL of this stack (Caddy, not the backend
@@ -145,6 +153,44 @@ services:
       timeout: 3s
       retries: 30
 
+  # Bundled S3-compatible object storage for file attachments (chat + agent
+  # Instructions uploads, see oc8.storage.s3). Bundled-by-default, switchable
+  # via env: point OC8_S3_ENDPOINT/OC8_S3_* at any S3-compatible endpoint
+  # (AWS S3, R2, etc.) in production instead of running this container.
+  minio:
+    restart: unless-stopped
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${OC8_S3_ACCESS_KEY:-oc8-minio}
+      MINIO_ROOT_PASSWORD: ${OC8_S3_SECRET_KEY:?set OC8_S3_SECRET_KEY in .env}
+    volumes:
+      - oc8-miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # One-shot: create the default bucket on first boot. Idempotent (`-p` /
+  # `|| true`) so a re-run against an already-provisioned bucket doesn't fail
+  # the compose run.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      OC8_S3_ACCESS_KEY: ${OC8_S3_ACCESS_KEY:-oc8-minio}
+      OC8_S3_SECRET_KEY: ${OC8_S3_SECRET_KEY:?set OC8_S3_SECRET_KEY in .env}
+      OC8_S3_BUCKET: ${OC8_S3_BUCKET:-oc8-uploads}
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        mc alias set local http://minio:9000 "$$OC8_S3_ACCESS_KEY" "$$OC8_S3_SECRET_KEY" && \
+        mc mb -p "local/$$OC8_S3_BUCKET" || true
+    restart: "no"
+
   # One-shot: migrate the schema, then optionally seed. App services wait for
   # this to complete, so migration runs exactly once (not in four processes).
   migrate:
@@ -207,6 +253,8 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+      minio:
+        condition: service_healthy
       runtime-provisioner:
         condition: service_started
     volumes:
@@ -230,6 +278,8 @@ services:
       migrate:
         condition: service_completed_successfully
       redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
       runtime-provisioner:
         condition: service_started
@@ -353,3 +403,4 @@ volumes:
   oc8-caddy-data:
   oc8-caddy-config:
   oc8-ollama:
+  oc8-miniodata:

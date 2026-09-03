@@ -13,6 +13,8 @@ from pathlib import Path
 import pytest
 from sqlalchemy import NullPool, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from testcontainers.core.container import DockerContainer
+from testcontainers.core.wait_strategies import LogMessageWaitStrategy
 from testcontainers.postgres import PostgresContainer
 from testcontainers.redis import RedisContainer
 
@@ -186,6 +188,67 @@ def redis_url() -> Iterator[str]:
         os.environ["OC8_REDIS_URL"] = url
         get_settings.cache_clear()
         yield url
+
+
+@pytest.fixture(scope="session")
+def minio_url() -> Iterator[str]:
+    """Session-scoped MinIO container backing `oc8.storage.s3` in tests.
+
+    testcontainers ships no first-class MinIO container usable here:
+    `testcontainers.community.minio.MinioContainer` needs the separate `minio`
+    SDK, which oc8 does not depend on (oc8.storage.s3 talks to S3-compatible
+    storage purely through boto3) -- so this runs the official `minio/minio`
+    image directly via the low-level `DockerContainer`, the same primitive
+    `redis_url`/`_pg` build on above.
+
+    Creates the test bucket and points `get_settings()` at the container for
+    the whole session (same pattern as `redis_url`), then clears
+    `oc8.storage.s3._client`'s lru_cache so a fresh boto3 client binds to it
+    -- both before first use and again on teardown, so a later test session's
+    cached client can never point at this (by then stopped) container.
+    """
+    import boto3
+
+    from oc8.config import get_settings
+    from oc8.storage import s3 as s3_mod
+
+    access_key = "oc8-test"
+    secret_key = "oc8-test-secret"
+    bucket = "oc8-test-bucket"
+
+    container = (
+        DockerContainer("minio/minio:latest")
+        .with_exposed_ports(9000)
+        .with_env("MINIO_ROOT_USER", access_key)
+        .with_env("MINIO_ROOT_PASSWORD", secret_key)
+        .with_command("server /data")
+        .waiting_for(LogMessageWaitStrategy("API:"))
+    )
+    with container:
+        host = container.get_container_host_ip()
+        port = container.get_exposed_port(9000)
+        endpoint = f"http://{host}:{port}"
+
+        os.environ["OC8_S3_ENDPOINT"] = endpoint
+        os.environ["OC8_S3_ACCESS_KEY"] = access_key
+        os.environ["OC8_S3_SECRET_KEY"] = secret_key
+        os.environ["OC8_S3_BUCKET"] = bucket
+        os.environ["OC8_S3_REGION"] = "us-east-1"
+        get_settings.cache_clear()
+        s3_mod._client.cache_clear()
+
+        # Equivalent of docker-compose's one-shot `minio-init` service: create
+        # the bucket the tests write into.
+        boto3.client(
+            "s3",
+            endpoint_url=endpoint,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            region_name="us-east-1",
+        ).create_bucket(Bucket=bucket)
+
+        yield endpoint
+        s3_mod._client.cache_clear()
 
 
 @pytest.fixture(scope="session")

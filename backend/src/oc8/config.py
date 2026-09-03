@@ -208,6 +208,17 @@ class Settings(BaseSettings):
 
     github_webhook_secret: str = ""
 
+    # Object storage (file attachments: chat + agent Instructions uploads).
+    # Bundled-by-default, switchable via env: dev/self-hosted points at the
+    # bundled MinIO container; swap these to any S3-compatible endpoint
+    # (AWS S3, R2, etc.) for production without a code change. See
+    # oc8.storage.s3.
+    s3_endpoint: str = "http://minio:9000"
+    s3_access_key: str = "oc8-minio"
+    s3_secret_key: str = ""
+    s3_bucket: str = "oc8-uploads"
+    s3_region: str = "us-east-1"
+
     log_sql: bool = Field(default=False)
     #: Root log level for every oc8 process. INFO by default because the level
     #: only matters once something is listening at all, and until recently
