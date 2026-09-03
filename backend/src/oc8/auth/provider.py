@@ -89,3 +89,8 @@ _dev_provider: IdentityProvider = DevIdentityProvider()
 def get_identity_provider() -> IdentityProvider:
     """Community ships exactly one identity provider: the dev/password one."""
     return _dev_provider
+
+
+def set_identity_provider(provider: IdentityProvider) -> None:
+    global _dev_provider
+    _dev_provider = provider

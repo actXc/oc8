@@ -21,6 +21,7 @@ __all__ = [
     "SandboxSpec",
     "get_sandbox_driver",
     "sandbox_session",
+    "set_sandbox_driver",
 ]
 
 _driver: SandboxDriver | None = None
@@ -38,6 +39,11 @@ def get_sandbox_driver() -> SandboxDriver:
         else:
             _driver = DockerSandboxDriver()
     return _driver
+
+
+def set_sandbox_driver(driver: SandboxDriver) -> None:
+    global _driver
+    _driver = driver
 
 
 @asynccontextmanager
