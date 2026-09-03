@@ -223,6 +223,21 @@ async def create_skill_version(
             status.HTTP_409_CONFLICT, f"version {body.semver} already exists for this skill"
         )
 
+    # A skill's `reference_root` names where its bundled files live (a capa
+    # path, or an `imported:<skill_version_id>` row set) -- it is not something
+    # this endpoint's caller ever supplies (this form has no archive), so the
+    # only way a new version keeps read_reference_file working is carrying the
+    # CURRENT version's value forward unchanged. The string still names the
+    # SAME underlying files; nothing needs duplicating.
+    current_version = (
+        await db.get(m.SkillVersion, skill.current_version_id)
+        if skill.current_version_id
+        else None
+    )
+    reference_root = (
+        current_version.definition.get("reference_root") if current_version is not None else None
+    )
+
     definition = _validated(
         _definition(
             slug=_slugify(skill.name),
@@ -231,6 +246,7 @@ async def create_skill_version(
             tools=body.tools,
             knowledge=body.knowledge,
             guardrails=body.guardrails,
+            reference_root=reference_root,
         )
     )
     version = m.SkillVersion(
@@ -518,7 +534,7 @@ async def import_skills(
     """Import exactly the skills named, and say what was skipped and why."""
     budget = await _budget_tokens(db, principal.tenant_id, body.department_id, body.budget_tokens)
     try:
-        found = await discover(body.source, budget_tokens=budget)
+        found = await discover(body.source, budget_tokens=budget, with_bundles=True)
     except ConnectorError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 

@@ -201,15 +201,34 @@ def archive_url(source: str) -> str:
     )
 
 
-def read_archive(blob: bytes, *, budget_tokens: int, limit: int = 200) -> list[Candidate]:
+def read_archive(
+    blob: bytes, *, budget_tokens: int, limit: int = 200, with_bundles: bool = False
+) -> list[Candidate]:
     """Every SKILL.md in an archive, judged -- each carrying its own bundled
-    references//assets//scripts/ files, if it has any.
+    references//assets//scripts/ files, if it has any AND `with_bundles` asked
+    for them.
 
     Members are read from the stream and never written to disk: a tar entry can
     name `../` and a path traversal during an import would be an odd way to lose
     a machine.
+
+    `with_bundles` gates the entire second pass (reading bundled file bytes).
+    A preview call never uses them (`Candidate.to_json()` drops the field), so
+    a caller that only wants the preview shape should leave this False --
+    otherwise a source with many skills, each near the per-bundle cap, would
+    have this function read up to `limit` x `_MAX_BUNDLED_TOTAL_BYTES` of file
+    bytes into memory for nothing.
+
+    Candidates are keyed by their own SKILL.md path, not by directory: a
+    directory can hold more than one file whose name ends in "skill.md" (the
+    match is a suffix, not an exact name -- `OTHER-SKILL.md` matches too), and
+    each one is a distinct candidate that must survive. Bundled-file
+    collection stays keyed by directory, since that part IS meant to be shared
+    by every skill found in the same directory.
     """
-    candidates_by_dir: dict[str, Candidate] = {}
+    candidates_by_path: dict[str, Candidate] = {}
+    path_to_dir: dict[str, str] = {}
+    skill_dirs: set[str] = set()
     bundles: dict[str, dict[str, bytes]] = {}  # skill directory -> {rel_path: bytes}
     bundle_totals: dict[str, int] = {}
 
@@ -217,7 +236,7 @@ def read_archive(blob: bytes, *, budget_tokens: int, limit: int = 200) -> list[C
         members = tar.getmembers()
 
         for member in members:
-            if not member.isfile() or len(candidates_by_dir) >= limit:
+            if not member.isfile() or len(candidates_by_path) >= limit:
                 continue
             if not member.name.lower().endswith("skill.md"):
                 continue
@@ -233,11 +252,14 @@ def read_archive(blob: bytes, *, budget_tokens: int, limit: int = 200) -> list[C
             if candidate is None:
                 continue
             skill_dir = path.rsplit("/", 1)[0] + "/" if "/" in path else ""
-            candidates_by_dir[skill_dir] = candidate
-            bundles[skill_dir] = {}
-            bundle_totals[skill_dir] = 0
+            candidates_by_path[path] = candidate
+            path_to_dir[path] = skill_dir
+            skill_dirs.add(skill_dir)
 
-        if candidates_by_dir:
+        if with_bundles and candidates_by_path:
+            for skill_dir in skill_dirs:
+                bundles[skill_dir] = {}
+                bundle_totals[skill_dir] = 0
             # Second pass: classify every other file against the skill
             # directories just discovered. member.name still carries the
             # archive's top directory, so strip it the same way before
@@ -246,7 +268,7 @@ def read_archive(blob: bytes, *, budget_tokens: int, limit: int = 200) -> list[C
                 if not member.isfile():
                     continue
                 stripped = member.name.split("/", 1)[-1]
-                for skill_dir in candidates_by_dir:
+                for skill_dir in skill_dirs:
                     if skill_dir and not stripped.startswith(skill_dir):
                         continue
                     rel = stripped[len(skill_dir):] if skill_dir else stripped
@@ -272,17 +294,19 @@ def read_archive(blob: bytes, *, budget_tokens: int, limit: int = 200) -> list[C
             tokens=c.tokens,
             verdict=c.verdict,
             warnings=c.warnings,
-            bundled_files=bundles[skill_dir],
+            bundled_files=bundles.get(path_to_dir[path], {}) if with_bundles else {},
         )
-        for skill_dir, c in candidates_by_dir.items()
+        for path, c in candidates_by_path.items()
     ]
     return sorted(out, key=lambda c: c.name.lower())
 
 
-async def discover(source: str, *, budget_tokens: int) -> list[Candidate]:
+async def discover(
+    source: str, *, budget_tokens: int, with_bundles: bool = False
+) -> list[Candidate]:
     """Fetch a source and return what it offers, with a verdict on each."""
     blob = await safe_fetch_bytes(archive_url(source))
     try:
-        return read_archive(blob, budget_tokens=budget_tokens)
+        return read_archive(blob, budget_tokens=budget_tokens, with_bundles=with_bundles)
     except tarfile.TarError as exc:
         raise ConnectorError(f"{source!r} is not a readable archive: {exc}") from exc
