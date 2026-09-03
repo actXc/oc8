@@ -133,8 +133,10 @@ def parse_skill(text: str, *, path: str, budget_tokens: int) -> Candidate | None
         )
     if re.search(r"\b(references?|scripts?|assets)/[\w./-]+", body):
         warnings.append(
-            "verweist auf mitgelieferte Dateien — ein oc8-Agent hat kein Dateisystem, "
-            "diese Verweise laufen ins Leere"
+            "references bundled files — only works if this skill is installed via "
+            "an oc8 capa (with references/assets/scripts) and assigned to the agent; "
+            "imported directly here, the skill has no directory of its own for "
+            "read_reference_file to read from"
         )
     if meta.get("hooks"):
         warnings.append("bringt Hooks mit, die oc8 nicht ausführt")

@@ -132,6 +132,13 @@ class SkillTemplateSpec(BaseModel):
     requires_tools: list[str] = []
     requires_kbs: list[str] = []
     guardrails: list[str] = []
+    #: Where this skill's own `references/`/`assets/`/`scripts/` directories
+    #: live, relative to the CAPA root -- "" for a skill whose SKILL.md sits at
+    #: the capa root itself, "skills/<slug>" for one nested under skills/, and
+    #: None for a skill with no on-disk directory at all (a `skills/*.toml`
+    #: native skill, or an inline command). None is exactly the case with
+    #: nothing for `read_reference_file` (agent/control_tools.py) to serve.
+    reference_root: str | None = None
 
 
 class SkillPackSpec(BaseModel):

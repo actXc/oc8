@@ -67,10 +67,15 @@ def test_tools_an_oc8_agent_does_not_have_are_flagged() -> None:
 
 
 def test_bundled_files_are_flagged() -> None:
+    # A direct import (this module's own flow) never gets a reference_root --
+    # only capas/materialise.py sets one, for a skill installed via an actual
+    # capa on disk (see capas/manifest.py's SkillTemplateSpec.reference_root).
+    # So read_reference_file can never serve one imported this way, whatever
+    # oc8 supports for a properly-installed capa's own skills.
     text = "---\nname: x\n---\n\nLies references/details.md und dann scripts/run.sh."
     c = parse_skill(text, path="x/SKILL.md", budget_tokens=1000)
     assert c is not None
-    assert any("Dateisystem" in w for w in c.warnings)
+    assert any("read_reference_file" in w for w in c.warnings)
 
 
 def test_something_that_is_not_a_skill_is_not_one() -> None:
