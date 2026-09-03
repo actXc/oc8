@@ -549,19 +549,6 @@ function ToolTile({
             : "border-border bg-background/40 hover:border-primary/40",
       )}
     >
-      {onRemove && (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove();
-          }}
-          title="Remove tool"
-          className="absolute right-2 top-2 z-10 rounded-md p-1 text-muted-foreground opacity-0 transition hover:text-destructive group-hover:opacity-100"
-        >
-          <Trash2 className="h-3 w-3" />
-        </button>
-      )}
       <button
         type="button"
         onClick={() => !disabled && onToggle(!on)}
@@ -590,17 +577,27 @@ function ToolTile({
           )}
         </div>
         <div className="text-xs text-muted-foreground">{tool.desc}</div>
-        <div className="mt-1 flex items-center gap-1.5">
-          <span className="rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-widest text-primary">
-            via MCP
-          </span>
-          {disabled && (
-            <span className="rounded-full border border-border bg-background/40 px-1.5 py-0.5 text-[9px] text-muted-foreground">
-              not enabled at department level
-            </span>
-          )}
-        </div>
       </button>
+      <div className="flex w-full items-center gap-1.5">
+        <span className="rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-widest text-primary">
+          via MCP
+        </span>
+        {disabled && (
+          <span className="rounded-full border border-border bg-background/40 px-1.5 py-0.5 text-[9px] text-muted-foreground">
+            not enabled at department level
+          </span>
+        )}
+        {onRemove && (
+          <button
+            type="button"
+            onClick={() => onRemove()}
+            title="Remove tool"
+            className="ml-auto inline-flex items-center rounded-md p-1 text-muted-foreground transition hover:text-destructive"
+          >
+            <Trash2 className="h-3 w-3" />
+          </button>
+        )}
+      </div>
       {children}
     </div>
   );
