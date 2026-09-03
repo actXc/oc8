@@ -88,6 +88,10 @@ class ModelConfigWrite(CamelModel):
     #: reasoning tokens before writing anything visible, which reads as the
     #: run failing outright on a large task, not as a slow one.
     max_tokens: int | None = None
+    #: Gates whether chat image attachments are sent to this model at all.
+    #: None/absent leaves it unchanged on update, matching max_tokens's own
+    #: None-means-"don't touch" semantics.
+    supports_vision: bool | None = None
     used_by_copilot: bool | None = None
     #: A specific Credential to bind to this ModelConfig (id as string). None
     #: leaves the tenant-wide "first credential of this provider's type"

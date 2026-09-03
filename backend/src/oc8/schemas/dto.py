@@ -300,6 +300,7 @@ class ModelDTO(CamelModel):
     #: sets none of its own (modelrouter/sampling.py). None means "framework
     #: default" (1536), not "unlimited".
     max_tokens: int | None = None
+    supports_vision: bool = False
     used_by_copilot: bool = False
     credential_id: str | None = None
     #: Set only when `status` is "error"/"unknown" -- the real reason from

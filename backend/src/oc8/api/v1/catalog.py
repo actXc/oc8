@@ -187,6 +187,11 @@ async def create_model(
     )
     db.add(cfg)
     await db.flush()  # cfg.id must exist before the auto-activation count query below
+    if body.supports_vision:
+        # jsonb: replaced whole, or SQLAlchemy never notices the mutation.
+        params = dict(cfg.params or {})
+        params["supports_vision"] = True
+        cfg.params = params
     existing_count = (
         await db.execute(
             select(func.count())
@@ -241,6 +246,14 @@ async def update_model(
             params["max_tokens"] = int(body.max_tokens)
         else:
             params.pop("max_tokens", None)
+        cfg.params = params
+    if "supports_vision" in body.model_fields_set:
+        # jsonb: replaced whole, or SQLAlchemy never notices the mutation.
+        params = dict(cfg.params or {})
+        if body.supports_vision:
+            params["supports_vision"] = True
+        else:
+            params.pop("supports_vision", None)
         cfg.params = params
     if "used_by_copilot" in body.model_fields_set:
         await _apply_copilot_flag(db, _p.tenant_id, cfg, body.used_by_copilot)

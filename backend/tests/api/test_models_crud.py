@@ -196,6 +196,80 @@ async def test_patch_sets_and_clears_max_tokens() -> None:
             assert r.json()["maxTokens"] is None
 
 
+async def test_create_model_persists_supports_vision() -> None:
+    tenant = uuid.UUID(str(ACME_TENANT_ID))
+    app = create_app()
+    async with LifespanManager(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            headers = {"Authorization": f"Bearer {_token(tenant)}"}
+            r = await client.post(
+                "/api/v1/models",
+                json={
+                    "provider": "ollama",
+                    "model": "llama3.1:8b",
+                    "locality": "local",
+                    "supportsVision": True,
+                },
+                headers=headers,
+            )
+            assert r.status_code == 201, r.text
+            assert r.json()["supportsVision"] is True
+
+
+async def test_patch_sets_and_clears_supports_vision() -> None:
+    tenant = uuid.UUID(str(ACME_TENANT_ID))
+    app = create_app()
+    async with LifespanManager(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            headers = {"Authorization": f"Bearer {_token(tenant)}"}
+            r = await client.post(
+                "/api/v1/models",
+                json={"provider": "ollama", "model": "llama3.1:8b", "locality": "local"},
+                headers=headers,
+            )
+            assert r.status_code == 201, r.text
+            model_id = r.json()["id"]
+            assert r.json()["supportsVision"] is False
+
+            r = await client.patch(
+                f"/api/v1/models/{model_id}",
+                json={
+                    "provider": "ollama",
+                    "model": "llama3.1:8b",
+                    "locality": "local",
+                    "supportsVision": True,
+                },
+                headers=headers,
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["supportsVision"] is True
+
+            # Omitted on a later PATCH -> preserved, not cleared.
+            r = await client.patch(
+                f"/api/v1/models/{model_id}",
+                json={"provider": "ollama", "model": "llama3.1:8b", "locality": "local"},
+                headers=headers,
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["supportsVision"] is True
+
+            # Explicit false -> cleared back to "not vision-capable".
+            r = await client.patch(
+                f"/api/v1/models/{model_id}",
+                json={
+                    "provider": "ollama",
+                    "model": "llama3.1:8b",
+                    "locality": "local",
+                    "supportsVision": False,
+                },
+                headers=headers,
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["supportsVision"] is False
+
+
 async def test_create_model_canonicalizes_provider_alias() -> None:
     tenant = uuid.UUID(str(ACME_TENANT_ID))
     app = create_app()
