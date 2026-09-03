@@ -65,8 +65,8 @@ function PendingProposals({ de }: { de: boolean }) {
   // nothing and believes a structural change went through that did not.
   const [failed, setFailed] = useState(false);
 
-  // Same shape the chat send below uses (`sendMessage.mutate(text, { onError:
-  // ... })`): mark optimistically, undo the mark and show a notice if the
+  // Same shape the chat send below uses (`sendMessage.mutate({ message: text },
+  // { onError: ... })`): mark optimistically, undo the mark and show a notice if the
   // server refuses.
   function answer(id: string, run: (options: { onError: () => void }) => void) {
     setFailed(false);
@@ -230,7 +230,7 @@ function CopilotDockPanel() {
     if (!sessionId || pendingSend === null) return;
     const text = pendingSend;
     setPendingSend(null);
-    sendMessage.mutate(text, { onError: () => fail(text) });
+    sendMessage.mutate({ message: text }, { onError: () => fail(text) });
     // sendMessage/fail are fresh every render; only sessionId/pendingSend
     // should re-trigger this.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -275,7 +275,7 @@ function CopilotDockPanel() {
       });
       return;
     }
-    sendMessage.mutate(text, { onError: () => fail(text) });
+    sendMessage.mutate({ message: text }, { onError: () => fail(text) });
   }
 
   const suggestions = de

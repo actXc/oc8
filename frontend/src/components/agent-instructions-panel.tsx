@@ -142,7 +142,7 @@ function DraftWithCopilot({
   }
 
   function sendAndTrack(message: string) {
-    sendMessage.mutate(message, {
+    sendMessage.mutate({ message }, {
       onSuccess: (userMessage) => {
         if (userMessage.runId) {
           setAwaitingRunId(userMessage.runId);

@@ -25,7 +25,7 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from oc8 import models as m
@@ -155,9 +155,12 @@ async def send_message(
     Assistant refuses the message outright (see the secret-blindness gate
     below) -- callers must not assume a run was always started.
 
-    COMMITS `db` (via `enqueue_run`, or directly on the refusal path) --
-    callers must not issue further queries on it afterwards, same contract
-    `enqueue_run` itself documents.
+    COMMITS `db` (via `enqueue_run`, or directly on the refusal path), which
+    ends the transaction-local `app.tenant_id` RLS binding -- this function
+    re-binds it before returning on both exits, same idiom as
+    `collab.intake`'s handoff routing, so a caller reading `user_message`
+    afterwards (e.g. `api/v1/chat.py`'s `_message_dto`, querying its
+    attachments) does not have to know the trap exists.
     """
     history = await list_messages(db, tenant_id=tenant_id, session_id=session.id)
     user_message = m.ChatMessage(
@@ -215,6 +218,13 @@ async def send_message(
         )
         session.last_message_at = dt.datetime.now(tz=dt.UTC)
         await db.commit()
+        # This commit ends the transaction-local `app.tenant_id` RLS binding --
+        # re-bind here, not in every caller (`_message_dto` reads `user_message`
+        # right after this returns). Same idiom as the enqueue_run exit below
+        # and `collab.intake`'s handoff routing.
+        await db.execute(
+            text("SELECT set_config('app.tenant_id', :tid, true)"), {"tid": str(tenant_id)}
+        )
         return user_message, None
 
     task_text = _build_task_text(history, message)
@@ -280,6 +290,14 @@ async def send_message(
         context=context,
         source="chat",
         task_id=session.task_id,
+    )
+    # `enqueue_run` COMMITS, ending the transaction-local `app.tenant_id`
+    # binding. Re-bind here rather than in the handler, so a caller reading
+    # `user_message` afterwards (`_message_dto`, querying its attachments)
+    # does not have to know the trap exists -- same idiom as
+    # `collab.intake`'s handoff routing.
+    await db.execute(
+        text("SELECT set_config('app.tenant_id', :tid, true)"), {"tid": str(tenant_id)}
     )
     return user_message, run
 

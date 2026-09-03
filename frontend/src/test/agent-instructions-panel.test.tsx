@@ -281,7 +281,9 @@ describe("AgentInstructionsPanel", () => {
 
       expect(createSessionMock).toHaveBeenCalledWith("assistant-1", expect.anything());
       expect(sendMessageMock).toHaveBeenCalledWith(
-        expect.stringContaining("Answer billing questions"),
+        expect.objectContaining({
+          message: expect.stringContaining("Answer billing questions"),
+        }),
         expect.anything(),
       );
     });
@@ -300,12 +302,12 @@ describe("AgentInstructionsPanel", () => {
         ],
       });
       sendMessageMock.mockImplementation(
-        (message: string, opts?: { onSuccess?: (m: unknown) => void }) => {
+        (body: { message: string }, opts?: { onSuccess?: (m: unknown) => void }) => {
           opts?.onSuccess?.({
             id: "u1",
             sessionId: "s1",
             role: "user",
-            content: message,
+            content: body.message,
             runId: "run-draft",
             renderedComponents: [],
             createdAt: "2026-08-27T00:00:01Z",
@@ -334,7 +336,9 @@ describe("AgentInstructionsPanel", () => {
       // straight out, no createSession round trip.
       expect(createSessionMock).not.toHaveBeenCalled();
       expect(sendMessageMock).toHaveBeenCalledWith(
-        expect.stringContaining("Answer billing questions"),
+        expect.objectContaining({
+          message: expect.stringContaining("Answer billing questions"),
+        }),
         expect.anything(),
       );
 
@@ -405,12 +409,12 @@ describe("AgentInstructionsPanel", () => {
         ],
       });
       sendMessageMock.mockImplementation(
-        (message: string, opts?: { onSuccess?: (m: unknown) => void }) => {
+        (body: { message: string }, opts?: { onSuccess?: (m: unknown) => void }) => {
           opts?.onSuccess?.({
             id: "u-draft",
             sessionId: "s1",
             role: "user",
-            content: message,
+            content: body.message,
             runId: "run-draft",
             renderedComponents: [],
             createdAt: "2026-08-27T00:00:01Z",
@@ -524,8 +528,8 @@ describe("AgentInstructionsPanel", () => {
           },
         ],
       });
-      sendMessageMock.mockImplementation((_message: string, opts?: { onError?: () => void }) =>
-        opts?.onError?.(),
+      sendMessageMock.mockImplementation(
+        (_body: { message: string }, opts?: { onError?: () => void }) => opts?.onError?.(),
       );
 
       renderWithClient(

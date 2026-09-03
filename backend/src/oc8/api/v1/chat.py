@@ -8,6 +8,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy import select
 
 from oc8 import models as m
 from oc8.agent.assistant import get_or_create_assistant
@@ -26,7 +27,7 @@ from oc8.chat.service import (
     send_message,
 )
 from oc8.schemas.base import CamelModel
-from oc8.schemas.dto import ChatMessageDTO, ChatSessionDTO
+from oc8.schemas.dto import ChatMessageDTO, ChatSessionDTO, FileAttachmentDTO
 from oc8.schemas.requests import (
     CreateChatSessionRequest,
     RenameChatSessionRequest,
@@ -46,7 +47,27 @@ def _session_dto(session: m.ChatSession) -> ChatSessionDTO:
     )
 
 
-def _message_dto(msg: m.ChatMessage) -> ChatMessageDTO:
+async def _message_dto(
+    msg: m.ChatMessage, db: DbSession, tenant_id: uuid.UUID
+) -> ChatMessageDTO:
+    result = await db.execute(
+        select(m.FileAttachment).where(
+            m.FileAttachment.tenant_id == tenant_id,
+            m.FileAttachment.owner_type == "chat_message",
+            m.FileAttachment.owner_id == msg.id,
+        )
+    )
+    attachments = [
+        FileAttachmentDTO(
+            id=str(row.id),
+            filename=row.filename,
+            content_type=row.content_type,
+            size_bytes=row.size_bytes,
+            is_image=row.is_image,
+            created_at=row.created_at.isoformat(),
+        )
+        for row in result.scalars().all()
+    ]
     return ChatMessageDTO(
         id=str(msg.id),
         session_id=str(msg.session_id),
@@ -55,6 +76,7 @@ def _message_dto(msg: m.ChatMessage) -> ChatMessageDTO:
         run_id=str(msg.run_id) if msg.run_id else None,
         rendered_components=msg.rendered_components,
         created_at=msg.created_at.isoformat(),
+        attachments=attachments,
     )
 
 
@@ -166,7 +188,7 @@ async def get_messages(
 ) -> list[ChatMessageDTO]:
     await _owned_session(request, session_id, db, actor)
     messages = await list_messages(db, tenant_id=actor.principal.tenant_id, session_id=session_id)
-    return [_message_dto(msg) for msg in messages]
+    return [await _message_dto(msg, db, actor.principal.tenant_id) for msg in messages]
 
 
 @router.patch("/chat/sessions/{session_id}", response_model=ChatSessionDTO)
@@ -229,7 +251,7 @@ async def post_message(
         # token to read it from later. See `control_tools._acting_token_role`.
         operator_role=actor.principal.role,
     )
-    dto = _message_dto(user_message)
+    dto = await _message_dto(user_message, db, actor.principal.tenant_id)
     if run is not None:
         # NOT persisted -- user_message.run_id stays NULL in the database,
         # same as every other user turn (a later GET of this same message

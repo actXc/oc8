@@ -764,6 +764,15 @@ class ChatSessionDTO(CamelModel):
     last_message_at: str | None = None
 
 
+class FileAttachmentDTO(CamelModel):
+    id: str
+    filename: str
+    content_type: str
+    size_bytes: int
+    is_image: bool
+    created_at: str
+
+
 class ChatMessageDTO(CamelModel):
     id: str
     session_id: str
@@ -772,15 +781,7 @@ class ChatMessageDTO(CamelModel):
     run_id: str | None = None
     rendered_components: list[RenderedComponentDTO] = []
     created_at: str
-
-
-class FileAttachmentDTO(CamelModel):
-    id: str
-    filename: str
-    content_type: str
-    size_bytes: int
-    is_image: bool
-    created_at: str
+    attachments: list[FileAttachmentDTO] = []
 
 
 class ReportDTO(CamelModel):

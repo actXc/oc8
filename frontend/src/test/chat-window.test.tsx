@@ -8,6 +8,7 @@ const messagesMock = vi.fn();
 const sendMessageMock = vi.fn();
 const renameSessionMock = vi.fn();
 const deleteSessionMock = vi.fn();
+const uploadAttachmentMock = vi.fn();
 
 vi.mock("@/lib/hooks-chat", () => ({
   useChatSessions: () => sessionsMock(),
@@ -16,6 +17,7 @@ vi.mock("@/lib/hooks-chat", () => ({
   useSendChatMessage: () => ({ mutate: sendMessageMock, isPending: false }),
   useRenameChatSession: () => ({ mutate: renameSessionMock }),
   useDeleteChatSession: () => ({ mutate: deleteSessionMock }),
+  useUploadChatAttachment: () => ({ mutate: uploadAttachmentMock, isPending: false }),
 }));
 
 import { ChatWindow } from "@/components/chat-window";
@@ -37,6 +39,7 @@ describe("ChatWindow", () => {
     sendMessageMock.mockReset();
     renameSessionMock.mockReset();
     deleteSessionMock.mockReset();
+    uploadAttachmentMock.mockReset();
   });
 
   it("offers to start a chat when the agent has no sessions yet", () => {
@@ -223,5 +226,107 @@ describe("ChatWindow session picker", () => {
     fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
 
     expect(deleteSessionMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("ChatWindow attachments", () => {
+  beforeEach(() => {
+    sessionsMock.mockReset();
+    createSessionMock.mockReset();
+    messagesMock.mockReset();
+    sendMessageMock.mockReset();
+    renameSessionMock.mockReset();
+    deleteSessionMock.mockReset();
+    uploadAttachmentMock.mockReset();
+    sessionsMock.mockReturnValue({
+      data: [{ id: "s1", agentId: "agent-1", title: "", createdAt: "2026-08-27T00:00:00Z" }],
+      isLoading: false,
+    });
+  });
+
+  const attachmentDto = {
+    id: "att1",
+    filename: "notes.txt",
+    contentType: "text/plain",
+    sizeBytes: 12,
+    isImage: false,
+    createdAt: "2026-08-27T00:00:00Z",
+  };
+
+  it("uploading a file adds a pending attachment chip", () => {
+    messagesMock.mockReturnValue({ data: [], isLoading: false });
+    uploadAttachmentMock.mockImplementation(
+      (_file: File, opts?: { onSuccess?: (dto: unknown) => void }) => {
+        opts?.onSuccess?.(attachmentDto);
+      },
+    );
+    renderChat();
+
+    const file = new File(["hello"], "notes.txt", { type: "text/plain" });
+    fireEvent.change(screen.getByLabelText(/attach a file/i), { target: { files: [file] } });
+
+    expect(uploadAttachmentMock).toHaveBeenCalledWith(file, expect.anything());
+    expect(screen.getByText("notes.txt")).toBeInTheDocument();
+  });
+
+  it("removing a pending chip before send removes it", () => {
+    messagesMock.mockReturnValue({ data: [], isLoading: false });
+    uploadAttachmentMock.mockImplementation(
+      (_file: File, opts?: { onSuccess?: (dto: unknown) => void }) => {
+        opts?.onSuccess?.(attachmentDto);
+      },
+    );
+    renderChat();
+
+    const file = new File(["hello"], "notes.txt", { type: "text/plain" });
+    fireEvent.change(screen.getByLabelText(/attach a file/i), { target: { files: [file] } });
+    expect(screen.getByText("notes.txt")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /remove/i }));
+    expect(screen.queryByText("notes.txt")).not.toBeInTheDocument();
+  });
+
+  it("sending carries the pending attachment ids and clears them on success", () => {
+    messagesMock.mockReturnValue({ data: [], isLoading: false });
+    uploadAttachmentMock.mockImplementation(
+      (_file: File, opts?: { onSuccess?: (dto: unknown) => void }) => {
+        opts?.onSuccess?.(attachmentDto);
+      },
+    );
+    renderChat();
+
+    const file = new File(["hello"], "notes.txt", { type: "text/plain" });
+    fireEvent.change(screen.getByLabelText(/attach a file/i), { target: { files: [file] } });
+
+    const textarea = screen.getByPlaceholderText(/type a message/i);
+    fireEvent.change(textarea, { target: { value: "see attached" } });
+    fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+
+    expect(sendMessageMock).toHaveBeenCalledWith(
+      { message: "see attached", attachmentIds: ["att1"] },
+      expect.anything(),
+    );
+  });
+
+  it("a sent message with an attachment renders its chip", () => {
+    messagesMock.mockReturnValue({
+      data: [
+        {
+          id: "m1",
+          sessionId: "s1",
+          role: "user",
+          content: "see attached",
+          runId: null,
+          renderedComponents: [],
+          createdAt: "2026-08-27T00:00:00Z",
+          attachments: [attachmentDto],
+        },
+      ],
+      isLoading: false,
+    });
+    renderChat();
+
+    expect(screen.getByText("see attached")).toBeInTheDocument();
+    expect(screen.getByText("notes.txt")).toBeInTheDocument();
   });
 });

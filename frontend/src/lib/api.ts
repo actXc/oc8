@@ -290,6 +290,37 @@ export async function restoreBackup(
   return (await res.json()) as BackupRestoreResultDTO;
 }
 
+// ---- Chat attachments --------------------------------------------------
+// Same multipart shape as previewBackup/restoreBackup above: a File goes
+// through FormData, never JSON, so this can't go through `api.*` either --
+// no `content-type` header is set, letting the browser fill in the
+// multipart boundary itself.
+
+export interface FileAttachmentDTO {
+  id: string;
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+  isImage: boolean;
+  createdAt: string;
+}
+
+export async function uploadChatAttachment(
+  sessionId: string,
+  file: File,
+): Promise<FileAttachmentDTO> {
+  const token = await getToken();
+  const body = new FormData();
+  body.append("file", file);
+  const res = await fetch(`${API_URL}/chat/sessions/${sessionId}/attachments`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}` },
+    body,
+  });
+  if (!res.ok) throw await toError(res);
+  return (await res.json()) as FileAttachmentDTO;
+}
+
 // ---- Capa export -------------------------------------------------------
 // Same shape as backup export/preview above: `POST /capas/export` returns
 // either a JSON preview (dry_run) or a binary ZIP, so it can't go through

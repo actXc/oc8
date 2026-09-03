@@ -153,7 +153,10 @@ describe("CopilotDock", () => {
     fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
 
     expect(createSessionMock).toHaveBeenCalledWith("assistant-1", expect.anything());
-    expect(sendMessageMock).toHaveBeenCalledWith("What needs approval?", expect.anything());
+    expect(sendMessageMock).toHaveBeenCalledWith(
+      { message: "What needs approval?" },
+      expect.anything(),
+    );
   });
 
   it("sends directly, without creating a session, once one already exists", () => {
@@ -170,7 +173,10 @@ describe("CopilotDock", () => {
     fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
 
     expect(createSessionMock).not.toHaveBeenCalled();
-    expect(sendMessageMock).toHaveBeenCalledWith("Cost this month?", expect.anything());
+    expect(sendMessageMock).toHaveBeenCalledWith(
+      { message: "Cost this month?" },
+      expect.anything(),
+    );
   });
 
   it("on a failed send, shows an unavailable notice and restores the typed text instead of losing it", () => {
@@ -178,8 +184,8 @@ describe("CopilotDock", () => {
       data: [{ id: "s1", agentId: "assistant-1", title: "", createdAt: "t", lastMessageAt: null }],
     });
     messagesMock.mockReturnValue({ data: [] });
-    sendMessageMock.mockImplementation((_text: string, opts?: { onError?: () => void }) =>
-      opts?.onError?.(),
+    sendMessageMock.mockImplementation(
+      (_body: { message: string }, opts?: { onError?: () => void }) => opts?.onError?.(),
     );
     renderDock();
     openDock();

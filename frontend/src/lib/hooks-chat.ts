@@ -5,8 +5,10 @@
 // poll, not any of that.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { api, uploadChatAttachment, type FileAttachmentDTO } from "@/lib/api";
 import type { RunComponentDTO } from "@/lib/hooks";
+
+export type { FileAttachmentDTO } from "@/lib/api";
 
 export interface ChatSessionDTO {
   id: string;
@@ -24,6 +26,7 @@ export interface ChatMessageDTO {
   runId: string | null;
   renderedComponents: RunComponentDTO[];
   createdAt: string;
+  attachments: FileAttachmentDTO[];
 }
 
 const keys = {
@@ -95,8 +98,11 @@ export function useDeleteChatSession(agentId: string) {
 export function useSendChatMessage(sessionId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (message: string) =>
-      api.post<ChatMessageDTO>(`/chat/sessions/${sessionId}/messages`, { message }),
+    mutationFn: ({ message, attachmentIds }: { message: string; attachmentIds?: string[] }) =>
+      api.post<ChatMessageDTO>(`/chat/sessions/${sessionId}/messages`, {
+        message,
+        attachmentIds,
+      }),
     onSuccess: (message) => {
       qc.setQueryData<ChatMessageDTO[]>(keys.messages(sessionId), (prev) => [
         ...(prev ?? []),
@@ -104,5 +110,17 @@ export function useSendChatMessage(sessionId: string) {
       ]);
       qc.invalidateQueries({ queryKey: keys.sessions(message.sessionId) });
     },
+  });
+}
+
+// Uploads a file ahead of the message that will reference it -- see
+// `oc8.api.v1.files`'s `upload_chat_attachment`: it's owned by the SESSION
+// until the message that names it in `attachmentIds` is actually sent, at
+// which point `chat/service.py::send_message` re-points `owner_id` to the
+// new `ChatMessage`. Nothing here removes an attachment the caller uploaded
+// and then never sent -- see chat-window.tsx's pending-chip removal.
+export function useUploadChatAttachment(sessionId: string) {
+  return useMutation({
+    mutationFn: (file: File) => uploadChatAttachment(sessionId, file),
   });
 }

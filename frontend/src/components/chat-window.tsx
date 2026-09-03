@@ -5,8 +5,17 @@
 // (source="chat"), so guardrails/approvals apply exactly as they do to an
 // autonomous run.
 
-import { useEffect, useRef, useState } from "react";
-import { ChevronDown, MessageSquare, Pencil, Plus, Send, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import {
+  ChevronDown,
+  MessageSquare,
+  Paperclip,
+  Pencil,
+  Plus,
+  Send,
+  Trash2,
+  X,
+} from "lucide-react";
 import { Panel } from "@/components/app-shell";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { RUN_COMPONENT_REGISTRY } from "@/components/run-record-card";
@@ -23,7 +32,9 @@ import {
   useDeleteChatSession,
   useRenameChatSession,
   useSendChatMessage,
+  useUploadChatAttachment,
   type ChatSessionDTO,
+  type FileAttachmentDTO,
 } from "@/lib/hooks-chat";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -44,7 +55,10 @@ export function ChatWindow({ agentId, agentName }: { agentId: string; agentName:
 
   const { data: messages, isLoading: messagesLoading } = useChatMessages(sessionId);
   const sendMessage = useSendChatMessage(sessionId ?? "");
+  const uploadAttachment = useUploadChatAttachment(sessionId ?? "");
   const [draft, setDraft] = useState("");
+  const [pendingAttachments, setPendingAttachments] = useState<FileAttachmentDTO[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -60,7 +74,24 @@ export function ChatWindow({ agentId, agentName }: { agentId: string; agentName:
     const trimmed = draft.trim();
     if (!trimmed || !sessionId) return;
     setDraft("");
-    sendMessage.mutate(trimmed);
+    const attachmentIds = pendingAttachments.map((a) => a.id);
+    sendMessage.mutate(
+      { message: trimmed, attachmentIds },
+      { onSuccess: () => setPendingAttachments([]) },
+    );
+  }
+
+  function handleFileChosen(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !sessionId) return;
+    uploadAttachment.mutate(file, {
+      onSuccess: (dto) => setPendingAttachments((p) => [...p, dto]),
+    });
+  }
+
+  function removePendingAttachment(id: string) {
+    setPendingAttachments((p) => p.filter((a) => a.id !== id));
   }
 
   // The transcript's own state IS the "is the agent still working" signal --
@@ -159,6 +190,25 @@ export function ChatWindow({ agentId, agentName }: { agentId: string; agentName:
                     })}
                   </div>
                 )}
+                {m.attachments && m.attachments.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {m.attachments.map((a) => (
+                      <span
+                        key={a.id}
+                        title={a.filename}
+                        className={cn(
+                          "inline-flex max-w-[180px] items-center gap-1 truncate rounded-full border px-2 py-0.5 text-[11px]",
+                          m.role === "user"
+                            ? "border-primary-foreground/30 text-primary-foreground/90"
+                            : "border-border text-muted-foreground",
+                        )}
+                      >
+                        <Paperclip className="h-2.5 w-2.5 shrink-0" />
+                        <span className="truncate">{a.filename}</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           ))
@@ -173,28 +223,69 @@ export function ChatWindow({ agentId, agentName }: { agentId: string; agentName:
       </div>
 
       {sessionId && (
-        <div className="flex items-end gap-2 border-t border-border px-4 py-3">
-          <textarea
-            rows={1}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-            placeholder={t("Type a message…", "Nachricht eingeben…")}
-            className="max-h-32 flex-1 resize-none rounded-md border border-border bg-background/40 px-3 py-2 text-sm outline-none focus:border-primary/50"
-          />
-          <button
-            type="button"
-            onClick={submit}
-            disabled={sendMessage.isPending || waitingOnAgent || !draft.trim()}
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
-          >
-            <Send className="h-3.5 w-3.5" />
-          </button>
+        <div className="border-t border-border px-4 py-3">
+          {pendingAttachments.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {pendingAttachments.map((a) => (
+                <span
+                  key={a.id}
+                  title={a.filename}
+                  className="inline-flex max-w-[200px] items-center gap-1 truncate rounded-full border border-border bg-background/60 py-0.5 pl-2 pr-1 text-[11px] text-muted-foreground"
+                >
+                  <Paperclip className="h-2.5 w-2.5 shrink-0" />
+                  <span className="truncate">{a.filename}</span>
+                  <button
+                    type="button"
+                    onClick={() => removePendingAttachment(a.id)}
+                    title={t("Remove", "Entfernen")}
+                    className="rounded-full p-0.5 text-muted-foreground transition hover:text-foreground"
+                  >
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="flex items-end gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              aria-label={t("Attach a file", "Datei anhängen")}
+              onChange={handleFileChosen}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploadAttachment.isPending}
+              title={t("Attach a file", "Datei anhängen")}
+              className="inline-flex items-center justify-center rounded-md border border-border px-2.5 py-2 text-muted-foreground transition hover:text-foreground disabled:opacity-50"
+            >
+              <Paperclip className="h-3.5 w-3.5" />
+            </button>
+            <textarea
+              rows={1}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+              placeholder={t("Type a message…", "Nachricht eingeben…")}
+              className="max-h-32 flex-1 resize-none rounded-md border border-border bg-background/40 px-3 py-2 text-sm outline-none focus:border-primary/50"
+            />
+            <button
+              type="button"
+              onClick={submit}
+              disabled={sendMessage.isPending || waitingOnAgent || !draft.trim()}
+              aria-label={t("Send", "Senden")}
+              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
+            >
+              <Send className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
       )}
     </Panel>
