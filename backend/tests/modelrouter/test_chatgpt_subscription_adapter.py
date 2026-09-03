@@ -11,6 +11,7 @@ tools, `output`/`output_text` instead of `choices[].message`, and
 
 from __future__ import annotations
 
+import base64
 import json
 from typing import Any
 
@@ -25,9 +26,11 @@ from oc8.modelrouter.adapters.chatgpt_subscription import (
 )
 from oc8.modelrouter.types import (
     CompletionRequest,
+    ImagePart,
     ModelParams,
     NeutralMessage,
     NeutralTool,
+    TextPart,
     ToolCall,
 )
 
@@ -114,6 +117,46 @@ def test_payload_uses_typed_input_items_not_chat_messages() -> None:
             "role": "assistant",
             "content": [{"type": "output_text", "text": "hi"}],
         },
+    ]
+
+
+def test_payload_builds_an_input_image_part_alongside_input_text_for_a_user_turn() -> None:
+    """Task 5: a mixed-content user turn -> a `message` item whose `content`
+    is `[{"type": "input_text", ...}, {"type": "input_image", "image_url":
+    "data:<content_type>;base64,<data>"}]` -- the Responses API's own
+    inline-data-URL shape for an image input part."""
+    encoded = base64.b64encode(b"\x89PNG...").decode()
+    payload = build_responses_payload(
+        _req(
+            messages=[
+                NeutralMessage(
+                    role="user",
+                    content=[
+                        TextPart(text="what's in this image?"),
+                        ImagePart(data=b"\x89PNG...", content_type="image/png"),
+                    ],
+                )
+            ]
+        )
+    )
+    assert payload["input"] == [
+        {
+            "type": "message",
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "what's in this image?"},
+                {"type": "input_image", "image_url": f"data:image/png;base64,{encoded}"},
+            ],
+        }
+    ]
+
+
+def test_a_plain_string_user_message_still_produces_a_single_input_text_item() -> None:
+    """The `str` case must be unchanged -- no behavior change when there is
+    no image."""
+    payload = build_responses_payload(_req(messages=[NeutralMessage(role="user", content="hallo")]))
+    assert payload["input"] == [
+        {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hallo"}]}
     ]
 
 

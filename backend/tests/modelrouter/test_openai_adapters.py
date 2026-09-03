@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from typing import Any
 
 import httpx
@@ -8,12 +9,14 @@ import pytest
 from oc8.modelrouter.adapters._openai_common import to_openai_messages
 from oc8.modelrouter.adapters.openai import OpenAIAdapter
 from oc8.modelrouter.adapters.openai_compatible import OpenAICompatibleAdapter
-from oc8.modelrouter.trim import overflow_tokens, trim_for_overflow, trim_to_budget
+from oc8.modelrouter.trim import _cost, overflow_tokens, trim_for_overflow, trim_to_budget
 from oc8.modelrouter.types import (
     CompletionRequest,
+    ImagePart,
     ModelParams,
     NeutralMessage,
     NeutralTool,
+    TextPart,
     ToolCall,
 )
 
@@ -227,6 +230,49 @@ async def test_a_nameless_tool_call_never_reaches_the_provider() -> None:
     assert tool_ids == ["call_ok"], "its result must go with it"
 
 
+def test_to_openai_messages_builds_an_image_url_content_block() -> None:
+    """Task 5: the OpenAI-compatible shape for an image is a content block
+    that is a SIBLING of the text block inside `content`, `{"type":
+    "image_url", "image_url": {"url": "data:<content_type>;base64,<data>"}}`
+    -- different from Anthropic's `{"type": "image", "source": {...}}`."""
+    msg = NeutralMessage(
+        role="user",
+        content=[
+            TextPart(text="what's in this image?"),
+            ImagePart(data=b"\x89PNG...", content_type="image/png"),
+        ],
+    )
+    sent = to_openai_messages([msg])
+    encoded = base64.b64encode(b"\x89PNG...").decode()
+    assert sent[0]["role"] == "user"
+    assert sent[0]["content"][0] == {"type": "text", "text": "what's in this image?"}
+    assert sent[0]["content"][1] == {
+        "type": "image_url",
+        "image_url": {"url": f"data:image/png;base64,{encoded}"},
+    }
+
+
+def test_a_plain_string_user_message_is_unaffected_by_the_image_helper() -> None:
+    sent = to_openai_messages([NeutralMessage(role="user", content="hi there")])
+    assert sent[0] == {"role": "user", "content": "hi there"}
+
+
+def test_an_assistant_turn_with_only_image_parts_and_no_tool_calls_is_kept() -> None:
+    """An assistant turn's `content` block list can be non-empty (an image)
+    while carrying no text and no tool calls -- that must still count as
+    "something to say", not get dropped by the empty-turn guard."""
+    sent = to_openai_messages(
+        [
+            NeutralMessage(
+                role="assistant",
+                content=[ImagePart(data=b"\x89PNG...", content_type="image/png")],
+            )
+        ]
+    )
+    assert len(sent) == 1
+    assert sent[0]["content"][0]["type"] == "image_url"
+
+
 async def test_an_assistant_turn_left_with_nothing_is_dropped_entirely() -> None:
     """If the nameless call was the turn's ONLY content, what remains is an
     assistant message with neither text nor calls -- which the same endpoint
@@ -320,3 +366,58 @@ async def test_a_transcript_with_nothing_left_to_drop_is_not_retried() -> None:
     """Retrying an identical request would turn one clear failure into a loop."""
     messages = [NeutralMessage(role="system", content="sys"), _long("user", 5, "jetzt ")]
     assert trim_for_overflow(messages, over_by=100_000, headroom=2048) is None
+
+
+def test_cost_of_list_content_ignores_image_parts_and_does_not_crash() -> None:
+    """`NeutralMessage.content` can be `str | list[ContentPart]` (Task 4's
+    image-attachment support). The old `text = message.content or ""`
+    followed by `text += ...` blew up with a `TypeError` the moment content
+    was a non-empty list -- `or` binds `text` to the list itself, and a list
+    has no `+=` against a string. Only `TextPart` entries should count
+    toward this rough token estimate; an `ImagePart`'s bytes must not."""
+    text_only = NeutralMessage(role="user", content="hello world")
+    mixed = NeutralMessage(
+        role="user",
+        content=[
+            TextPart(text="hello world"),
+            ImagePart(data=b"\x89PNG" * 500, content_type="image/png"),
+        ],
+    )
+    assert _cost(mixed) == _cost(text_only)
+
+
+async def test_a_message_with_list_content_does_not_crash_the_budget_check() -> None:
+    """`_cost` is called unconditionally on every message just to sum the
+    total, even when the transcript already fits -- so this alone exercises
+    the crash path from the docstring above without needing to force a trim."""
+    messages = [
+        NeutralMessage(role="system", content="sys"),
+        NeutralMessage(
+            role="user",
+            content=[
+                TextPart(text="what's in this image?"),
+                ImagePart(data=b"\x89PNG...", content_type="image/png"),
+            ],
+        ),
+    ]
+    assert trim_to_budget(messages, budget_tokens=100_000) == messages
+
+
+async def test_a_list_content_message_survives_an_actual_trim_without_crashing() -> None:
+    """Same crash risk, but exercised inside the trimming loop itself (the
+    per-message `cost = _cost(message)` call), not just the initial sum."""
+    messages = [
+        NeutralMessage(role="system", content="sys"),
+        *[_long("user", 400, f"alt-{i} ") for i in range(20)],
+        NeutralMessage(
+            role="user",
+            content=[
+                TextPart(text="aktuell, what's in this image?"),
+                ImagePart(data=b"\x89PNG...", content_type="image/png"),
+            ],
+        ),
+    ]
+    kept = trim_to_budget(messages, budget_tokens=2000)
+    assert len(kept) < len(messages), "something has to give"
+    assert isinstance(kept[-1].content, list)
+    assert any(isinstance(p, ImagePart) for p in kept[-1].content)

@@ -110,6 +110,7 @@ What that adds up to
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 from collections.abc import AsyncIterator
@@ -122,8 +123,10 @@ from oc8.modelrouter.types import (
     CompletionChunk,
     CompletionRequest,
     CompletionResult,
+    ImagePart,
     NeutralMessage,
     NeutralTool,
+    TextPart,
     ToolCall,
     ToolCallDelta,
     Usage,
@@ -156,7 +159,16 @@ def to_responses_input(messages: list[NeutralMessage]) -> tuple[str, list[dict[s
     for msg in messages:
         if msg.role == "system":
             if msg.content:
-                instructions.append(msg.content)
+                # System turns never carry images in this design -- they are
+                # hoisted into the plain-text `instructions` field, which has
+                # no content-part shape of its own. Same assumption as
+                # `oc8.modelrouter.adapters.anthropic._to_anthropic_messages`.
+                if isinstance(msg.content, str):
+                    instructions.append(msg.content)
+                else:
+                    instructions.append(
+                        "\n".join(p.text for p in msg.content if isinstance(p, TextPart))
+                    )
         elif msg.role == "user":
             items.append(_message_item("user", "input_text", msg.content))
         elif msg.role == "assistant":
@@ -192,8 +204,34 @@ def to_responses_input(messages: list[NeutralMessage]) -> tuple[str, list[dict[s
     return "\n\n".join(instructions), items
 
 
-def _message_item(role: str, part_type: str, text: str) -> dict[str, Any]:
-    return {"type": "message", "role": role, "content": [{"type": part_type, "text": text}]}
+def _message_item(role: str, part_type: str, content: str | list[Any]) -> dict[str, Any]:
+    """A neutral message's content -> one Responses API `message` input item.
+
+    The plain-`str` case keeps the original single-`input_text`/`output_text`
+    item shape unchanged. A `list[ContentPart]` becomes a list of typed
+    content parts in order: `TextPart` -> `{"type": part_type, "text": ...}`
+    (so a user turn's text stays `input_text` and an assistant turn's stays
+    `output_text`), and `ImagePart` -> `{"type": "input_image", "image_url":
+    "data:<content_type>;base64,<data>"}` -- always `input_image`, since the
+    Responses API has no `output_image` counterpart and only user-authored
+    turns are expected to carry one in this design.
+    """
+    if isinstance(content, str):
+        return {"type": "message", "role": role, "content": [{"type": part_type, "text": content}]}
+    parts: list[dict[str, Any]] = []
+    for part in content:
+        if isinstance(part, TextPart):
+            parts.append({"type": part_type, "text": part.text})
+        elif isinstance(part, ImagePart):
+            parts.append(
+                {
+                    "type": "input_image",
+                    "image_url": (
+                        f"data:{part.content_type};base64,{base64.b64encode(part.data).decode()}"
+                    ),
+                }
+            )
+    return {"type": "message", "role": role, "content": parts}
 
 
 def to_responses_tools(tools: list[NeutralTool]) -> list[dict[str, Any]]:

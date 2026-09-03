@@ -5,6 +5,7 @@ both the dedicated OpenAI adapter and the generic OpenAI-compatible adapter
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 from typing import Any
@@ -15,7 +16,9 @@ from oc8.modelrouter.http_errors import raise_for_status_with_body
 from oc8.modelrouter.types import (
     CompletionRequest,
     CompletionResult,
+    ImagePart,
     NeutralMessage,
+    TextPart,
     ToolCall,
     Usage,
 )
@@ -33,6 +36,37 @@ TOOL_BRIDGE_CONTENT = "(tool result received)"
 logger = logging.getLogger(__name__)
 
 
+def _content_blocks(content: str | list[Any]) -> list[dict[str, Any]] | str:
+    """`NeutralMessage.content` -> the Chat Completions content shape.
+
+    A plain string passes through unchanged (the common case, and the shape
+    every existing call site already expects). A `list[ContentPart]` becomes
+    a list of content blocks -- `{"type": "text", ...}` for a `TextPart` and
+    `{"type": "image_url", "image_url": {"url": "data:<content_type>;base64,
+    <data>"}}` for an `ImagePart`, OpenAI's own inline-data-URL shape. Same
+    pattern as `oc8.modelrouter.adapters.anthropic._content_blocks`.
+    """
+    if isinstance(content, str):
+        return content
+    blocks: list[dict[str, Any]] = []
+    for part in content:
+        if isinstance(part, TextPart):
+            blocks.append({"type": "text", "text": part.text})
+        elif isinstance(part, ImagePart):
+            blocks.append(
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": (
+                            f"data:{part.content_type};base64,"
+                            f"{base64.b64encode(part.data).decode()}"
+                        )
+                    },
+                }
+            )
+    return blocks
+
+
 def to_openai_messages(messages: list[NeutralMessage]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     # A call with no name cannot be dispatched by anyone, and providers reject the
@@ -46,18 +80,26 @@ def to_openai_messages(messages: list[NeutralMessage]) -> list[dict[str, Any]]:
         if msg.role in ("system", "user"):
             if msg.role == "user" and out and out[-1]["role"] == "tool":
                 out.append({"role": "assistant", "content": TOOL_BRIDGE_CONTENT})
-            out.append({"role": msg.role, "content": msg.content})
+            out.append({"role": msg.role, "content": _content_blocks(msg.content)})
         elif msg.role == "assistant":
             usable = [tc for tc in msg.tool_calls if tc.name.strip()]
             for tc in msg.tool_calls:
                 if not tc.name.strip():
                     logger.warning("dropping a tool call with no name (id=%r)", tc.id)
                     dropped_call_ids.add(tc.id)
-            if not usable and not (msg.content or "").strip():
+            content_blocks = _content_blocks(msg.content)
+            # `.strip()` only applies to the str case; a non-empty list of
+            # blocks (e.g. an image) always counts as "something to say".
+            has_content = (
+                bool(content_blocks.strip())
+                if isinstance(content_blocks, str)
+                else bool(content_blocks)
+            )
+            if not usable and not has_content:
                 # Nothing left to say: an assistant turn with neither text nor
                 # calls is itself rejected ("Invalid assistant message").
                 continue
-            entry: dict[str, Any] = {"role": "assistant", "content": msg.content or None}
+            entry: dict[str, Any] = {"role": "assistant", "content": content_blocks or None}
             if usable:
                 entry["tool_calls"] = [
                     {

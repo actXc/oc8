@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 from collections.abc import AsyncIterator
@@ -14,7 +15,9 @@ from oc8.modelrouter.types import (
     CompletionChunk,
     CompletionRequest,
     CompletionResult,
+    ImagePart,
     NeutralMessage,
+    TextPart,
     ToolCall,
     ToolCallDelta,
     Usage,
@@ -24,7 +27,28 @@ logger = logging.getLogger(__name__)
 
 
 def _message_to_ollama(msg: NeutralMessage) -> dict[str, Any]:
-    out: dict[str, Any] = {"role": msg.role, "content": msg.content}
+    """`NeutralMessage` -> `/api/chat`'s own message shape.
+
+    Unlike the Anthropic/OpenAI/Responses adapters, Ollama does NOT take
+    inline image content blocks: `content` stays a single string (every
+    `TextPart` joined together for the list case, unchanged for the plain
+    `str` case), and images go in a separate top-level `"images"` array,
+    each a RAW base64 string with no `data:image/...;base64,` prefix -- that
+    prefix is an OpenAI/Anthropic convention, not Ollama's.
+    """
+    if isinstance(msg.content, str):
+        content: str = msg.content
+        images: list[str] = []
+    else:
+        content = "\n".join(part.text for part in msg.content if isinstance(part, TextPart))
+        images = [
+            base64.b64encode(part.data).decode()
+            for part in msg.content
+            if isinstance(part, ImagePart)
+        ]
+    out: dict[str, Any] = {"role": msg.role, "content": content}
+    if images:
+        out["images"] = images
     if msg.tool_calls:
         out["tool_calls"] = [
             {"function": {"name": tc.name, "arguments": tc.arguments}} for tc in msg.tool_calls

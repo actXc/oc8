@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from oc8.modelrouter.http_errors import _NEGATIVE_MAX_TOKENS
 from oc8.modelrouter.streaming import estimate_tokens
-from oc8.modelrouter.types import NeutralMessage
+from oc8.modelrouter.types import NeutralMessage, TextPart
 
 #: Said in the transcript itself, in the place the dropped turns were, so the
 #: model can tell the difference between "this never happened" and "I no longer
@@ -33,7 +33,18 @@ NOTICE = (
 
 
 def _cost(message: NeutralMessage) -> int:
-    text = message.content or ""
+    # `content` is a plain string in the common case, but may also be a list
+    # of content parts (text mixed with images -- see `oc8.modelrouter.types.
+    # ContentPart`). Only the `TextPart` entries count toward this rough
+    # budget estimate; an `ImagePart`'s own token cost is real but not needed
+    # for a "does this roughly fit" heuristic, so it is simply not counted
+    # here rather than crashing (`text = message.content or ""` followed by
+    # `text += ...` blows up with a `TypeError` the moment `content` is a
+    # non-empty list, since `or` binds `text` to the list itself).
+    if isinstance(message.content, str):
+        text = message.content
+    else:
+        text = "".join(part.text for part in message.content if isinstance(part, TextPart))
     for call in message.tool_calls:
         text += call.name + str(call.arguments)
     return estimate_tokens(text) + 4  # per-message overhead the wire format adds

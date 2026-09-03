@@ -9,13 +9,21 @@ tokens -- and is the only place usage or stop_reason appears.
 
 from __future__ import annotations
 
+import base64
 from typing import Any
 
 import httpx
 import pytest
 
-from oc8.modelrouter.adapters.ollama import OllamaAdapter
-from oc8.modelrouter.types import CompletionRequest, ModelParams, NeutralMessage, Usage
+from oc8.modelrouter.adapters.ollama import OllamaAdapter, _message_to_ollama
+from oc8.modelrouter.types import (
+    CompletionRequest,
+    ImagePart,
+    ModelParams,
+    NeutralMessage,
+    TextPart,
+    Usage,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -137,3 +145,52 @@ async def test_a_malformed_line_does_not_kill_the_stream(monkeypatch: pytest.Mon
     _patch_stream(monkeypatch, body)
     chunks = await _chunks(OllamaAdapter(base_url="http://ollama"))
     assert "".join(c.text for c in chunks) == "ab"
+
+
+# --------------------------------------------------------------------------
+# _message_to_ollama -- Task 5: Ollama's `/api/chat` image shape is genuinely
+# different from the other three adapters. It does NOT use inline content
+# blocks: `content` stays a single string, and images go in a SEPARATE
+# top-level `"images"` array of RAW base64 (no `data:image/...;base64,`
+# prefix -- that prefix is an OpenAI/Anthropic convention, not Ollama's).
+# --------------------------------------------------------------------------
+
+
+def test_message_to_ollama_puts_images_in_a_separate_top_level_key() -> None:
+    msg = NeutralMessage(
+        role="user",
+        content=[
+            TextPart(text="what's in this image?"),
+            ImagePart(data=b"\x89PNG...", content_type="image/png"),
+        ],
+    )
+    out = _message_to_ollama(msg)
+    assert out["content"] == "what's in this image?"
+    assert out["images"] == [base64.b64encode(b"\x89PNG...").decode()]
+    # Raw base64 only -- no data: URL prefix, unlike the other three adapters.
+    assert not out["images"][0].startswith("data:")
+
+
+def test_message_to_ollama_joins_multiple_text_parts_into_one_content_string() -> None:
+    msg = NeutralMessage(
+        role="user",
+        content=[TextPart(text="first"), TextPart(text="second")],
+    )
+    out = _message_to_ollama(msg)
+    assert "first" in out["content"]
+    assert "second" in out["content"]
+    assert "images" not in out
+
+
+def test_message_to_ollama_omits_the_images_key_when_there_are_none() -> None:
+    """Only add `"images"` when the message actually has one or more
+    `ImagePart`s -- an empty list must not be sent."""
+    msg = NeutralMessage(role="user", content=[TextPart(text="just text")])
+    out = _message_to_ollama(msg)
+    assert "images" not in out
+
+
+def test_message_to_ollama_plain_string_content_is_unaffected() -> None:
+    out = _message_to_ollama(NeutralMessage(role="user", content="hi there"))
+    assert out == {"role": "user", "content": "hi there"}
+    assert "images" not in out
