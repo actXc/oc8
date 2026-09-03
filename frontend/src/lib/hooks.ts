@@ -187,6 +187,7 @@ export interface ModelDTO {
   // (1536), not "unlimited".
   maxTokens?: number | null;
   usedByCopilot: boolean;
+  supportsVision?: boolean;
   credentialId: string | null;
   healthError: string | null;
   healthCheckedAt: string | null;
@@ -222,6 +223,7 @@ export interface ModelWriteBody {
   displayName?: string;
   maxTokens?: number;
   usedByCopilot?: boolean;
+  supportsVision?: boolean;
   credentialId?: string | null;
 }
 

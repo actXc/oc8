@@ -831,6 +831,7 @@ function ModelFormDialog({ editing, onClose }: { editing: ModelDTO | null; onClo
   const [locality, setLocality] = useState<"cloud" | "local">(editing?.locality ?? "cloud");
   const [displayName, setDisplayName] = useState(editing?.displayName ?? "");
   const [usedByCopilot, setUsedByCopilot] = useState(editing?.usedByCopilot ?? false);
+  const [supportsVision, setSupportsVision] = useState(editing?.supportsVision ?? false);
   const [maxTokens, setMaxTokens] = useState(
     editing?.maxTokens != null ? String(editing.maxTokens) : "",
   );
@@ -935,6 +936,7 @@ function ModelFormDialog({ editing, onClose }: { editing: ModelDTO | null; onClo
       locality,
       displayName: displayName.trim() || undefined,
       usedByCopilot,
+      supportsVision,
       ...(editing ? { maxTokens: parsedMaxTokens ?? 0 } : {}),
     };
     try {
@@ -1104,6 +1106,15 @@ function ModelFormDialog({ editing, onClose }: { editing: ModelDTO | null; onClo
                   onChange={(e) => setUsedByCopilot(e.target.checked)}
                 />
                 {t("Use this model for the Copilot", "Dieses Modell für den Copilot nutzen")}
+              </label>
+
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={supportsVision}
+                  onChange={(e) => setSupportsVision(e.target.checked)}
+                />
+                {t("This model can see images (vision)", "Dieses Modell kann Bilder verarbeiten (Vision)")}
               </label>
 
               {editing && (
