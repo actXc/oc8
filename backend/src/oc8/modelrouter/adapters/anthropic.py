@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -59,14 +60,15 @@ def _to_anthropic_messages(messages: list[NeutralMessage]) -> tuple[str, list[di
     return "\n".join(system_parts), out
 
 
-def _build_payload(req: CompletionRequest) -> dict[str, Any]:
+def _build_payload(req: CompletionRequest, *, include_temperature: bool = True) -> dict[str, Any]:
     system, messages = _to_anthropic_messages(req.messages)
     payload: dict[str, Any] = {
         "model": req.model,
         "max_tokens": req.params.max_tokens,
-        "temperature": req.params.temperature,
         "messages": messages,
     }
+    if include_temperature:
+        payload["temperature"] = req.params.temperature
     if system:
         payload["system"] = system
     if req.tools:
@@ -75,6 +77,19 @@ def _build_payload(req: CompletionRequest) -> dict[str, Any]:
             for t in req.tools
         ]
     return payload
+
+
+# Live, 2026-09: newer Claude models (claude-sonnet-5, claude-opus-5, ...)
+# reject `temperature` outright rather than merely ignoring it, and there is
+# no way to know in advance which model name will do this next -- a hardcoded
+# list of "deprecated on" models would need updating with every release and
+# would still miss one. So this is detected from the provider's own words and
+# handled by retrying once without the field, rather than by naming models.
+_TEMPERATURE_DEPRECATED = re.compile(r'"message"\s*:\s*"temperature is deprecated for this model')
+
+
+def _is_temperature_deprecated(exc: httpx.HTTPStatusError) -> bool:
+    return exc.response.status_code == 400 and bool(_TEMPERATURE_DEPRECATED.search(str(exc)))
 
 
 class AnthropicAdapter:
@@ -92,8 +107,20 @@ class AnthropicAdapter:
 
     async def complete(self, req: CompletionRequest) -> CompletionResult:
         async with httpx.AsyncClient(timeout=180.0) as client:
-            resp = await client.post(_API_URL, json=_build_payload(req), headers=self._headers())
-            raise_for_status_with_body(resp)
+            try:
+                resp = await client.post(
+                    _API_URL, json=_build_payload(req), headers=self._headers()
+                )
+                raise_for_status_with_body(resp)
+            except httpx.HTTPStatusError as exc:
+                if not _is_temperature_deprecated(exc):
+                    raise
+                resp = await client.post(
+                    _API_URL,
+                    json=_build_payload(req, include_temperature=False),
+                    headers=self._headers(),
+                )
+                raise_for_status_with_body(resp)
             data = resp.json()
 
         text_parts: list[str] = []
@@ -135,6 +162,24 @@ class AnthropicAdapter:
         blocks by position rather than a separate tool-call channel.
         """
         payload = {**_build_payload(req), "stream": True}
+        # The rejection arrives from `araise_for_status_with_body` before any
+        # SSE line has been parsed, so retrying is safe as long as nothing has
+        # reached the caller yet -- `emitted` guards that the same way the
+        # fallback chain (fallback.py) already does for a mid-stream failure.
+        emitted = False
+        try:
+            async for chunk in self._stream_once(payload):
+                emitted = True
+                yield chunk
+            return
+        except httpx.HTTPStatusError as exc:
+            if emitted or not _is_temperature_deprecated(exc):
+                raise
+        payload = {**_build_payload(req, include_temperature=False), "stream": True}
+        async for chunk in self._stream_once(payload):
+            yield chunk
+
+    async def _stream_once(self, payload: dict[str, Any]) -> AsyncIterator[CompletionChunk]:
         # message_start carries input_tokens; message_delta carries only
         # output_tokens (Anthropic never repeats the input count once it's
         # sent). The accumulator treats each chunk's usage as the new
