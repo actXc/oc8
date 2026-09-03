@@ -45,6 +45,26 @@ class SkillVersion(Base, PkMixin, TenantMixin, TimestampMixin, SoftDeleteMixin):
     __table_args__ = (UniqueConstraint("skill_id", "semver", name="uq_skill_version"),)
 
 
+class ImportedSkillFile(Base, PkMixin, TenantMixin, TimestampMixin):
+    """One `references/`/`assets/`/`scripts/` file bundled with a skill that was
+    imported directly from a repository (skills.importer), pinned to the exact
+    `SkillVersion` it arrived with. A capa-installed skill's files live on disk
+    instead and never get a row here -- see `reference_root`'s two shapes,
+    documented on `agent.control_tools`'s `read_reference_file` dispatch."""
+
+    __tablename__ = "imported_skill_file"
+
+    skill_version_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    rel_path: Mapped[str] = mapped_column(Text, nullable=False)
+    content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "skill_version_id", "rel_path", name="uq_imported_skill_file_version_path"
+        ),
+    )
+
+
 class SkillAssignment(Base, PkMixin, TenantMixin, TimestampMixin, SoftDeleteMixin):
     """Who may load a skill. The scope is which column is filled:
 

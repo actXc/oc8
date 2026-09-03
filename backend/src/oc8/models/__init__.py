@@ -52,7 +52,7 @@ from oc8.models.run import (
     ToolInvocation,
 )
 from oc8.models.secrets import Secret, TenantDek
-from oc8.models.skills import Skill, SkillAssignment, SkillVersion
+from oc8.models.skills import ImportedSkillFile, Skill, SkillAssignment, SkillVersion
 from oc8.models.triggers import Trigger
 
 __all__ = [
@@ -84,6 +84,7 @@ __all__ = [
     "FlowVersion",
     "Handoff",
     "HandoffType",
+    "ImportedSkillFile",
     "IngestionJob",
     "Integration",
     "KbChunk",
