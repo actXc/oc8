@@ -834,6 +834,7 @@ function ModelFormDialog({ editing, onClose }: { editing: ModelDTO | null; onClo
   const [maxTokens, setMaxTokens] = useState(
     editing?.maxTokens != null ? String(editing.maxTokens) : "",
   );
+  const [effort, setEffort] = useState(editing?.effort ?? "");
   // Create-mode only: discovery + multi-select, so adding several of a
   // provider's models doesn't mean typing each tag by hand. Manual entry
   // (the plain `modelTag` field above) stays the fallback for a provider
@@ -936,6 +937,7 @@ function ModelFormDialog({ editing, onClose }: { editing: ModelDTO | null; onClo
       displayName: displayName.trim() || undefined,
       usedByCopilot,
       ...(editing ? { maxTokens: parsedMaxTokens ?? 0 } : {}),
+      effort: effort.trim(),
     };
     try {
       if (editing) {
@@ -1127,6 +1129,25 @@ function ModelFormDialog({ editing, onClose }: { editing: ModelDTO | null; onClo
                   </p>
                 </label>
               )}
+
+              <label className="block">
+                <span className="mb-1 block text-[10px] uppercase tracking-widest text-muted-foreground">
+                  {t("Effort (optional)", "Effort (optional)")}
+                </span>
+                <input
+                  type="text"
+                  placeholder="e.g. high"
+                  value={effort}
+                  onChange={(e) => setEffort(e.target.value)}
+                  className="w-full rounded-md border border-border bg-background/40 px-3 py-2 text-sm outline-none focus:border-primary/50"
+                />
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  {t(
+                    "Reasoning effort forwarded as-is to providers that support it (currently Anthropic). Leave blank to omit. Not validated here — the provider decides which values it accepts.",
+                    "Reasoning-Aufwand, unverändert an Anbieter weitergereicht, die dies unterstützen (aktuell Anthropic). Leer lassen, um es wegzulassen. Wird hier nicht validiert — der Anbieter entscheidet, welche Werte er akzeptiert.",
+                  )}
+                </p>
+              </label>
             </>
           )}
         </div>

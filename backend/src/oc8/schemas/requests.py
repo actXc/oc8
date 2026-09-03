@@ -87,6 +87,11 @@ class ModelConfigWrite(CamelModel):
     #: reasoning tokens before writing anything visible, which reads as the
     #: run failing outright on a large task, not as a slow one.
     max_tokens: int | None = None
+    #: Forwarded to the provider verbatim (modelrouter/sampling.py's
+    #: resolve_params, modelrouter/adapters/anthropic.py). Not validated
+    #: against a fixed set of values -- the provider owns what it accepts,
+    #: and that changes on the provider's own schedule. Blank clears it.
+    effort: str | None = None
     used_by_copilot: bool | None = None
     #: A specific Credential to bind to this ModelConfig (id as string). None
     #: leaves the tenant-wide "first credential of this provider's type"

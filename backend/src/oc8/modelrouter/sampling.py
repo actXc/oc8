@@ -51,6 +51,7 @@ def bumped_for_length_retry(params: ModelParams) -> ModelParams:
     return ModelParams(
         temperature=params.temperature,
         max_tokens=params.max_tokens * LENGTH_RETRY_MAX_TOKENS_MULTIPLIER,
+        effort=params.effort,
     )
 
 
@@ -68,6 +69,20 @@ def _max_tokens(raw: Any) -> int | None:
     return raw if raw > 0 else None
 
 
+def _effort(raw: Any) -> str | None:
+    """A usable effort value, or None if this value says nothing.
+
+    Deliberately not constrained to a fixed set ("low"/"medium"/"high", ...):
+    the provider defines what it accepts, and that set changes on the
+    provider's own schedule -- validating against today's guess would only
+    reject tomorrow's valid value. Any non-empty string is forwarded as-is.
+    """
+    if not isinstance(raw, str):
+        return None
+    trimmed = raw.strip()
+    return trimmed or None
+
+
 def resolve_params(
     config: m.ModelConfig | None,
     *,
@@ -79,6 +94,7 @@ def resolve_params(
     """
     temperature = DEFAULT_TEMPERATURE
     max_tokens = DEFAULT_MAX_TOKENS
+    effort: str | None = None
 
     # Widest scope first, so a narrower one simply overwrites it. Each key is
     # considered independently: setting only temperature on an agent must not
@@ -93,5 +109,7 @@ def resolve_params(
             temperature = t
         if (mt := _max_tokens(source.get("max_tokens"))) is not None:
             max_tokens = mt
+        if (e := _effort(source.get("effort"))) is not None:
+            effort = e
 
-    return ModelParams(temperature=temperature, max_tokens=max_tokens)
+    return ModelParams(temperature=temperature, max_tokens=max_tokens, effort=effort)

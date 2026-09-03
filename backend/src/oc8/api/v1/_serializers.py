@@ -274,6 +274,10 @@ def integration_to_dto(i: m.Integration, slug_to_id: dict[str, str]) -> Integrat
     )
 
 
+def _str_or_none(value: Any) -> str | None:
+    return value if isinstance(value, str) and value.strip() else None
+
+
 def _int_or_none(value: Any) -> int | None:
     try:
         parsed = int(value)
@@ -302,6 +306,7 @@ def model_to_dto(mc: m.ModelConfig, assigned_to: list[str]) -> ModelDTO:
         display_name=mc.display_name,
         context_window=_int_or_none((mc.params or {}).get("context_window")),
         max_tokens=_int_or_none((mc.params or {}).get("max_tokens")),
+        effort=_str_or_none((mc.params or {}).get("effort")),
         # `mapped_column(default=False)` applies at INSERT, not at construction; a
         # row built and serialized before its first flush still reads None here.
         used_by_copilot=bool(mc.used_by_copilot),

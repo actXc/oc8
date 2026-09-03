@@ -69,6 +69,8 @@ def _build_payload(req: CompletionRequest, *, include_temperature: bool = True) 
     }
     if include_temperature:
         payload["temperature"] = req.params.temperature
+    if req.params.effort:
+        payload["effort"] = req.params.effort
     if system:
         payload["system"] = system
     if req.tools:
