@@ -266,6 +266,112 @@ async def test_an_imported_skill_is_a_real_row_marked_as_foreign(
 
 
 @pytest.mark.asyncio
+async def test_an_imported_skill_with_bundled_files_gets_a_reference_root(
+    app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The whole point: import a skill whose body tells the agent to read a
+    references/ file, and confirm the file actually lands somewhere
+    read_reference_file (agent/control_tools.py) can serve it from."""
+    import uuid as _uuid
+
+    from asgi_lifespan import LifespanManager
+    from httpx import ASGITransport, AsyncClient
+    from sqlalchemy import select
+
+    from oc8 import models as m
+    from oc8.auth import get_identity_provider
+    from oc8.main import create_app
+
+    blob = _tar_with_paths(
+        {
+            "repo-abc/skills/one/SKILL.md": SMALL,
+            "repo-abc/skills/one/references/checklist.md": "1. Check VAT ID.\n",
+        }
+    )
+
+    async def _fake_fetch(url: str, **kw: object) -> bytes:
+        return blob
+
+    monkeypatch.setattr("oc8.skills.importer.safe_fetch_bytes", _fake_fetch)
+
+    tenant = _uuid.uuid4()
+    token = get_identity_provider().mint(tenant_id=tenant, subject="op", role="org_admin")
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.post(
+                "/api/v1/skills/import",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"source": "https://github.com/o/r", "names": ["Sauber übergeben"]},
+            )
+    assert r.status_code == 201, r.text
+
+    async with app_session(tenant) as db:
+        skill = (
+            await db.execute(select(m.Skill).where(m.Skill.name == "Sauber übergeben"))
+        ).scalar_one()
+        version = await db.get(m.SkillVersion, skill.current_version_id)
+        assert version is not None
+        reference_root = version.definition.get("reference_root")
+        assert reference_root == f"imported:{version.id}"
+
+        stored = (
+            await db.execute(
+                select(m.ImportedSkillFile).where(
+                    m.ImportedSkillFile.skill_version_id == version.id
+                )
+            )
+        ).scalars().all()
+        assert len(stored) == 1
+        assert stored[0].rel_path == "references/checklist.md"
+        assert stored[0].content == b"1. Check VAT ID.\n"
+
+
+@pytest.mark.asyncio
+async def test_an_imported_skill_with_no_bundled_files_gets_no_reference_root(
+    app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unremarkable case, worth asserting explicitly: nothing about a plain
+    import (no bundled files) should start writing reference_root or rows."""
+    import uuid as _uuid
+
+    from asgi_lifespan import LifespanManager
+    from httpx import ASGITransport, AsyncClient
+    from sqlalchemy import select
+
+    from oc8 import models as m
+    from oc8.auth import get_identity_provider
+    from oc8.main import create_app
+
+    blob = _tar_with_paths({"repo-abc/skills/one/SKILL.md": SMALL})
+
+    async def _fake_fetch(url: str, **kw: object) -> bytes:
+        return blob
+
+    monkeypatch.setattr("oc8.skills.importer.safe_fetch_bytes", _fake_fetch)
+
+    tenant = _uuid.uuid4()
+    token = get_identity_provider().mint(tenant_id=tenant, subject="op", role="org_admin")
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.post(
+                "/api/v1/skills/import",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"source": "https://github.com/o/r", "names": ["Sauber übergeben"]},
+            )
+    assert r.status_code == 201, r.text
+
+    async with app_session(tenant) as db:
+        skill = (
+            await db.execute(select(m.Skill).where(m.Skill.name == "Sauber übergeben"))
+        ).scalar_one()
+        version = await db.get(m.SkillVersion, skill.current_version_id)
+        assert version is not None
+        assert version.definition.get("reference_root") is None
+
+
+@pytest.mark.asyncio
 async def test_an_explicit_budget_overrides_the_derived_one(
     app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -26,6 +26,7 @@ from oc8 import models as m
 from oc8.api.deps import CurrentPrincipal, DbSession, require_permission
 from oc8.api.v1._serializers import skill_to_dto
 from oc8.authz.permissions import MANAGE, SKILL, VIEW, perm
+from oc8.db.base import uuid7
 from oc8.knowledge.connectors.base import ConnectorError
 from oc8.schemas.base import CamelModel
 from oc8.schemas.dto import SkillDTO
@@ -75,6 +76,7 @@ def _definition(
     tools: list[str],
     knowledge: list[str],
     guardrails: list[str],
+    reference_root: str | None = None,
 ) -> dict[str, Any]:
     """Build the pinned definition shape.
 
@@ -89,6 +91,7 @@ def _definition(
         "instruction": instructions.strip(),
         "requires": {"tools": list(tools), "kbs": list(knowledge)},
         "guardrails": list(guardrails),
+        "reference_root": reference_root,
         "presentation": {
             "tools": list(tools),
             "knowledge": list(knowledge),
@@ -551,6 +554,8 @@ async def import_skills(
             skipped.append({"name": name, "reason": "a skill of that name already exists"})
             continue
 
+        version_id = uuid7()
+        reference_root = f"imported:{version_id}" if candidate.bundled_files else None
         definition = _validated(
             _definition(
                 slug=_slugify(name),
@@ -562,6 +567,7 @@ async def import_skills(
                 # was written for an agent with a shell" is better placed than
                 # one that silently follows an instruction it cannot carry out.
                 guardrails=candidate.warnings,
+                reference_root=reference_root,
             )
         )
         skill = m.Skill(
@@ -581,6 +587,7 @@ async def import_skills(
         db.add(skill)
         await db.flush()
         version = m.SkillVersion(
+            id=version_id,
             tenant_id=principal.tenant_id,
             skill_id=skill.id,
             semver="1.0.0",
@@ -589,6 +596,15 @@ async def import_skills(
         )
         db.add(version)
         await db.flush()
+        for rel_path, content in candidate.bundled_files.items():
+            db.add(
+                m.ImportedSkillFile(
+                    tenant_id=principal.tenant_id,
+                    skill_version_id=version_id,
+                    rel_path=rel_path,
+                    content=content,
+                )
+            )
         skill.current_version_id = version.id
         await db.flush()
         imported.append({"id": str(skill.id), "name": name, "tokens": candidate.tokens})
