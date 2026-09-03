@@ -2,6 +2,7 @@
 
 from oc8.copilot.models import CopilotOperation, CopilotProposal
 from oc8.models.account import AccountVerificationToken
+from oc8.models.attachments import FileAttachment
 from oc8.models.capas import Capa, CapaInstallation, CapaVersion
 from oc8.models.channels import ApprovalChannelBinding, ChannelPollCursor
 from oc8.models.chat import ChatMessage, ChatSession
@@ -79,6 +80,7 @@ __all__ = [
     "Credential",
     "DataSource",
     "Department",
+    "FileAttachment",
     "Flow",
     "FlowRun",
     "FlowVersion",
