@@ -9,10 +9,8 @@
 
 kind = "library"
 key = "purchasing_po_auto_limit"
-label = "Bestellungen bis zu einem Betrag automatisch, kein Löschen"
-label_en = "Purchase orders up to an amount automatically, no deleting"
-summary = "Legt Bestellungen und Lieferantendaten selbstständig an; ab dem eingestellten Betrag entscheidet ein Mensch, Löschen ist ausgeschlossen. Deckt nicht ab, ob ein Lieferant neu oder bereits bekannt ist -- dafür gibt es ein eigenes Guardrail."
-summary_en = "Creates purchase orders and supplier data on its own; at or above the configured amount a human decides, and deleting is excluded. Does not cover whether a supplier is new or already known -- see the dedicated guardrail for that."
+label = "Purchase orders up to an amount automatically, no deleting"
+summary = "Creates purchase orders and supplier data on its own; at or above the configured amount a human decides, and deleting is excluded. Does not cover whether a supplier is new or already known -- see the dedicated guardrail for that."
 use_case = "purchasing"
 read = true
 write = false
@@ -23,8 +21,7 @@ only = ["search_records", "get_record", "list_models", "list_resource_templates"
 
 [[adjustable]]
 field = "approval_eur"
-label = "Freigabe ab"
-label_en = "Approval from"
+label = "Approval from"
 unit = "EUR"
 min = 0
 max = 50000

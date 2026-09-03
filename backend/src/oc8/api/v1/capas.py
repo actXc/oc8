@@ -18,6 +18,7 @@ from oc8.api.v1._serializers import department_to_dto
 from oc8.auth import Principal
 from oc8.authz.permissions import MANAGE, PLUGIN, VIEW, perm
 from oc8.capas.discovery import DiscoveredPlugin, discover_plugins, find_plugin
+from oc8.capas.i18n import translations_for
 from oc8.capas.lifecycle import (
     ConsentError,
     QuarantinedError,
@@ -137,6 +138,10 @@ class DiscoveredPluginDTO(CamelModel):
     summary: str
     valid: bool
     error: str | None = None
+    #: Every translation of `summary` this capa ships, keyed by locale
+    #: (design: capa-i18n). Missing a locale means the browser falls back to
+    #: `summary` itself.
+    summary_translations: dict[str, str] = {}
     installed: bool = False
     installed_version: str | None = None
     database_id: str | None = None
@@ -157,6 +162,63 @@ class DiscoveredPluginDTO(CamelModel):
     personal_settings: dict[str, Any] | None = None
     source_format: str = "oc8"
     warnings: list[str] = []
+
+
+def _resolve_personal_settings_translations(
+    personal_settings: dict[str, Any] | None, i18n: dict[str, dict[str, str]]
+) -> dict[str, Any] | None:
+    """Attach every locale's translation of `personal_settings.label` under a
+    `translations` key, alongside the raw manifest dict `personal_settings`
+    already is. `None` in, `None` out -- most capas declare no personal
+    setting at all."""
+    if personal_settings is None:
+        return None
+    label = personal_settings.get("label")
+    if not isinstance(label, str) or not label:
+        return personal_settings
+    translations = translations_for(i18n, label)
+    if not translations:
+        return personal_settings
+    return {**personal_settings, "translations": {"label": translations}}
+
+
+def _resolve_setup_translations(
+    setup: dict[str, Any] | None, i18n: dict[str, dict[str, str]]
+) -> dict[str, Any] | None:
+    """Attach every locale's translation of `setup`'s own translatable text
+    (`title`, `description`, `submit_label`, each field's `label`/`help`)
+    under a `translations` key, alongside the raw manifest dict `setup`
+    already is -- the setup form is rendered from this dict directly, never
+    parsed through `PluginSetupSpec` here, so translations ride the same
+    untyped shape rather than a second, structured representation."""
+    if setup is None or not i18n:
+        return setup
+    top_level: dict[str, dict[str, str]] = {}
+    for key in ("title", "description", "submit_label"):
+        value = setup.get(key)
+        if isinstance(value, str) and value:
+            resolved = translations_for(i18n, value)
+            if resolved:
+                top_level[key] = resolved
+    fields_by_key: dict[str, dict[str, dict[str, str]]] = {}
+    for f in setup.get("fields", []):
+        if not isinstance(f, dict):
+            continue
+        field_key = f.get("key")
+        if not isinstance(field_key, str) or not field_key:
+            continue
+        for prop in ("label", "help"):
+            value = f.get(prop)
+            if isinstance(value, str) and value:
+                resolved = translations_for(i18n, value)
+                if resolved:
+                    fields_by_key.setdefault(field_key, {})[prop] = resolved
+    if not top_level and not fields_by_key:
+        return setup
+    translations: dict[str, Any] = dict(top_level)
+    if fields_by_key:
+        translations["fields"] = fields_by_key
+    return {**setup, "translations": translations}
 
 
 class InstallFromDiskRequest(CamelModel):
@@ -323,6 +385,7 @@ async def list_available(
                 type=d.type,
                 trust=d.trust,
                 summary=d.summary,
+                summary_translations=translations_for(d.i18n, d.summary),
                 valid=d.valid,
                 error=d.error,
                 installed=row is not None,
@@ -333,8 +396,10 @@ async def list_available(
                 permissions=list((d.manifest or {}).get("permissions", [])),
                 capabilities=list((d.manifest or {}).get("capabilities", [])),
                 surfaces=_PLUGIN_SURFACES.get(d.type, []),
-                setup=(d.manifest or {}).get("setup"),
-                personal_settings=(d.manifest or {}).get("personal_settings"),
+                setup=_resolve_setup_translations((d.manifest or {}).get("setup"), d.i18n),
+                personal_settings=_resolve_personal_settings_translations(
+                    (d.manifest or {}).get("personal_settings"), d.i18n
+                ),
                 source_format=str((d.manifest or {}).get("source_format", "oc8")),
                 warnings=list(d.warnings),
             )

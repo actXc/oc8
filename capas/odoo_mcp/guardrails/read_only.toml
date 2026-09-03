@@ -3,10 +3,8 @@
 kind = "preset"
 connection = "primary"
 key = "read_only"
-label = "Nur lesen"
-label_en = "Read only"
-summary = "Darf suchen und nachschlagen, aber nichts verändern."
-summary_en = "Can search and look things up, but change nothing."
+label = "Read only"
+summary = "Can search and look things up, but change nothing."
 recommended = false
 read = true
 write = false

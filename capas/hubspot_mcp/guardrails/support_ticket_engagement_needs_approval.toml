@@ -1,9 +1,7 @@
 kind = "library"
 key = "support_ticket_engagement_needs_approval"
 label = "Support ticket work, replies need approval"
-label_en = "Support ticket work, replies need approval"
 summary = "Can search, create, update and associate tickets (and any other object) on its own; logging an engagement -- the reply a customer actually reads -- needs approval instead. Note the caveat every entry here shares: nothing distinguishes a ticket from a deal or a contact at the tool level, so this is a naming convention for the department, not a technical restriction to the tickets object type."
-summary_en = "Can search, create, update and associate tickets (and any other object) on its own; logging an engagement -- the reply a customer actually reads -- needs approval instead. Note the caveat every entry here shares: nothing distinguishes a ticket from a deal or a contact at the tool level, so this is a naming convention for the department, not a technical restriction to the tickets object type."
 use_case = "support"
 read = true
 write = false

@@ -1,9 +1,7 @@
 kind = "library"
 key = "sharepoint_knowledge_worker_read_only"
-label = "SharePoint-Wissensarbeit, nur lesen"
-label_en = "SharePoint knowledge worker, read only"
-summary = "Kann Dateien in SharePoint/OneDrive lesen und suchen, aber nichts verändern, versenden oder in anderen Kategorien agieren."
-summary_en = "Can read and search files in SharePoint/OneDrive, but change nothing, send nothing, and act in no other category."
+label = "SharePoint knowledge worker, read only"
+summary = "Can read and search files in SharePoint/OneDrive, but change nothing, send nothing, and act in no other category."
 use_case = "files"
 read = true
 write = false

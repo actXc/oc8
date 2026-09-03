@@ -3,10 +3,8 @@
 kind = "preset"
 connection = "primary"
 key = "autonomous_with_limit"
-label = "Selbstständig mit Limit"
-label_en = "Autonomous with a limit"
-summary = "Legt an und bearbeitet selbstständig; ab 1000 € braucht es eine Freigabe. Löschen ist nicht enthalten."
-summary_en = "Creates and edits on its own; anything worth €1,000 or more needs approval. Deleting is not included."
+label = "Autonomous with a limit"
+summary = "Creates and edits on its own; anything worth €1,000 or more needs approval. Deleting is not included."
 recommended = false
 read = true
 write = false

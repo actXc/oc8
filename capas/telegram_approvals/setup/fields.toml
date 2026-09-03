@@ -1,6 +1,6 @@
-title = "Telegram verbinden"
-description = "Der Bot-Token von @BotFather. Verlässt den Secret Store nie unverschlüsselt."
-submit_label = "Speichern & testen"
+title = "Connect Telegram"
+description = "The bot token from @BotFather. Never leaves the secret store unencrypted."
+submit_label = "Save & test"
 # No top-level validate_entry_point here anymore: configure_plugin's
 # credential-kind branch (Task 7) only resolves-and-copies an
 # already-selected credential's value into `secret_ref` -- it does not also
@@ -14,11 +14,11 @@ submit_label = "Speichern & testen"
 
 [[fields]]
 key = "bot_token"
-label = "Bot-Token"
+label = "Bot token"
 kind = "credential"
 credential_type = "telegram_bot"
 required = true
-help = "Von @BotFather per /newbot erhalten, Format 123456:ABC-DEF..."
+help = "Obtained from @BotFather via /newbot, format 123456:ABC-DEF..."
 secret_ref = "telegram/bot_token"
 
 # Read by channels/registry.py's _resolved_config -> ChannelCapabilities.
@@ -29,9 +29,9 @@ secret_ref = "telegram/bot_token"
 # want this chat to carry more than a bare "something is waiting" pointer.
 [[fields]]
 key = "max_classification"
-label = "Höchste erlaubte Vertraulichkeit"
+label = "Highest allowed confidentiality"
 kind = "select"
 options = ["public", "internal", "confidential", "restricted"]
 default = "public"
 required = false
-help = "Wie sensibel dürfen Nachrichten sein, die dieser Kanal tatsächlich anzeigt (Approval-Details, Assistant-Antworten)? Bei \"public\" kommt nur ein Hinweis an, dass etwas wartet -- der Inhalt selbst bleibt in oc8."
+help = "How sensitive may the messages this channel actually displays be (approval details, assistant replies)? With \"public\", only a heads-up that something is waiting arrives -- the content itself stays in oc8."

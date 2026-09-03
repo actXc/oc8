@@ -13,7 +13,7 @@ name = "gdrive_source"
 version = "1.0.0"
 type = "connector"
 trust = "first_party"
-summary = "Google Drive als Wissensquelle — Dokumente, Tabellen und Textdateien"
+summary = "Google Drive as a knowledge source — documents, spreadsheets and text files"
 permissions = ["knowledge:write"]
 
 [plugin.entry_points]

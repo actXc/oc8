@@ -1,0 +1,10 @@
+#
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8\n"
+
+msgid ""
+"Standard skills for every agent: hand off cleanly, be honest, record what "
+"was learned"
+msgstr ""
+"Standard-Skills für alle Agenten: sauber abgeben, ehrlich sein, Gelerntes "
+"festhalten"

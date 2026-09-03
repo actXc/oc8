@@ -1,0 +1,6 @@
+#
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8\n"
+
+msgid "Sales department with a Head of Sales, AE and SDR — example plugin"
+msgstr "Vertriebsabteilung mit Head of Sales, AE und SDR — Beispiel-Plugin"

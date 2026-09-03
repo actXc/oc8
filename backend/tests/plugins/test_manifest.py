@@ -188,10 +188,8 @@ def test_manifest_without_presets_still_parses() -> None:
 def test_a_well_formed_preset_parses() -> None:
     preset = {
         "key": "read_only",
-        "label": "Nur lesen",
-        "label_en": "Read only",
-        "summary": "Darf suchen.",
-        "summary_en": "Can search.",
+        "label": "Read only",
+        "summary": "Can search.",
         "recommended": True,
         "read": True,
     }
@@ -207,17 +205,13 @@ def test_two_recommended_presets_fail_naming_both_keys() -> None:
     p1 = {
         "key": "a",
         "label": "A",
-        "label_en": "A",
         "summary": "s",
-        "summary_en": "s",
         "recommended": True,
     }
     p2 = {
         "key": "b",
         "label": "B",
-        "label_en": "B",
         "summary": "s",
-        "summary_en": "s",
         "recommended": True,
     }
     with pytest.raises(ManifestError) as exc:
@@ -226,8 +220,8 @@ def test_two_recommended_presets_fail_naming_both_keys() -> None:
 
 
 def test_duplicate_preset_keys_fail() -> None:
-    p1 = {"key": "dup", "label": "A", "label_en": "A", "summary": "s", "summary_en": "s"}
-    p2 = {"key": "dup", "label": "B", "label_en": "B", "summary": "s", "summary_en": "s"}
+    p1 = {"key": "dup", "label": "A", "summary": "s"}
+    p2 = {"key": "dup", "label": "B", "summary": "s"}
     with pytest.raises(ManifestError) as exc:
         parse_manifest(_tool_pack_manifest(_connection(guardrail_presets=[p1, p2])))
     assert "dup" in str(exc.value)
@@ -237,9 +231,7 @@ def test_unknown_approval_action_fails_naming_it() -> None:
     preset = {
         "key": "bad",
         "label": "x",
-        "label_en": "x",
         "summary": "s",
-        "summary_en": "s",
         "approval_actions": ["delete"],
     }
     with pytest.raises(ManifestError) as exc:
@@ -251,9 +243,7 @@ def test_non_numeric_approval_eur_fails() -> None:
     preset = {
         "key": "bad",
         "label": "x",
-        "label_en": "x",
         "summary": "s",
-        "summary_en": "s",
         "approval_eur": "lots",
     }
     with pytest.raises(ManifestError):
@@ -264,9 +254,7 @@ def test_empty_string_approval_eur_means_no_threshold() -> None:
     preset = {
         "key": "ok",
         "label": "x",
-        "label_en": "x",
         "summary": "s",
-        "summary_en": "s",
         "approval_eur": "",
     }
     mf = parse_manifest(_tool_pack_manifest(_connection(guardrail_presets=[preset])))
@@ -278,9 +266,7 @@ def test_approval_eur_dropped_with_a_warning_when_connection_has_no_value_spec()
     preset = {
         "key": "ok",
         "label": "x",
-        "label_en": "x",
         "summary": "s",
-        "summary_en": "s",
         "approval_eur": 1000,
     }
     mf = parse_manifest(
@@ -294,9 +280,7 @@ def test_approval_eur_kept_when_connection_has_value_spec() -> None:
     preset = {
         "key": "ok",
         "label": "x",
-        "label_en": "x",
         "summary": "s",
-        "summary_en": "s",
         "approval_eur": 1000,
     }
     conn = _connection(
@@ -318,10 +302,8 @@ def test_a_zero_threshold_survives_the_empty_string_normalisation() -> None:
     """
     preset = {
         "key": "every_send",
-        "label": "Jede Sendung",
-        "label_en": "Every send",
-        "summary": "Ein Mensch entscheidet jede Sendung.",
-        "summary_en": "A human decides every send.",
+        "label": "Every send",
+        "summary": "A human decides every send.",
         "approval_eur": 0,
     }
     conn = _connection(

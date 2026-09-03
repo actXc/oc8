@@ -1,9 +1,7 @@
 kind = "library"
 key = "shared_drive_knowledge_worker_read_only"
-label = "Nur Shared-Drive-Wissen lesen"
-label_en = "Shared Drive knowledge, read only"
-summary = "Kann Dateien in Shared Drives lesen und durchsuchen; nichts anderes ist erreichbar."
-summary_en = "Can read and search files in Shared Drives; nothing else is reachable."
+label = "Shared Drive knowledge, read only"
+summary = "Can read and search files in Shared Drives; nothing else is reachable."
 use_case = "files"
 read = true
 write = false

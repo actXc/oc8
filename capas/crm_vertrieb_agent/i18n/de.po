@@ -1,0 +1,7 @@
+#
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8\n"
+
+msgid "Sales department with a CRM agent that works the Odoo pipeline"
+msgstr ""
+"Vertriebsabteilung mit einem CRM-Agenten, der die Odoo-Pipeline bearbeitet"

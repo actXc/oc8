@@ -46,10 +46,10 @@ describe("departments.$id tool guardrails", () => {
         guardrailPresets: [
           {
             key: "assist_with_approval",
-            label: "Unterstützen",
-            labelEn: "Assist with approval",
-            summary: "s",
-            summaryEn: "Every send needs approval.",
+            label: "Assist with approval",
+            labelTranslations: { de: "Unterstützen" },
+            summary: "Every send needs approval.",
+            summaryTranslations: { de: "s" },
             recommended: true,
             read: true,
             write: true,
@@ -93,10 +93,10 @@ describe("departments.$id tool guardrails", () => {
         guardrailPresets: [
           {
             key: "autonomous_with_limit",
-            label: "Autonom mit Limit",
-            labelEn: "Autonomous with a limit",
-            summary: "s",
-            summaryEn: "Acts on its own below the threshold.",
+            label: "Autonomous with a limit",
+            labelTranslations: { de: "Autonom mit Limit" },
+            summary: "Acts on its own below the threshold.",
+            summaryTranslations: { de: "s" },
             recommended: false,
             read: true,
             write: true,

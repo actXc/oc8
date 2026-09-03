@@ -166,9 +166,7 @@ class GuardrailPreset(BaseModel):
     model_config = ConfigDict(extra="forbid")
     key: str
     label: str
-    label_en: str
     summary: str
-    summary_en: str
     recommended: bool = False
     read: bool = False
     write: bool = False
@@ -477,7 +475,6 @@ class PersonalSettingsSpec(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     label: str
-    label_en: str = ""
     location: str = "approval_channels"
 
 

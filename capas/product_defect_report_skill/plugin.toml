@@ -13,5 +13,5 @@ name = "product_defect_report_skill"
 version = "1.0.1"
 type = "skill"
 trust = "first_party"
-summary = "Einen echten Produktfehler an die Entwicklung melden und die Nummer zurücktragen"
+summary = "Report a genuine product defect to engineering and carry the ticket number back"
 

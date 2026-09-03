@@ -18,6 +18,7 @@ from oc8.api.deps import CurrentPrincipal, DbSession, require_permission
 from oc8.authz.permissions import INTEGRATION, MANAGE, VIEW, perm
 from oc8.capas.discovery import find_plugin
 from oc8.capas.guardrails import GuardrailLibrary
+from oc8.capas.i18n import translations_for
 from oc8.capas.manifest import ManifestError, ToolPackConnection, parse_manifest
 from oc8.schemas.dto import (
     GuardrailAdjustableDTO,
@@ -34,9 +35,10 @@ _TEST_TIMEOUT_S = 15.0
 
 def _manifest_connection(
     c: m.McpConnection,
-) -> tuple[ToolPackConnection, GuardrailLibrary | None] | None:
+) -> tuple[ToolPackConnection, GuardrailLibrary | None, dict[str, dict[str, str]]] | None:
     """The manifest connection this row was materialised from, paired with its
-    plugin's optional `guardrails/*.toml` library, or None.
+    plugin's optional `guardrails/*.toml` library and its `i18n/*.po`
+    catalogs, or None.
 
     `config` holds INSTANCE data (server URL, env, secret refs); the presets,
     `value_spec` and guardrail library are PLUGIN data that lives on disk,
@@ -72,7 +74,7 @@ def _manifest_connection(
     )
     if conn is None:
         return None
-    return conn, discovered.guardrail_library
+    return conn, discovered.guardrail_library, discovered.i18n
 
 
 async def _connection_env(db: DbSession, conn: m.McpConnection) -> dict[str, str]:
@@ -99,15 +101,17 @@ def _to_dto(c: m.McpConnection) -> McpConnectionDTO:
     # connection unavailable to the UI.
     scopes = c.scopes if isinstance(c.scopes, list) else []
     resolved = _manifest_connection(c)
-    manifest_conn, guardrail_library = resolved if resolved is not None else (None, None)
+    manifest_conn, guardrail_library, i18n = (
+        resolved if resolved is not None else (None, None, {})
+    )
     presets = (
         [
             GuardrailPresetDTO(
                 key=p.key,
                 label=p.label,
-                label_en=p.label_en,
+                label_translations=translations_for(i18n, p.label),
                 summary=p.summary,
-                summary_en=p.summary_en,
+                summary_translations=translations_for(i18n, p.summary),
                 recommended=p.recommended,
                 read=p.read,
                 write=p.write,
@@ -126,9 +130,9 @@ def _to_dto(c: m.McpConnection) -> McpConnectionDTO:
             GuardrailDTO(
                 key=g.key,
                 label=g.label,
-                label_en=g.label_en,
+                label_translations=translations_for(i18n, g.label),
                 summary=g.summary,
-                summary_en=g.summary_en,
+                summary_translations=translations_for(i18n, g.summary),
                 use_case=g.use_case,
                 read=g.read,
                 write=g.write,
@@ -140,7 +144,7 @@ def _to_dto(c: m.McpConnection) -> McpConnectionDTO:
                     GuardrailAdjustableDTO(
                         field=a.field,
                         label=a.label,
-                        label_en=a.label_en,
+                        label_translations=translations_for(i18n, a.label),
                         unit=a.unit,
                         min=a.min,
                         max=a.max,

@@ -9,10 +9,8 @@
 
 kind = "library"
 key = "helpdesk_internal_work_no_contact"
-label = "Tickets intern bearbeiten, nie an Kundschaft schreiben"
-label_en = "Work tickets internally, never write to the customer"
-summary = "Bearbeitet und weist Tickets selbstständig zu, aber post_message und delete_record stehen nicht zur Verfügung. Deckt nicht ab, ob eine interne Notiz versehentlich kundenrelevante Inhalte enthält -- dieses Werkzeug prüft keine Inhalte. Deckt auch keine Bereichsgrenze ab: dieselbe Regel gilt für jedes Odoo-Modell, das die Verbindung erreicht, nicht nur für Tickets."
-summary_en = "Updates and assigns tickets on its own, but post_message and delete_record are withheld. Does not cover an internal note accidentally containing customer-sensitive content -- this tool inspects no content. Also does not cover a domain boundary: the same rule applies to any Odoo model the connection reaches, not only tickets."
+label = "Work tickets internally, never write to the customer"
+summary = "Updates and assigns tickets on its own, but post_message and delete_record are withheld. Does not cover an internal note accidentally containing customer-sensitive content -- this tool inspects no content. Also does not cover a domain boundary: the same rule applies to any Odoo model the connection reaches, not only tickets."
 use_case = "helpdesk"
 read = true
 write = false

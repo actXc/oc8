@@ -11,7 +11,7 @@ label = "CRM Vertrieb"
 version = "1.0.0"
 type = "department_template"
 trust = "first_party"
-summary = "Vertriebsabteilung mit einem CRM-Agenten, der die Odoo-Pipeline bearbeitet"
+summary = "Sales department with a CRM agent that works the Odoo pipeline"
 depends = ["integration:odoo"]
 
 [plugin.department_template]

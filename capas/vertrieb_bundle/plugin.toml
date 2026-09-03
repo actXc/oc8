@@ -9,7 +9,7 @@ name = "vertrieb_bundle"
 version = "1.0.0"
 type = "department_template"
 trust = "first_party"
-summary = "Vertriebsabteilung mit Head of Sales, AE und SDR — Beispiel-Plugin"
+summary = "Sales department with a Head of Sales, AE and SDR — example plugin"
 
 # The department frame is the ceiling of what every agent in this department may
 # do (§5.3). Unlike the built-in sales template, this one GRANTS department

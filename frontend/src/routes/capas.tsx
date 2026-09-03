@@ -34,7 +34,7 @@ import {
 } from "@/components/mcp-connections";
 import { CapaSetupDialog } from "@/components/capa-setup-dialog";
 import { useCan } from "@/lib/governance-hooks";
-import { useT } from "@/lib/i18n";
+import { resolveTranslation, useLang, useT } from "@/lib/i18n";
 import {
   type DiscoveredCapa,
   type McpConnection,
@@ -718,6 +718,7 @@ function CapaCard({
   onConfigure: () => void;
 }) {
   const t = useT();
+  const { lang } = useLang();
   const typeLabel = TYPE_LABELS[plugin.type];
   const canConfigure = canConfigurePlugin(plugin);
 
@@ -765,7 +766,11 @@ function CapaCard({
           {canConfigure && (
             <button
               type="button"
-              title={plugin.setup!.title}
+              title={resolveTranslation(
+                plugin.setup!.title,
+                plugin.setup!.translations?.title,
+                lang,
+              )}
               onClick={onConfigure}
               className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:bg-muted/40 hover:text-foreground"
             >
@@ -786,7 +791,9 @@ function CapaCard({
       {/* Clamped -- the full text is one tap away in the detail sheet, not
           hidden, just not eating card height for every Capa at once. */}
       <p className="line-clamp-2 text-sm text-muted-foreground">
-        {plugin.summary || t("No description.", "Keine Beschreibung.")}
+        {plugin.summary
+          ? resolveTranslation(plugin.summary, plugin.summaryTranslations, lang)
+          : t("No description.", "Keine Beschreibung.")}
       </p>
 
       <div className="mt-auto flex items-center justify-between gap-2 pt-1">
@@ -883,6 +890,7 @@ export function CapaDetailSheet({
   onClose: () => void;
 }) {
   const t = useT();
+  const { lang } = useLang();
   const typeLabel = TYPE_LABELS[plugin.type];
   const canConfigure = canConfigurePlugin(plugin);
 
@@ -891,7 +899,11 @@ export function CapaDetailSheet({
       open
       onOpenChange={(o) => !o && onClose()}
       title={plugin.label || plugin.name}
-      description={plugin.summary || t("No description.", "Keine Beschreibung.")}
+      description={
+        plugin.summary
+          ? resolveTranslation(plugin.summary, plugin.summaryTranslations, lang)
+          : t("No description.", "Keine Beschreibung.")
+      }
       footer={
         canConfigure ? (
           <button
@@ -899,7 +911,7 @@ export function CapaDetailSheet({
             onClick={onConfigure}
             className="rounded-md border border-primary/40 bg-primary/10 px-2.5 py-1.5 text-xs text-primary hover:bg-primary/20"
           >
-            {plugin.setup!.title}
+            {resolveTranslation(plugin.setup!.title, plugin.setup!.translations?.title, lang)}
           </button>
         ) : undefined
       }
@@ -945,8 +957,12 @@ export function CapaDetailSheet({
           >
             <UserRound className="h-3.5 w-3.5 shrink-0" />
             {t(
-              `${plugin.personalSettings.labelEn || plugin.personalSettings.label} is a personal setting — set it under your Profile.`,
-              `${plugin.personalSettings.label} ist eine persönliche Einstellung — unter deinem Profil einzurichten.`,
+              `${plugin.personalSettings.label} is a personal setting — set it under your Profile.`,
+              `${resolveTranslation(
+                plugin.personalSettings.label,
+                plugin.personalSettings.translations?.label,
+                lang,
+              )} ist eine persönliche Einstellung — unter deinem Profil einzurichten.`,
             )}
           </a>
         )}

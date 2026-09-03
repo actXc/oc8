@@ -1,10 +1,8 @@
 kind = "preset"
 connection = "primary"
 key = "autonomous_with_limit"
-label = "Selbstständig mit Limit"
-label_en = "Autonomous with a limit"
-summary = "Arbeitet selbstständig, kann aber nichts aus einem Shared Drive löschen und keine Termine absagen."
-summary_en = "Works on its own, but cannot delete anything from a Shared Drive and cannot cancel a calendar event."
+label = "Autonomous with a limit"
+summary = "Works on its own, but cannot delete anything from a Shared Drive and cannot cancel a calendar event."
 recommended = false
 read = true
 write = false

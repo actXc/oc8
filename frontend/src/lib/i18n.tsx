@@ -61,3 +61,18 @@ export function useT() {
     [lang],
   );
 }
+
+/**
+ * Resolves a capa-authored English string against the `<field>Translations`
+ * map the backend bulk-resolves from that capa's `i18n/*.po` catalogs
+ * (capa-i18n design). A locale missing from the map -- untranslated, or a
+ * locale the capa never shipped -- falls back to `source` itself.
+ */
+export function resolveTranslation(
+  source: string,
+  translations: Record<string, string> | undefined,
+  lang: Lang,
+): string {
+  if (lang === "en" || !translations) return source;
+  return translations[lang] ?? source;
+}

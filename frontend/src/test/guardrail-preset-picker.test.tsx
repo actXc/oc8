@@ -11,10 +11,10 @@ import { LanguageProvider } from "@/lib/i18n";
 const PRESETS: GuardrailPreset[] = [
   {
     key: "read_only",
-    label: "Nur lesen",
-    labelEn: "Read only",
-    summary: "s",
-    summaryEn: "Can search.",
+    label: "Read only",
+    labelTranslations: { de: "Nur lesen" },
+    summary: "Can search.",
+    summaryTranslations: { de: "s" },
     recommended: false,
     read: true,
     write: false,
@@ -25,10 +25,10 @@ const PRESETS: GuardrailPreset[] = [
   },
   {
     key: "assist_with_approval",
-    label: "Unterstützen",
-    labelEn: "Assist with approval",
-    summary: "s",
-    summaryEn: "Every send needs approval.",
+    label: "Assist with approval",
+    labelTranslations: { de: "Unterstützen" },
+    summary: "Every send needs approval.",
+    summaryTranslations: { de: "s" },
     recommended: true,
     read: true,
     write: true,
@@ -46,10 +46,10 @@ const PRESETS: GuardrailPreset[] = [
 // as "everything reachable above EUR 1000", including unattended deletion.
 const AUTONOMOUS_WITH_LIMIT: GuardrailPreset = {
   key: "autonomous_with_limit",
-  label: "Autonom mit Limit",
-  labelEn: "Autonomous with a limit",
-  summary: "s",
-  summaryEn: "Acts on its own below the threshold.",
+  label: "Autonomous with a limit",
+  labelTranslations: { de: "Autonom mit Limit" },
+  summary: "Acts on its own below the threshold.",
+  summaryTranslations: { de: "s" },
   recommended: false,
   read: true,
   write: true,
@@ -272,10 +272,10 @@ describe("GuardrailPresetPicker", () => {
 const LIBRARY: GuardrailLibraryEntry[] = [
   {
     key: "sales_quote_approval_threshold",
-    label: "Angebote ab einem Betrag freigeben",
-    labelEn: "Approve quotes above an amount",
-    summary: "s",
-    summaryEn: "Creates and maintains quotes on its own; above the amount a human decides.",
+    label: "Approve quotes above an amount",
+    labelTranslations: { de: "Angebote ab einem Betrag freigeben" },
+    summary: "Creates and maintains quotes on its own; above the amount a human decides.",
+    summaryTranslations: { de: "s" },
     useCase: "sales",
     read: true,
     write: false,
@@ -286,8 +286,8 @@ const LIBRARY: GuardrailLibraryEntry[] = [
     adjustable: [
       {
         field: "approval_eur",
-        label: "Freigabe ab",
-        labelEn: "Approval from",
+        label: "Approval from",
+        labelTranslations: { de: "Freigabe ab" },
         unit: "EUR",
         min: 0,
         max: 50000,
@@ -296,10 +296,10 @@ const LIBRARY: GuardrailLibraryEntry[] = [
   },
   {
     key: "helpdesk_reply_needs_approval",
-    label: "Tickets bearbeiten, Kundenantwort mit Freigabe",
-    labelEn: "Work tickets, customer replies need approval",
-    summary: "s",
-    summaryEn: "Can search and update tickets; sending a reply needs approval.",
+    label: "Work tickets, customer replies need approval",
+    labelTranslations: { de: "Tickets bearbeiten, Kundenantwort mit Freigabe" },
+    summary: "Can search and update tickets; sending a reply needs approval.",
+    summaryTranslations: { de: "s" },
     useCase: "helpdesk",
     read: true,
     write: false,
@@ -544,10 +544,10 @@ describe("GuardrailPresetPicker -- guardrail library (grouped by use_case)", () 
 const GENERIC_FIVE: GuardrailPreset[] = [
   {
     key: "read_only",
-    label: "Nur lesen",
-    labelEn: "Read only",
-    summary: "s",
-    summaryEn: "Can search.",
+    label: "Read only",
+    labelTranslations: { de: "Nur lesen" },
+    summary: "Can search.",
+    summaryTranslations: { de: "s" },
     recommended: false,
     read: true,
     write: false,
@@ -558,10 +558,10 @@ const GENERIC_FIVE: GuardrailPreset[] = [
   },
   {
     key: "assist_with_approval",
-    label: "Unterstützen",
-    labelEn: "Assist with approval",
-    summary: "s",
-    summaryEn: "Every send needs approval.",
+    label: "Assist with approval",
+    labelTranslations: { de: "Unterstützen" },
+    summary: "Every send needs approval.",
+    summaryTranslations: { de: "s" },
     recommended: true,
     read: true,
     write: true,
@@ -572,10 +572,10 @@ const GENERIC_FIVE: GuardrailPreset[] = [
   },
   {
     key: "autonomous_with_limit",
-    label: "Autonom mit Limit",
-    labelEn: "Autonomous with a limit",
-    summary: "s",
-    summaryEn: "Acts on its own below the threshold.",
+    label: "Autonomous with a limit",
+    labelTranslations: { de: "Autonom mit Limit" },
+    summary: "Acts on its own below the threshold.",
+    summaryTranslations: { de: "s" },
     recommended: false,
     read: true,
     write: true,
@@ -586,10 +586,10 @@ const GENERIC_FIVE: GuardrailPreset[] = [
   },
   {
     key: "internal_only",
-    label: "Nur intern",
-    labelEn: "Internal only",
-    summary: "s",
-    summaryEn: "Never messages a customer.",
+    label: "Internal only",
+    labelTranslations: { de: "Nur intern" },
+    summary: "Never messages a customer.",
+    summaryTranslations: { de: "s" },
     recommended: false,
     read: true,
     write: true,
@@ -600,10 +600,10 @@ const GENERIC_FIVE: GuardrailPreset[] = [
   },
   {
     key: "no_deletions",
-    label: "Nie löschen",
-    labelEn: "No deletions",
-    summary: "s",
-    summaryEn: "Never deletes a record.",
+    label: "No deletions",
+    labelTranslations: { de: "Nie löschen" },
+    summary: "Never deletes a record.",
+    summaryTranslations: { de: "s" },
     recommended: false,
     read: true,
     write: true,
@@ -624,7 +624,7 @@ describe("GuardrailPresetPicker -- no library (backward-compat regression)", () 
       <GuardrailPresetPicker presets={GENERIC_FIVE} hasValueSpec value={FREE} onChange={vi.fn()} />,
     );
     for (const preset of GENERIC_FIVE) {
-      expect(screen.getByText(new RegExp(preset.labelEn, "i"))).toBeInTheDocument();
+      expect(screen.getByText(new RegExp(preset.label, "i"))).toBeInTheDocument();
     }
     // No library grouping ever appears when there is no library.
     expect(screen.queryByText("Sales")).not.toBeInTheDocument();

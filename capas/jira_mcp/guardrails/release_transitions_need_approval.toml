@@ -6,9 +6,7 @@
 kind = "library"
 key = "release_transitions_need_approval"
 label = "Status transitions (e.g. to \"Released\") need approval"
-label_en = "Status transitions (e.g. to \"Released\") need approval"
 summary = "Creates, updates, comments and plans on its own; only the one call that moves a ticket into another status (jira_transition_issue) needs approval -- because a status change often triggers a customer notice or a release. Does not cover deletion."
-summary_en = "Creates, updates, comments and plans on its own; only the one call that moves a ticket into another status (jira_transition_issue) needs approval -- because a status change often triggers a customer notice or a release. Does not cover deletion."
 use_case = "release management"
 read = true
 write = false

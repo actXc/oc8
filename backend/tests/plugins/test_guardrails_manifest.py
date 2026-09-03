@@ -10,10 +10,8 @@ from oc8.capas.manifest import ManifestError
 _VALID = """
 [[guardrail]]
 key = "quote_approval_threshold"
-label = "Angebote ab einem Betrag freigeben"
-label_en = "Approve quotes above an amount"
-summary = "Erstellt Angebote selbststaendig; ab dem Betrag entscheidet ein Mensch."
-summary_en = "Creates quotes on its own; above the amount a human decides."
+label = "Approve quotes above an amount"
+summary = "Creates quotes on its own; above the amount a human decides."
 use_case = "sales"
 read = true
 write = false
@@ -24,8 +22,7 @@ only = []
 
   [[guardrail.adjustable]]
   field = "approval_eur"
-  label = "Freigabe ab"
-  label_en = "Approval from"
+  label = "Approval from"
   unit = "EUR"
   min = 0
   max = 10000
@@ -45,8 +42,7 @@ def test_parses_a_minimal_valid_file(tmp_path: Path) -> None:
     assert len(lib.guardrail) == 1
     g = lib.guardrail[0]
     assert g.key == "quote_approval_threshold"
-    assert g.label == "Angebote ab einem Betrag freigeben"
-    assert g.label_en == "Approve quotes above an amount"
+    assert g.label == "Approve quotes above an amount"
     assert g.use_case == "sales"
     assert g.read is True
     assert g.write is False
@@ -106,8 +102,8 @@ def test_approval_eur_zero_is_preserved_not_normalised_to_none(tmp_path: Path) -
 
 def test_approval_eur_empty_string_normalises_to_none(tmp_path: Path) -> None:
     body = _VALID.replace("approval_eur = 3000", 'approval_eur = ""').replace(
-        '  [[guardrail.adjustable]]\n  field = "approval_eur"\n  label = "Freigabe ab"\n'
-        '  label_en = "Approval from"\n  unit = "EUR"\n  min = 0\n  max = 10000\n',
+        '  [[guardrail.adjustable]]\n  field = "approval_eur"\n  label = "Approval from"\n'
+        '  unit = "EUR"\n  min = 0\n  max = 10000\n',
         "",
     )
     path = _write(tmp_path, body)

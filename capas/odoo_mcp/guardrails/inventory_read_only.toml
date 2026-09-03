@@ -9,10 +9,8 @@
 
 kind = "library"
 key = "inventory_read_only"
-label = "Lagerbestand, nur lesen"
-label_en = "Inventory, read only"
-summary = "Darf Bestände und Lagerbewegungen durchsuchen und auswerten, aber nichts verändern. Deckt keine physische Zählung ab -- das bleibt außerhalb dieses Werkzeug-Sets. Deckt auch keine Bereichsgrenze ab: read=true gilt für jedes Odoo-Modell, das die Verbindung erreicht, nicht nur für Lagerdaten."
-summary_en = "Can search and aggregate stock and stock moves, but change nothing. Does not cover a physical count -- that stays outside this tool set. Also does not cover a domain boundary: read=true applies to any Odoo model the connection reaches, not only inventory data."
+label = "Inventory, read only"
+summary = "Can search and aggregate stock and stock moves, but change nothing. Does not cover a physical count -- that stays outside this tool set. Also does not cover a domain boundary: read=true applies to any Odoo model the connection reaches, not only inventory data."
 use_case = "inventory"
 read = true
 write = false

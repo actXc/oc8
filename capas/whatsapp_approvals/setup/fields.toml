@@ -1,6 +1,6 @@
-title = "WhatsApp verbinden"
-description = "Cloud-API-Zugriffstoken und die Sende-Rufnummer aus dem Meta Business-Konto."
-submit_label = "Speichern & testen"
+title = "Connect WhatsApp"
+description = "Cloud API access token and the sending phone number from the Meta Business account."
+submit_label = "Save & test"
 # No top-level validate_entry_point here anymore -- moved to
 # credential_types/whatsapp_api.toml (mirrors telegram_approvals' e5a379a8
 # migration). configure_plugin's credential-kind branch only resolves and
@@ -9,9 +9,9 @@ submit_label = "Speichern & testen"
 
 [[fields]]
 key = "access_token"
-label = "Cloud-API-Zugriffstoken"
+label = "Cloud API access token"
 kind = "credential"
 credential_type = "whatsapp_api"
 required = true
-help = "Aus dem Meta Business-Konto, App > WhatsApp > API-Setup."
+help = "From the Meta Business account, App > WhatsApp > API Setup."
 secret_ref = "whatsapp/access_token"

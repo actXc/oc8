@@ -9,10 +9,8 @@
 
 kind = "library"
 key = "inventory_autonomous_with_limit"
-label = "Lager selbstständig mit Wertlimit, kein Löschen"
-label_en = "Autonomous inventory with a value limit, no deleting"
-summary = "Legt Lagerdatensätze selbstständig an und bearbeitet sie; ab dem eingestellten Betrag entscheidet ein Mensch, und Löschen ist ausgeschlossen. Deckt die meisten Lagerbuchungen praktisch nicht ab, weil sie in Odoo selten eines der erkannten Wertfelder tragen -- dann verhält sich dieses Guardrail wie ein reines 'nie löschen', ohne echte Betragsprüfung."
-summary_en = "Creates and updates inventory records on its own; at or above the configured amount a human decides, and deleting is excluded. Does not, in practice, cover most stock movements, because they rarely carry one of the recognised value fields in Odoo -- for those, this guardrail behaves like a plain 'never delete', without a real amount check."
+label = "Autonomous inventory with a value limit, no deleting"
+summary = "Creates and updates inventory records on its own; at or above the configured amount a human decides, and deleting is excluded. Does not, in practice, cover most stock movements, because they rarely carry one of the recognised value fields in Odoo -- for those, this guardrail behaves like a plain 'never delete', without a real amount check."
 use_case = "inventory"
 read = true
 write = false
@@ -23,8 +21,7 @@ only = ["search_records", "get_record", "list_models", "list_resource_templates"
 
 [[adjustable]]
 field = "approval_eur"
-label = "Freigabe ab"
-label_en = "Approval from"
+label = "Approval from"
 unit = "EUR"
 min = 0
 max = 20000

@@ -1,0 +1,27 @@
+#
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8\n"
+
+msgid "Link WhatsApp"
+msgstr "WhatsApp verbinden"
+
+msgid "Receive approvals on WhatsApp and decide right there"
+msgstr "Freigaben auf WhatsApp erhalten und dort entscheiden"
+
+msgid "Connect WhatsApp"
+msgstr "WhatsApp verbinden"
+
+msgid ""
+"Cloud API access token and the sending phone number from the Meta Business "
+"account."
+msgstr ""
+"Cloud-API-Zugriffstoken und die Sende-Rufnummer aus dem Meta Business-Konto."
+
+msgid "Save & test"
+msgstr "Speichern & testen"
+
+msgid "Cloud API access token"
+msgstr "Cloud-API-Zugriffstoken"
+
+msgid "From the Meta Business account, App > WhatsApp > API Setup."
+msgstr "Aus dem Meta Business-Konto, App > WhatsApp > API-Setup."

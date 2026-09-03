@@ -4,10 +4,8 @@
 # library: every entry says what it grants AND what it deliberately does not.
 kind = "library"
 key = "mail_assistant_drafts_only"
-label = "Mail-Assistent, nur Entwürfe"
-label_en = "Mail assistant, drafts only"
-summary = "Liest und erstellt Entwürfe, sendet aber niemals selbstständig — mail_send und mail_reply sind gar nicht erreichbar, nicht nur freigabepflichtig."
-summary_en = "Reads and drafts, but never sends on its own — mail_send and mail_reply are unreachable entirely, not merely approval-gated."
+label = "Mail assistant, drafts only"
+summary = "Reads and drafts, but never sends on its own — mail_send and mail_reply are unreachable entirely, not merely approval-gated."
 use_case = "mail"
 read = true
 write = false

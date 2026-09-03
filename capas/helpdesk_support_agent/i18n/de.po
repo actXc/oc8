@@ -1,0 +1,10 @@
+#
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8\n"
+
+msgid ""
+"Customer service department with an agent that handles support tickets "
+"autonomously"
+msgstr ""
+"Kundenservice-Abteilung mit einer Agentin, die Support-Tickets eigenständig "
+"bearbeitet"

@@ -9,10 +9,8 @@
 
 kind = "library"
 key = "helpdesk_no_deletions"
-label = "Tickets bearbeiten, nie löschen"
-label_en = "Work tickets, never delete"
-summary = "Darf Tickets anlegen, bearbeiten und beantworten; delete_record steht nicht zur Verfügung. Deckt nicht ab, dass ein Ticket per Update de facto stillgelegt wird (z. B. auf eine Papierkorb-Stufe gesetzt) -- das bleibt ohne Freigabe möglich. Deckt auch keine Bereichsgrenze ab: das Ausschließen von delete_record gilt für jedes Odoo-Modell, das die Verbindung erreicht, nicht nur für Tickets."
-summary_en = "Can create, update and reply to tickets; delete_record is withheld. Does not cover a ticket being effectively retired through an update (e.g. set to a trash-like stage) -- that remains possible without approval. Also does not cover a domain boundary: excluding delete_record applies to any Odoo model the connection reaches, not only tickets."
+label = "Work tickets, never delete"
+summary = "Can create, update and reply to tickets; delete_record is withheld. Does not cover a ticket being effectively retired through an update (e.g. set to a trash-like stage) -- that remains possible without approval. Also does not cover a domain boundary: excluding delete_record applies to any Odoo model the connection reaches, not only tickets."
 use_case = "helpdesk"
 read = true
 write = false

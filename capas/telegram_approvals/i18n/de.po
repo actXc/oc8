@@ -1,0 +1,38 @@
+#
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8\n"
+
+msgid "Link Telegram"
+msgstr "Telegram verbinden"
+
+msgid "Receive approvals on Telegram and decide right there"
+msgstr "Freigaben auf Telegram erhalten und dort entscheiden"
+
+msgid "Connect Telegram"
+msgstr "Telegram verbinden"
+
+msgid ""
+"The bot token from @BotFather. Never leaves the secret store unencrypted."
+msgstr ""
+"Der Bot-Token von @BotFather. Verlässt den Secret Store nie unverschlüsselt."
+
+msgid "Save & test"
+msgstr "Speichern & testen"
+
+msgid "Bot token"
+msgstr "Bot-Token"
+
+msgid "Obtained from @BotFather via /newbot, format 123456:ABC-DEF..."
+msgstr "Von @BotFather per /newbot erhalten, Format 123456:ABC-DEF..."
+
+msgid "Highest allowed confidentiality"
+msgstr "Höchste erlaubte Vertraulichkeit"
+
+msgid ""
+"How sensitive may the messages this channel actually displays be (approval "
+"details, assistant replies)? With \"public\", only a heads-up that something"
+" is waiting arrives -- the content itself stays in oc8."
+msgstr ""
+"Wie sensibel dürfen Nachrichten sein, die dieser Kanal tatsächlich anzeigt "
+"(Approval-Details, Assistant-Antworten)? Bei \"public\" kommt nur ein "
+"Hinweis an, dass etwas wartet -- der Inhalt selbst bleibt in oc8."

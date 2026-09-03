@@ -9,10 +9,8 @@
 
 kind = "library"
 key = "quote_approval_threshold"
-label = "Angebote ab einem Betrag freigeben"
-label_en = "Approve quotes above an amount"
-summary = "Der Agent erstellt und pflegt Angebote selbstständig; ab dem eingestellten Betrag entscheidet ein Mensch. Deckt nicht ab, ob ein Angebot als gewonnen markiert wird -- es gibt kein Werkzeug, das diese eine Feldänderung von jeder anderen Aktualisierung unterscheidet. Wichtiger: `only` ist hier bewusst leer, wie im Entwurf dieses Dokuments (design §4) -- delete_record und post_message bleiben also ungefiltert erreichbar, und eine Löschung trägt keinen Betrag, den die Freigabe je greifen könnte. Wer diese Lücke geschlossen haben will, nimmt `sales_autonomous_with_limit`, das denselben Schwellenwert-Gedanken mit ausgeschlossenem delete_record kombiniert."
-summary_en = "Creates and maintains quotes on its own; at or above the configured amount a human decides. Does not cover whether a quote actually gets marked won -- no tool distinguishes that one field change from any other update. More importantly: `only` is deliberately left empty here, matching this file's own worked example (design §4) -- so delete_record and post_message stay reachable ungated, and a deletion carries no amount the threshold could ever catch. `sales_autonomous_with_limit` is the version that closes this gap -- same threshold idea, with delete_record excluded."
+label = "Approve quotes above an amount"
+summary = "Creates and maintains quotes on its own; at or above the configured amount a human decides. Does not cover whether a quote actually gets marked won -- no tool distinguishes that one field change from any other update. More importantly: `only` is deliberately left empty here, matching this file's own worked example (design §4) -- so delete_record and post_message stay reachable ungated, and a deletion carries no amount the threshold could ever catch. `sales_autonomous_with_limit` is the version that closes this gap -- same threshold idea, with delete_record excluded."
 use_case = "sales"
 read = true
 write = false
@@ -23,8 +21,7 @@ only = []
 
 [[adjustable]]
 field = "approval_eur"
-label = "Freigabe ab"
-label_en = "Approval from"
+label = "Approval from"
 unit = "EUR"
 min = 0
 max = 50000

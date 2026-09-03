@@ -1,0 +1,7 @@
+#
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8\n"
+
+msgid ""
+"Google Drive as a knowledge source — documents, spreadsheets and text files"
+msgstr "Google Drive als Wissensquelle — Dokumente, Tabellen und Textdateien"

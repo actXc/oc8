@@ -21,6 +21,7 @@ from oc8.authz.pdp import (
 )
 from oc8.capas.discovery import DiscoveredPlugin, find_plugin
 from oc8.capas.guardrails import Guardrail, GuardrailLibrary
+from oc8.capas.i18n import translations_for
 from oc8.capas.manifest import GuardrailPreset, parse_manifest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -179,10 +180,16 @@ def test_every_entry_read_and_send_only_name_real_odoo_mcp_tools() -> None:
 
 
 def test_every_entry_has_bilingual_nonempty_prose() -> None:
+    # `label_de`/`summary_de` no longer live on the model (capa-i18n design):
+    # every library entry's German prose now has to actually resolve out of
+    # odoo_mcp's `i18n/de.po` catalog instead.
+    i18n = _discovered().i18n
     lib = _library()
     for g in lib.guardrail:
-        for field in (g.label, g.label_en, g.summary, g.summary_en):
+        for field in (g.label, g.summary):
             assert field and field.strip()
+        assert translations_for(i18n, g.label).get("de", "").strip()
+        assert translations_for(i18n, g.summary).get("de", "").strip()
 
 
 # --- Specific entries, asserted by exact key + field values (design §8: "so
@@ -238,7 +245,7 @@ def test_helpdesk_reply_needs_approval_exact_values() -> None:
 # for a representative slice -- one euro-threshold entry, one entry gating a
 # tool BY NAME, one entry withholding a tool outright -- by running the parsed
 # entry through the SAME two steps production does and asserting the decision
-# the entry's own `summary`/`summary_en` claims.
+# the entry's own `summary`/`summary_de` claims.
 #
 # The gate exercised is `authorize_tool_call`, deliberately: it is the one
 # `agent/engine.py` and `api/mcp_gateway.py` reach for every real tool call.
@@ -493,10 +500,12 @@ def test_no_threshold_entry_describes_an_exclusive_boundary() -> None:
     # The half of the mismatch above that no decision can catch: a summary
     # promising one boundary while the PDP applies another is wrong even when
     # every assertion about behaviour passes.
+    i18n = _discovered().i18n
     for g in _library().guardrail:
         if g.approval_eur is None:
             continue
-        for prose in (g.summary, g.summary_en):
+        de_summary = translations_for(i18n, g.summary).get("de", "")
+        for prose in (g.summary, de_summary):
             found = _exclusive_boundary_phrase(prose)
             assert found is None, (
                 f"guardrail {g.key} (€{g.approval_eur}) describes its threshold with "
@@ -512,12 +521,14 @@ def test_no_plugin_toml_preset_describes_an_exclusive_boundary() -> None:
     # other: "ab 1000 €" (inclusive, correct) beside "anything worth more than
     # EUR 1,000" (exclusive, wrong). Nothing that read only the
     # `kind = "library"` entries could have seen it.
+    i18n = _discovered().i18n
     checked = 0
     for p in _presets():
         if p.approval_eur is None:
             continue
         checked += 1
-        for prose in (p.summary, p.summary_en):
+        de_summary = translations_for(i18n, p.summary).get("de", "")
+        for prose in (p.summary, de_summary):
             found = _exclusive_boundary_phrase(prose)
             assert found is None, (
                 f"preset {p.key} (€{p.approval_eur}) describes its threshold with "

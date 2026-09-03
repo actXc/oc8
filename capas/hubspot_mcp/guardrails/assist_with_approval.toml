@@ -2,9 +2,7 @@ kind = "preset"
 connection = "primary"
 key = "assist_with_approval"
 label = "Assist with approval"
-label_en = "Assist with approval"
 summary = "Works CRM records alongside you, but nothing changes without a person approving it."
-summary_en = "Works CRM records alongside you, but nothing changes without a person approving it."
 recommended = true
 read = true
 # `write` stays false in every preset here on purpose: this connection's

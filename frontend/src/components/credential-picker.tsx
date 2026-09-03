@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { KeyRound } from "lucide-react";
 import { toast } from "sonner";
-import { useT } from "@/lib/i18n";
+import { resolveTranslation, useLang, useT } from "@/lib/i18n";
 import {
   useCreateCredential,
   useCredentials,
@@ -24,9 +24,13 @@ export function CredentialPicker({
   onChange: (credentialId: string) => void;
 }) {
   const t = useT();
+  const { lang } = useLang();
   const { data: credentials = [] } = useCredentials(credentialType);
   const { data: types = [] } = useCredentialTypes();
   const type = types.find((entry) => entry.name === credentialType);
+  const typeDisplayName = type
+    ? resolveTranslation(type.displayName, type.displayNameTranslations, lang)
+    : credentialType;
   const createCredential = useCreateCredential();
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
@@ -61,30 +65,41 @@ export function CredentialPicker({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder={t(
-              `e.g. "Production ${type?.displayName ?? credentialType}"`,
-              `z. B. "Produktion ${type?.displayName ?? credentialType}"`,
+              `e.g. "Production ${typeDisplayName}"`,
+              `z. B. "Produktion ${typeDisplayName}"`,
             )}
             className="w-full rounded-md border border-border bg-background/40 px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
           />
         </label>
-        {(type?.fields ?? []).map((field: CredentialTypeFieldDTO) => (
-          <label key={field.key} className="block text-xs text-muted-foreground">
-            <span className="mb-1 flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
-              {field.kind === "password" && <KeyRound className="h-3 w-3 text-primary" />}
-              {field.label}
-            </span>
-            <input
-              type={field.kind === "password" ? "password" : field.kind === "url" ? "url" : "text"}
-              value={fieldValues[field.key] ?? field.default ?? ""}
-              onChange={(e) => setFieldValues((cur) => ({ ...cur, [field.key]: e.target.value }))}
-              placeholder={field.placeholder}
-              className="w-full rounded-md border border-border bg-background/40 px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
-            />
-            {field.help && (
-              <span className="mt-1 block text-[11px] text-muted-foreground/80">{field.help}</span>
-            )}
-          </label>
-        ))}
+        {(type?.fields ?? []).map((field: CredentialTypeFieldDTO) => {
+          const label = resolveTranslation(field.label, field.label_translations, lang);
+          const placeholder = resolveTranslation(
+            field.placeholder,
+            field.placeholder_translations,
+            lang,
+          );
+          const help = resolveTranslation(field.help, field.help_translations, lang);
+          return (
+            <label key={field.key} className="block text-xs text-muted-foreground">
+              <span className="mb-1 flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
+                {field.kind === "password" && <KeyRound className="h-3 w-3 text-primary" />}
+                {label}
+              </span>
+              <input
+                type={
+                  field.kind === "password" ? "password" : field.kind === "url" ? "url" : "text"
+                }
+                value={fieldValues[field.key] ?? field.default ?? ""}
+                onChange={(e) => setFieldValues((cur) => ({ ...cur, [field.key]: e.target.value }))}
+                placeholder={placeholder}
+                className="w-full rounded-md border border-border bg-background/40 px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
+              />
+              {help && (
+                <span className="mt-1 block text-[11px] text-muted-foreground/80">{help}</span>
+              )}
+            </label>
+          );
+        })}
         <div className="flex justify-end gap-2">
           <button
             type="button"

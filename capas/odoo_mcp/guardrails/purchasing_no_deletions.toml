@@ -9,10 +9,8 @@
 
 kind = "library"
 key = "purchasing_no_deletions"
-label = "Einkauf bearbeiten, nie löschen"
-label_en = "Work purchasing, never delete"
-summary = "Legt Bestellungen und Anfragen an und bearbeitet sie; delete_record steht nicht zur Verfügung. Deckt keine Stornierung ab, die als Statusänderung statt als Löschung modelliert ist -- das bleibt weiterhin möglich. Deckt auch keine Bereichsgrenze ab: das Ausschließen von delete_record gilt für jedes Odoo-Modell, das die Verbindung erreicht, nicht nur für den Einkauf."
-summary_en = "Creates and updates purchase orders and requisitions; delete_record is withheld. Does not cover a cancellation modelled as a status change instead of a deletion -- that remains possible. Also does not cover a domain boundary: excluding delete_record applies to any Odoo model the connection reaches, not only purchasing."
+label = "Work purchasing, never delete"
+summary = "Creates and updates purchase orders and requisitions; delete_record is withheld. Does not cover a cancellation modelled as a status change instead of a deletion -- that remains possible. Also does not cover a domain boundary: excluding delete_record applies to any Odoo model the connection reaches, not only purchasing."
 use_case = "purchasing"
 read = true
 write = false

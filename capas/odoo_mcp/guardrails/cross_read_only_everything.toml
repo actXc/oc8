@@ -9,10 +9,8 @@
 
 kind = "library"
 key = "cross_read_only_everything"
-label = "Nur lesen, über alle Bereiche hinweg"
-label_en = "Read only, across every area"
-summary = "Darf suchen, nachschlagen und auswerten, unabhängig davon, welches Odoo-Modell die Anfrage betrifft -- nichts wird verändert oder gesendet. Deckt keine bereichsspezifische Einschränkung ab; ein Agent mit diesem Guardrail kann potenziell alles lesen, was die Odoo-Verbindung liefert, nicht nur einen Bereich."
-summary_en = "Can search, look up and aggregate, whichever Odoo model the call touches -- nothing gets changed or sent. Does not cover a domain-specific restriction; an agent with this guardrail can potentially read anything the Odoo connection can read, not just one area."
+label = "Read only, across every area"
+summary = "Can search, look up and aggregate, whichever Odoo model the call touches -- nothing gets changed or sent. Does not cover a domain-specific restriction; an agent with this guardrail can potentially read anything the Odoo connection can read, not just one area."
 use_case = "cross_cutting"
 read = true
 write = false

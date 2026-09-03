@@ -22,10 +22,8 @@ def test_reads_a_preset_file_into_the_named_connection(tmp_path: Path) -> None:
 kind = "preset"
 connection = "primary"
 key = "read_only"
-label = "Nur lesen"
-label_en = "Read only"
-summary = "Kann lesen."
-summary_en = "Can read."
+label = "Read only"
+summary = "Can read."
 read = true
 """,
     )
@@ -55,10 +53,8 @@ def test_an_omitted_connection_is_reported_as_none_not_the_string_primary(
         """
 kind = "preset"
 key = "read_only"
-label = "Nur lesen"
-label_en = "Read only"
-summary = "Kann lesen."
-summary_en = "Can read."
+label = "Read only"
+summary = "Can read."
 read = true
 """,
     )
@@ -76,10 +72,8 @@ def test_reads_a_library_file_into_the_guardrail_library(tmp_path: Path) -> None
         """
 kind = "library"
 key = "mail_assistant_drafts_only"
-label = "Nur Entwürfe"
-label_en = "Drafts only"
-summary = "Erstellt nur Entwürfe."
-summary_en = "Creates only drafts."
+label = "Drafts only"
+summary = "Creates only drafts."
 use_case = "mail"
 """,
     )
@@ -109,9 +103,7 @@ def test_filename_must_equal_key(tmp_path: Path) -> None:
 kind = "library"
 key = "not_read_only"
 label = "x"
-label_en = "x"
 summary = "x"
-summary_en = "x"
 use_case = "x"
 """,
     )
@@ -139,9 +131,7 @@ def test_a_non_toml_file_in_guardrails_is_a_hard_error(tmp_path: Path) -> None:
 kind = "preset"
 key = "read_only"
 label = "x"
-label_en = "x"
 summary = "x"
-summary_en = "x"
 read = true
 """,
     )

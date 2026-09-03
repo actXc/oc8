@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { LanguageProvider } from "@/lib/i18n";
 
 const credentialsMock = vi.fn();
 const credentialTypesMock = vi.fn();
@@ -22,7 +23,9 @@ function renderPicker(props: Partial<React.ComponentProps<typeof CredentialPicke
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <CredentialPicker credentialType="s3_api" value="" onChange={vi.fn()} {...props} />
+      <LanguageProvider>
+        <CredentialPicker credentialType="s3_api" value="" onChange={vi.fn()} {...props} />
+      </LanguageProvider>
     </QueryClientProvider>,
   );
 }
@@ -84,5 +87,34 @@ describe("CredentialPicker", () => {
       });
       expect(onChange).toHaveBeenCalledWith("new-id");
     });
+  });
+
+  it("resolves credential_type display_name/field prose from *_translations under the German locale", () => {
+    credentialTypesMock.mockReturnValue({
+      data: [
+        {
+          ...S3_TYPE,
+          displayNameTranslations: { de: "S3 / Objektspeicher" },
+          fields: [
+            {
+              ...S3_TYPE.fields[0],
+              label_translations: { de: "Zugriffsschlüssel" },
+              help: "Found in the provider console.",
+              help_translations: { de: "Zu finden in der Anbieterkonsole." },
+            },
+          ],
+        },
+      ],
+    });
+    window.localStorage.setItem("oc8-lang", "de");
+    try {
+      renderPicker();
+      fireEvent.click(screen.getByRole("button", { name: /neu erstellen/i }));
+      expect(screen.getByText("Zugriffsschlüssel")).toBeInTheDocument();
+      expect(screen.getByText("Zu finden in der Anbieterkonsole.")).toBeInTheDocument();
+      expect(screen.queryByText("Access key")).not.toBeInTheDocument();
+    } finally {
+      window.localStorage.removeItem("oc8-lang");
+    }
   });
 });

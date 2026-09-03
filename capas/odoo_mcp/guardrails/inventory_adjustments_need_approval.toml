@@ -9,10 +9,8 @@
 
 kind = "library"
 key = "inventory_adjustments_need_approval"
-label = "Bestandsanpassungen brauchen eine Freigabe"
-label_en = "Stock adjustments need approval"
-summary = "Jede Neuanlage, Änderung oder Löschung eines Lagerdatensatzes braucht eine Freigabe. Deckt keine Toleranzgrenze ab -- anders als bei einem Geldbetrag gibt es hier keinen erkannten Mengen-Schwellenwert; jede Anpassung braucht dieselbe Freigabe, unabhängig von der Größe. Deckt post_message nicht ab -- eine Versandbenachrichtigung oder sonstige Nachricht an eine Person bleibt ungefiltert, weil dieses Guardrail sich auf Bestandsänderungen konzentriert, nicht auf Kundenkontakt."
-summary_en = "Every new, changed or deleted inventory record needs approval. Does not cover a tolerance band -- unlike a euro amount, there is no recognised quantity threshold here, so every adjustment needs the same approval regardless of size. Does not cover post_message -- a shipping notification or other message to a person stays ungated, because this guardrail is scoped to stock changes, not customer contact."
+label = "Stock adjustments need approval"
+summary = "Every new, changed or deleted inventory record needs approval. Does not cover a tolerance band -- unlike a euro amount, there is no recognised quantity threshold here, so every adjustment needs the same approval regardless of size. Does not cover post_message -- a shipping notification or other message to a person stays ungated, because this guardrail is scoped to stock changes, not customer contact."
 use_case = "inventory"
 read = true
 write = false

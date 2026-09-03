@@ -9,10 +9,8 @@
 
 kind = "library"
 key = "finance_read_only_reporting"
-label = "Finanzberichte, nur lesen"
-label_en = "Financial reporting, read only"
-summary = "Darf Rechnungen suchen, nachschlagen und auswerten, aber nichts anlegen, ändern oder senden. Deckt keine Berichte ab, die Daten außerhalb von Odoo zusammenführen. Deckt auch keine Bereichsgrenze ab: read=true gilt für jedes Odoo-Modell, das die Verbindung erreicht, nicht nur für Finanzdaten."
-summary_en = "Can search, look up and aggregate invoices, but create, change or send nothing. Does not cover reports that combine data from outside Odoo. Also does not cover a domain boundary: read=true applies to any Odoo model the connection reaches, not only financial data."
+label = "Financial reporting, read only"
+summary = "Can search, look up and aggregate invoices, but create, change or send nothing. Does not cover reports that combine data from outside Odoo. Also does not cover a domain boundary: read=true applies to any Odoo model the connection reaches, not only financial data."
 use_case = "finance"
 read = true
 write = false

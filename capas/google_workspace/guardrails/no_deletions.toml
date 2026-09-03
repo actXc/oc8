@@ -1,10 +1,8 @@
 kind = "preset"
 connection = "primary"
 key = "no_deletions"
-label = "Mit Freigabe, ohne Löschen"
-label_en = "With approval, never deletes"
-summary = "Wie \"Unterstützen mit Freigabe\", aber Löschen aus einem Shared Drive und das Absagen von Terminen ist gar nicht erst möglich."
-summary_en = "Like \"Assist with approval\", except deleting from a Shared Drive and cancelling a calendar event are not possible at all."
+label = "With approval, never deletes"
+summary = "Like \"Assist with approval\", except deleting from a Shared Drive and cancelling a calendar event are not possible at all."
 recommended = false
 read = true
 write = false

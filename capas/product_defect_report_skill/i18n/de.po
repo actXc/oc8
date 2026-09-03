@@ -1,0 +1,10 @@
+#
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8\n"
+
+msgid ""
+"Report a genuine product defect to engineering and carry the ticket number "
+"back"
+msgstr ""
+"Einen echten Produktfehler an die Entwicklung melden und die Nummer "
+"zurücktragen"

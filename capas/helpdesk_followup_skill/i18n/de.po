@@ -1,0 +1,6 @@
+#
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8\n"
+
+msgid "Continue a conversation a customer has replied to"
+msgstr "Ein Gespräch fortsetzen, auf das ein Kunde geantwortet hat"

@@ -3,10 +3,8 @@
 kind = "preset"
 connection = "primary"
 key = "internal_only"
-label = "Nur intern"
-label_en = "Internal only"
-summary = "Pflegt Leads, Angebote und Kontakte selbstständig, schreibt aber nie an Kundinnen und Kunden."
-summary_en = "Maintains leads, quotes and contacts on its own, but never writes to customers."
+label = "Internal only"
+summary = "Maintains leads, quotes and contacts on its own, but never writes to customers."
 recommended = false
 read = true
 write = false

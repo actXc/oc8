@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useT } from "@/lib/i18n";
+import { resolveTranslation, useLang, useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 /** Mirrors `GuardrailPresetDTO` (`backend/src/oc8/schemas/dto.py`) exactly --
@@ -22,9 +22,9 @@ import { cn } from "@/lib/utils";
 export interface GuardrailPreset {
   key: string;
   label: string;
-  labelEn: string;
+  labelTranslations: Record<string, string>;
   summary: string;
-  summaryEn: string;
+  summaryTranslations: Record<string, string>;
   recommended: boolean;
   read: boolean;
   write: boolean;
@@ -62,7 +62,7 @@ export interface GuardrailValue {
 export interface GuardrailAdjustable {
   field: string;
   label: string;
-  labelEn: string;
+  labelTranslations: Record<string, string>;
   unit: string | null;
   min: number | null;
   max: number | null;
@@ -82,9 +82,9 @@ export interface GuardrailAdjustable {
 export interface GuardrailLibraryEntry {
   key: string;
   label: string;
-  labelEn: string;
+  labelTranslations: Record<string, string>;
   summary: string;
-  summaryEn: string;
+  summaryTranslations: Record<string, string>;
   useCase: string;
   read: boolean;
   write: boolean;
@@ -343,6 +343,7 @@ export function GuardrailPresetPicker({
   onChange: (next: GuardrailValue) => void;
 }) {
   const t = useT();
+  const { lang } = useLang();
   const [manualCustom, setManualCustom] = useState(false);
 
   // Library branch, kept entirely separate from -- and returning before --
@@ -383,10 +384,10 @@ export function GuardrailPresetPicker({
                       )}
                     >
                       <span className="text-sm font-medium text-foreground">
-                        {t(entry.labelEn, entry.label)}
+                        {resolveTranslation(entry.label, entry.labelTranslations, lang)}
                       </span>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {t(entry.summaryEn, entry.summary)}
+                        {resolveTranslation(entry.summary, entry.summaryTranslations, lang)}
                       </p>
                       <div className="mt-2 flex flex-wrap items-center gap-1.5">
                         <GrantChip on={entry.read} label={t("Read", "Lesen")} />
@@ -432,10 +433,14 @@ export function GuardrailPresetPicker({
                             key={adj.field}
                             className="block text-xs uppercase tracking-wider text-muted-foreground"
                           >
-                            {t(adj.labelEn, adj.label)}
+                            {resolveTranslation(adj.label, adj.labelTranslations, lang)}
                             {adj.unit ? ` (${adj.unit})` : ""}
                             <input
-                              aria-label={t(adj.labelEn, adj.label)}
+                              aria-label={resolveTranslation(
+                                adj.label,
+                                adj.labelTranslations,
+                                lang,
+                              )}
                               type="number"
                               min={adj.min ?? undefined}
                               max={adj.max ?? undefined}
@@ -568,7 +573,7 @@ export function GuardrailPresetPicker({
               >
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-foreground">
-                    {t(preset.labelEn, preset.label)}
+                    {resolveTranslation(preset.label, preset.labelTranslations, lang)}
                   </span>
                   {preset.recommended && (
                     <span className="rounded-full bg-primary/20 px-2 py-0.5 text-xs text-primary">
@@ -577,7 +582,7 @@ export function GuardrailPresetPicker({
                   )}
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {t(preset.summaryEn, preset.summary)}
+                  {resolveTranslation(preset.summary, preset.summaryTranslations, lang)}
                 </p>
                 <div className="mt-2 flex flex-wrap items-center gap-1.5">
                   <GrantChip on={preset.read} label={t("Read", "Lesen")} />

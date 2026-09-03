@@ -193,9 +193,9 @@ class TestGitHubMcpGuardrailLibrary:
         for g in _library().guardrail:
             assert g.write is False
 
-    def test_every_entry_has_bilingual_nonempty_prose(self) -> None:
+    def test_every_entry_has_nonempty_prose(self) -> None:
         for g in _library().guardrail:
-            for field in (g.label, g.label_en, g.summary, g.summary_en):
+            for field in (g.label, g.summary):
                 assert field and field.strip()
 
     def test_every_entry_only_and_approval_actions_name_real_tools(self) -> None:

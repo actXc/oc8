@@ -73,10 +73,8 @@ server_url = ""
 kind = "preset"
 connection = "primary"
 key = "read_only"
-label = "Nur lesen"
-label_en = "Read only"
+label = "Read only"
 summary = "x"
-summary_en = "x"
 read = true
 """,
         encoding="utf-8",
@@ -99,9 +97,7 @@ def test_guardrails_folder_library_entries_attach_to_discovered_plugin(tmp_path:
 kind = "library"
 key = "scenario_one"
 label = "x"
-label_en = "x"
 summary = "x"
-summary_en = "x"
 use_case = "mail"
 """,
         encoding="utf-8",
@@ -202,9 +198,7 @@ server_url = ""
 kind = "preset"
 key = "read_only"
 label = "x"
-label_en = "x"
 summary = "x"
-summary_en = "x"
 read = true
 """,
         encoding="utf-8",
@@ -281,9 +275,7 @@ def test_a_typod_guardrail_file_extension_is_a_hard_error(tmp_path: Path) -> Non
 kind = "preset"
 key = "read_only"
 label = "x"
-label_en = "x"
 summary = "x"
-summary_en = "x"
 read = true
 """,
         encoding="utf-8",
@@ -347,9 +339,7 @@ server_url = ""
 [[connections.guardrail_presets]]
 key = "legacy_inline"
 label = "x"
-label_en = "x"
 summary = "x"
-summary_en = "x"
 read = true
 """,
         encoding="utf-8",
@@ -380,9 +370,7 @@ server_url = ""
 [[connections.guardrail_presets]]
 key = "legacy_inline"
 label = "x"
-label_en = "x"
 summary = "x"
-summary_en = "x"
 read = true
 """,
         encoding="utf-8",
@@ -395,9 +383,7 @@ kind = "preset"
 connection = "primary"
 key = "read_only"
 label = "x"
-label_en = "x"
 summary = "x"
-summary_en = "x"
 read = true
 """,
         encoding="utf-8",
@@ -431,9 +417,7 @@ def test_a_malformed_connections_shape_invalidates_only_that_plugin(tmp_path: Pa
 kind = "preset"
 key = "read_only"
 label = "x"
-label_en = "x"
 summary = "x"
-summary_en = "x"
 read = true
 """,
         encoding="utf-8",

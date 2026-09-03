@@ -9,10 +9,8 @@
 
 kind = "library"
 key = "sales_pipeline_read_only"
-label = "Vertriebs-Pipeline nur einsehen"
-label_en = "Sales pipeline, read only"
-summary = "Darf suchen, nachschlagen und auswerten, aber nichts an Leads, Angeboten oder Kontakten verändern. Deckt keine Zusammenfassung ab, die Daten außerhalb von Odoo einbezieht. Deckt auch keine Bereichsgrenze ab: read=true gilt für jedes Odoo-Modell, das die Verbindung erreicht, nicht nur für Vertriebsdaten -- dieselbe Freigabe liest ebenso Finanz- oder Personaldaten, sofern die Verbindung sie sieht."
-summary_en = "Can search, look up and aggregate, but change nothing about leads, quotes or contacts. Does not cover a summary that draws on data outside Odoo. Also does not cover a domain boundary: read=true applies to any Odoo model the connection reaches, not only sales data -- the same grant reads finance or HR records just as well, wherever the connection can see them."
+label = "Sales pipeline, read only"
+summary = "Can search, look up and aggregate, but change nothing about leads, quotes or contacts. Does not cover a summary that draws on data outside Odoo. Also does not cover a domain boundary: read=true applies to any Odoo model the connection reaches, not only sales data -- the same grant reads finance or HR records just as well, wherever the connection can see them."
 use_case = "sales"
 read = true
 write = false

@@ -15,7 +15,7 @@ import {
   type CredentialTypeFieldDTO,
 } from "@/lib/hooks";
 import { useMay } from "@/lib/governance-hooks";
-import { useT } from "@/lib/i18n";
+import { resolveTranslation, useLang, useT } from "@/lib/i18n";
 import { useConfirm } from "@/hooks/use-confirm";
 
 export const Route = createFileRoute("/credentials")({
@@ -24,6 +24,7 @@ export const Route = createFileRoute("/credentials")({
 
 export function CredentialsPage() {
   const t = useT();
+  const { lang } = useLang();
   const may = useMay();
   // `secret:view`, not `secret:manage`, is the real hard gate: it is what the
   // nav entry itself checks, so reaching this page already implies it -- this
@@ -41,7 +42,11 @@ export function CredentialsPage() {
   const deleteCredential = useDeleteCredential();
   const testCredential = useTestCredential();
   const { confirm, ConfirmDialog } = useConfirm();
-  const typeLabel = (name: string) => types.find((ty) => ty.name === name)?.displayName ?? name;
+  const typeLabel = (name: string) => {
+    const ty = types.find((entry) => entry.name === name);
+    if (!ty) return name;
+    return resolveTranslation(ty.displayName, ty.displayNameTranslations, lang);
+  };
 
   if (!mayView) {
     return (
@@ -202,9 +207,15 @@ function CreateCredentialDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  types: { name: string; displayName: string; fields: CredentialTypeFieldDTO[] }[];
+  types: {
+    name: string;
+    displayName: string;
+    displayNameTranslations: Record<string, string>;
+    fields: CredentialTypeFieldDTO[];
+  }[];
 }) {
   const t = useT();
+  const { lang } = useLang();
   const createCredential = useCreateCredential();
   const [name, setName] = useState("");
   const [credentialType, setCredentialType] = useState(types[0]?.name ?? "");
@@ -258,7 +269,7 @@ function CreateCredentialDialog({
             >
               {types.map((ty) => (
                 <option key={ty.name} value={ty.name}>
-                  {ty.displayName}
+                  {resolveTranslation(ty.displayName, ty.displayNameTranslations, lang)}
                 </option>
               ))}
             </select>
@@ -274,7 +285,7 @@ function CreateCredentialDialog({
           </label>
           {(selectedType?.fields ?? []).map((field) => (
             <label key={field.key} className="grid gap-1.5">
-              <span>{field.label}</span>
+              <span>{resolveTranslation(field.label, field.label_translations, lang)}</span>
               <input
                 type={field.kind === "password" ? "password" : "text"}
                 value={fieldValues[field.key] ?? field.default ?? ""}
@@ -311,9 +322,15 @@ function EditCredentialDialog({
 }: {
   credential: CredentialDTO | null;
   onOpenChange: (open: boolean) => void;
-  types: { name: string; displayName: string; fields: CredentialTypeFieldDTO[] }[];
+  types: {
+    name: string;
+    displayName: string;
+    displayNameTranslations: Record<string, string>;
+    fields: CredentialTypeFieldDTO[];
+  }[];
 }) {
   const t = useT();
+  const { lang } = useLang();
   const updateCredential = useUpdateCredential();
   const [name, setName] = useState("");
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
@@ -370,7 +387,15 @@ function EditCredentialDialog({
             <span>{t("Type", "Typ")}</span>
             <input
               disabled
-              value={selectedType?.displayName ?? credential.credentialType}
+              value={
+                selectedType
+                  ? resolveTranslation(
+                      selectedType.displayName,
+                      selectedType.displayNameTranslations,
+                      lang,
+                    )
+                  : credential.credentialType
+              }
               className="rounded-md border border-input bg-muted px-3 py-2 text-muted-foreground"
             />
           </label>
@@ -385,7 +410,7 @@ function EditCredentialDialog({
           </label>
           {(selectedType?.fields ?? []).map((field) => (
             <label key={field.key} className="grid gap-1.5">
-              <span>{field.label}</span>
+              <span>{resolveTranslation(field.label, field.label_translations, lang)}</span>
               <input
                 type={field.kind === "password" ? "password" : "text"}
                 value={fieldValues[field.key] ?? ""}
@@ -393,7 +418,7 @@ function EditCredentialDialog({
                 placeholder={
                   field.kind === "password"
                     ? t("Leave blank to keep unchanged", "Leer lassen, um es unverändert zu lassen")
-                    : field.placeholder
+                    : resolveTranslation(field.placeholder, field.placeholder_translations, lang)
                 }
                 className="rounded-md border border-input bg-background px-3 py-2"
               />

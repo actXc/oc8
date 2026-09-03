@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Panel } from "@/components/app-shell";
-import { useT } from "@/lib/i18n";
+import { resolveTranslation, useLang, useT } from "@/lib/i18n";
 import {
   useAvailablePlugins,
   useEnablePlugin,
@@ -33,6 +33,7 @@ export function ToolConnectStep({
   onSkip: () => void;
 }) {
   const t = useT();
+  const { lang } = useLang();
   const qc = useQueryClient();
   // Wizard picker over every discovered plugin, not a paginated list view.
   const { data: pluginsPage, isLoading } = useAvailablePlugins({ pageSize: 200 });
@@ -149,7 +150,9 @@ export function ToolConnectStep({
   if (target?.setup) {
     return (
       <Panel className="space-y-4 p-6">
-        <h3 className="font-serif text-lg">{target.setup.title}</h3>
+        <h3 className="font-serif text-lg">
+          {resolveTranslation(target.setup.title, target.setup.translations?.title, lang)}
+        </h3>
         <PluginSetupFields setup={target.setup} values={values} onChange={setValues} />
         <button
           onClick={submitSetup}
@@ -158,7 +161,11 @@ export function ToolConnectStep({
         >
           {submitting || test.isPending
             ? t("Connecting…", "Wird verbunden …")
-            : target.setup.submit_label}
+            : resolveTranslation(
+                target.setup.submit_label,
+                target.setup.translations?.submit_label,
+                lang,
+              )}
         </button>
       </Panel>
     );

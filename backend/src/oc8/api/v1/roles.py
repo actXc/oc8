@@ -261,8 +261,8 @@ async def permission_catalogue(principal: CurrentPrincipal) -> list[PermissionIn
             permission=info.permission,
             label=info.label,
             description=info.description,
-            label_en=info.label_en,
-            description_en=info.description_en,
+            label_de=info.label_de,
+            description_de=info.description_de,
             delegatable=info.delegatable,
             reason=info.reason,
         )

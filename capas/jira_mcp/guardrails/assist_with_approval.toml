@@ -2,9 +2,7 @@ kind = "preset"
 connection = "primary"
 key = "assist_with_approval"
 label = "Assist with approval"
-label_en = "Assist with approval"
 summary = "Works tickets alongside you, but nothing goes out without a person approving it."
-summary_en = "Works tickets alongside you, but nothing goes out without a person approving it."
 recommended = true
 read = true
 # `write` stays false in every preset here on purpose: this connection's

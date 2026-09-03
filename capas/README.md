@@ -62,7 +62,6 @@ capas/<name>/
         mcp.toml                      # optional
     i18n/                           # optional — translation catalogs
         de.po
-        en.po
     connector/                        # optional — a RAG/knowledge connector
         __init__.py
         connector.py
@@ -204,10 +203,8 @@ declares which one it is with a required discriminator field:
   kind = "preset"
   connection = "primary"
   key = "read_only"
-  label = "Nur lesen"
-  label_en = "Read only"
-  summary = "Darf lesen und suchen, aber nichts verändern."
-  summary_en = "Can read and search, but change nothing."
+  label = "Read only"
+  summary = "Can read and search, but change nothing."
   recommended = false
   read = true
   write = false
@@ -234,10 +231,8 @@ declares which one it is with a required discriminator field:
   ```toml
   kind = "library"
   key = "cross_never_deletes"
-  label = "Nie löschen, über alle Bereiche hinweg"
-  label_en = "Never delete, across every area"
-  summary = "Legt Datensätze an, bearbeitet und versendet sie, aber delete_record steht nie zur Verfügung ..."
-  summary_en = "Creates, updates and sends records, but delete_record is never available ..."
+  label = "Never delete, across every area"
+  summary = "Creates, updates and sends records, but delete_record is never available ..."
   use_case = "cross_cutting"
   read = true
   write = false
@@ -617,40 +612,43 @@ anywhere above it, so running from the repo root instead of `backend/` loses
 that keeps `oc8` recognised as first-party) and produces spurious lint errors
 that look like real ones.
 
-## i18n (optional, additive)
+## i18n
 
 ```
 capas/<name>/i18n/
     de.po
-    en.po
 ```
 
 Standard gettext catalogs — the same mechanism Odoo itself uses for module
-translations. `msgid` is the literal default-language string exactly as it
-appears in `guardrails/*.toml` or `setup/fields.toml` — not an invented
-dotted key:
+translations. `msgid` is the literal English string exactly as it appears in
+`plugin.toml`, `guardrails/*.toml`, `setup/fields.toml` or
+`personal_settings.label` — not an invented dotted key:
 
 ```po
 msgid "Read only"
 msgstr "Nur lesen"
 ```
 
-An author writes normal literal text in their TOML files with no new syntax.
+An author writes normal English literal text in their TOML files with no new
+syntax; adding a translation is purely additive, a `de.po` entry alongside it.
+There is no English catalog — `label`/`summary`/etc. in the TOML *are* the
+English source text, so an `en.po` would just duplicate them.
 
-**Scaffolding only, today.** Every `i18n/<locale>.po` is parsed at discovery
-time and exposed as `DiscoveredPlugin.i18n` (`{locale: {msgid: msgstr}}`), and
-that is where it stops: **nothing in the current codebase renders a catalog.**
-There is no resolution step and no fallback step, because there is no consumer
-— an author who adds `i18n/de.po` today gets a loaded catalog and an unchanged
-UI. The tests that exist
-(`backend/tests/plugins/test_discovery_full_assembly.py`) assert exactly that:
-the catalog is read and exposed. Wiring a resolver belongs at the presentation
-layer (where `api/v1/mcp.py` builds `GuardrailDTO`/`PluginSetupSpec` for the
-browser) and has not been done.
-
-Until then, use the `label`/`label_en` field-pair convention already used
-throughout `guardrails/*.toml` and `setup/fields.toml` — `i18n/` is **fully
-additive** and does not replace or migrate it.
+**Wired at the presentation layer.** `oc8.capas.i18n.translations_for(i18n,
+source_text)` resolves one string against every locale a capa's `i18n/`
+folder ships, returning `{locale: translated_text}`. `api/v1/mcp.py`,
+`api/v1/capas.py` and `api/v1/credentials.py` call it for every
+capa-authored string they expose — guardrail/preset `label`/`summary`, a
+`GuardrailAdjustable`'s `label`, a capa's `plugin.toml` summary,
+`personal_settings.label`, every `setup/fields.toml` field, and a
+`credential_types/*.toml` entry's `display_name` plus its own fields'
+`label`/`help`/`placeholder` — bulk-resolving all locales into a
+`<field>Translations: dict[str, str]` map on the DTO rather than picking one
+server-side. That lets the frontend switch language client-side (see
+`frontend/src/lib/i18n.tsx`'s `resolveTranslation`) without a refetch. A
+string absent from `i18n/<locale>.po` (or a capa that ships no `i18n/` at
+all) just falls back to the English `label`/`summary` — there is no hard
+requirement to translate everything.
 
 ## `plugin_depends` — capa-to-capa dependencies
 

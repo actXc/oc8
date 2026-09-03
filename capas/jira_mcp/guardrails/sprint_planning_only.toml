@@ -1,9 +1,7 @@
 kind = "library"
 key = "sprint_planning_only"
 label = "Sprint planning only, never issue content"
-label_en = "Sprint planning only, never issue content"
 summary = "Can create and rename sprints and move issues into or between them -- the content of individual issues (title, description, comments, status) stays untouched. For a scrum assistant that shapes capacity but never touches the work inside a ticket."
-summary_en = "Can create and rename sprints and move issues into or between them -- the content of individual issues (title, description, comments, status) stays untouched. For a scrum assistant that shapes capacity but never touches the work inside a ticket."
 use_case = "agile / scrum"
 read = true
 write = false

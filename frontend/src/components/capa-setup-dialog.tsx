@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { type DiscoveredCapa, useConfigurePlugin, useTestMcpConnectionById } from "@/lib/hooks";
 import { PluginSetupFields } from "@/components/plugin-setup-fields";
+import { resolveTranslation, useLang } from "@/lib/i18n";
 
 /** Generic renderer for the declarative setup contract in a plugin manifest.
  * It contains no provider, product, command, environment-variable, or field
@@ -15,6 +16,7 @@ export function CapaSetupDialog({
   onClose: () => void;
 }) {
   const setup = plugin.setup;
+  const { lang } = useLang();
   const configure = useConfigurePlugin(plugin.databaseId ?? "");
   const test = useTestMcpConnectionById();
   const defaults = useMemo(
@@ -66,9 +68,13 @@ export function CapaSetupDialog({
               <Puzzle className="h-5 w-5" />
             </div>
             <div>
-              <h3 className="font-serif text-lg">{setup.title}</h3>
+              <h3 className="font-serif text-lg">
+                {resolveTranslation(setup.title, setup.translations?.title, lang)}
+              </h3>
               {setup.description && (
-                <p className="mt-1 text-xs text-muted-foreground">{setup.description}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {resolveTranslation(setup.description, setup.translations?.description, lang)}
+                </p>
               )}
             </div>
           </div>
@@ -88,7 +94,7 @@ export function CapaSetupDialog({
             disabled={configure.isPending || test.isPending}
             className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-40"
           >
-            {setup.submit_label}
+            {resolveTranslation(setup.submit_label, setup.translations?.submit_label, lang)}
           </button>
         </footer>
       </div>

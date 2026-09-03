@@ -6,9 +6,7 @@
 kind = "library"
 key = "issue_triage_no_pr"
 label = "Issue triage, no code access"
-label_en = "Issue triage, no code access"
 summary = "Files, updates, comments on and links issues on its own -- no approval. Cannot create branches, commit, push or open pull requests: a support agent needs a real ticket number to hand a customer, not the ability to touch code."
-summary_en = "Files, updates, comments on and links issues on its own -- no approval. Cannot create branches, commit, push or open pull requests: a support agent needs a real ticket number to hand a customer, not the ability to touch code."
 use_case = "support"
 read = true
 write = false

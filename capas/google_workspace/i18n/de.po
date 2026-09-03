@@ -1,0 +1,102 @@
+#
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8\n"
+
+msgid ""
+"Access to everything; every send (email, calendar invite response) requires "
+"an approval. Does not cover a monetary threshold — no tool in this pack "
+"carries an amount."
+msgstr ""
+"Zugriff auf alles; jedes Versenden (E-Mail, Kalendereinladungsantwort) "
+"braucht eine Freigabe. Deckt keine finanzielle Betragsgrenze ab — es gibt "
+"kein Werkzeug in diesem Paket, das einen Betrag trägt."
+
+msgid "Assist with approval"
+msgstr "Unterstützen mit Freigabe"
+
+msgid "Autonomous with a limit"
+msgstr "Selbstständig mit Limit"
+
+msgid "Can read and search files in Shared Drives; nothing else is reachable."
+msgstr ""
+"Kann Dateien in Shared Drives lesen und durchsuchen; nichts anderes ist "
+"erreichbar."
+
+msgid "Can read and search, but change nothing."
+msgstr "Darf lesen und suchen, aber nichts verändern."
+
+msgid ""
+"Can read email and create drafts, but never actually send anything — "
+"gmail_send and gmail_reply are unreachable entirely."
+msgstr ""
+"Kann E-Mails lesen und Entwürfe erstellen, aber nichts tatsächlich versenden"
+" — gmail_send und gmail_reply sind gar nicht erreichbar."
+
+msgid "Docs editor, no mail/calendar"
+msgstr "Nur Dokumente, ohne E-Mail/Kalender"
+
+msgid ""
+"Docs, Sheets, Slides and Drive; mail and calendar are excluded -- what a "
+"tenant that only completed the Shared Drive step (and skipped domain-wide "
+"delegation) can actually use."
+msgstr ""
+"Docs, Sheets, Slides und Drive; E-Mail und Kalender sind ausgeschlossen -- "
+"passend für einen Mandanten, der nur die Shared-Drive-Freigabe eingerichtet "
+"hat und den Domain-Wide-Delegation-Schritt übersprungen hat."
+
+msgid ""
+"Full access to mail and calendar; Drive, Docs, Sheets and Slides stay "
+"unreachable."
+msgstr ""
+"Voller Zugriff auf E-Mail und Kalender; Drive, Docs, Sheets und Slides "
+"bleiben unerreichbar."
+
+msgid "Full assistant with send approval"
+msgstr "Voller Assistent mit Freigabe"
+
+msgid "Internal only"
+msgstr "Nur intern"
+
+msgid ""
+"Like \"Assist with approval\", except deleting from a Shared Drive and "
+"cancelling a calendar event are not possible at all."
+msgstr ""
+"Wie \"Unterstützen mit Freigabe\", aber Löschen aus einem Shared Drive und "
+"das Absagen von Terminen ist gar nicht erst möglich."
+
+msgid "Mail and calendar only"
+msgstr "Nur E-Mail und Kalender"
+
+msgid "Mail drafts only"
+msgstr "Nur E-Mail-Entwürfe"
+
+msgid "Read only"
+msgstr "Nur lesen"
+
+msgid "Shared Drive knowledge, read only"
+msgstr "Nur Shared-Drive-Wissen lesen"
+
+msgid "With approval, never deletes"
+msgstr "Mit Freigabe, ohne Löschen"
+
+msgid ""
+"Works alongside you, but nothing goes out without a person approving it."
+msgstr "Arbeitet mit, aber nichts wird versendet ohne eine Freigabe."
+
+msgid ""
+"Works on its own, but cannot delete anything from a Shared Drive and cannot "
+"cancel a calendar event."
+msgstr ""
+"Arbeitet selbstständig, kann aber nichts aus einem Shared Drive löschen und "
+"keine Termine absagen."
+
+msgid ""
+"Works on its own, but nothing goes outward: no email, not even a draft, no "
+"invite responses, and no calendar events — an event with attendees lands on "
+"their calendars, including outside the company. Deleting and cancelling a "
+"calendar event are also not possible."
+msgstr ""
+"Arbeitet selbstständig, aber nichts geht nach außen: keine E-Mail, nicht "
+"einmal ein Entwurf, keine Einladungsantwort und keine Termine, die auf "
+"fremden Kalendern landen. Löschen und Termine absagen ist ebenfalls nicht "
+"möglich."

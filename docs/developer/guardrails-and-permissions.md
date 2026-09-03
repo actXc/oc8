@@ -20,10 +20,8 @@ from a raw tool list. `microsoft365/guardrails/read_only.toml`:
 kind = "preset"
 connection = "primary"
 key = "read_only"
-label = "Nur lesen"
-label_en = "Read only"
-summary = "Darf lesen und suchen, aber nichts verändern."
-summary_en = "Can read and search, but change nothing."
+label = "Read only"
+summary = "Can read and search, but change nothing."
 recommended = false
 read = true
 write = false
@@ -48,10 +46,8 @@ attached to the capa as a whole rather than to one connection, with an
 ```toml
 kind = "library"
 key = "cross_never_deletes"
-label = "Nie löschen, über alle Bereiche hinweg"
-label_en = "Never delete, across every area"
-summary = "Legt Datensätze an, bearbeitet und versendet sie, aber delete_record steht nie zur Verfügung ..."
-summary_en = "Creates, updates and sends records, but delete_record is never available ..."
+label = "Never delete, across every area"
+summary = "Creates, updates and sends records, but delete_record is never available ..."
 use_case = "cross_cutting"
 read = true
 write = false
@@ -60,6 +56,30 @@ approval_eur = ""
 approval_actions = []
 only = ["search_records", "get_record", "list_models"]
 ```
+
+## German prose comes from `i18n/`, not a second field
+
+`label` and `summary` are the only prose fields either model carries — there
+is no `label_de`/`summary_de` pair to keep in sync. A capa that wants German
+copy adds a `de.po` catalog next to its manifest:
+
+```
+capas/<name>/i18n/
+    de.po
+```
+
+```po
+msgid "Read only"
+msgstr "Nur lesen"
+```
+
+`msgid` is the literal `label`/`summary` string, verbatim — not an invented
+key. The backend resolves every locale present in a capa's catalogs into a
+`<field>Translations` map on the DTO it sends the frontend, which switches
+locale client-side without a refetch; a string with no matching `msgid` (or a
+capa that ships no `i18n/` at all) just falls back to the English `label`.
+See `backend/src/oc8/capas/i18n.py` (`translations_for`) for the resolver
+itself.
 
 ## The one rule that isn't optional
 

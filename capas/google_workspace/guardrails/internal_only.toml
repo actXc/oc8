@@ -1,10 +1,8 @@
 kind = "preset"
 connection = "primary"
 key = "internal_only"
-label = "Nur intern"
-label_en = "Internal only"
-summary = "Arbeitet selbstständig, aber nichts geht nach außen: keine E-Mail, nicht einmal ein Entwurf, keine Einladungsantwort und keine Termine, die auf fremden Kalendern landen. Löschen und Termine absagen ist ebenfalls nicht möglich."
-summary_en = "Works on its own, but nothing goes outward: no email, not even a draft, no invite responses, and no calendar events — an event with attendees lands on their calendars, including outside the company. Deleting and cancelling a calendar event are also not possible."
+label = "Internal only"
+summary = "Works on its own, but nothing goes outward: no email, not even a draft, no invite responses, and no calendar events — an event with attendees lands on their calendars, including outside the company. Deleting and cancelling a calendar event are also not possible."
 recommended = false
 read = true
 write = false

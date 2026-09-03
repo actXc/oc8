@@ -19,7 +19,7 @@ name = "telegram_approvals"
 version = "1.1.1"
 type = "approval_channel"
 trust = "first_party"
-summary = "Freigaben auf Telegram erhalten und dort entscheiden"
+summary = "Receive approvals on Telegram and decide right there"
 permissions = ["approvals:notify"]
 
 [plugin.entry_points]
@@ -38,6 +38,5 @@ max_classification = "public"
 # PersonalSettingsSpec's docstring (capas/manifest.py). Rendered today by
 # frontend/src/routes/profile.tsx's ApprovalChannelsPanel.
 [plugin.personal_settings]
-label = "Telegram verbinden"
-label_en = "Link Telegram"
+label = "Link Telegram"
 location = "approval_channels"

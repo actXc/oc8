@@ -1,9 +1,7 @@
 kind = "library"
 key = "mail_and_calendar_only"
-label = "Nur Mail und Kalender"
-label_en = "Mail and Calendar only"
-summary = "Beschränkt auf Outlook-Mail und Kalender — Dateien, Teams, Word/Excel/PowerPoint sind unerreichbar. Deckt keine Priorisierung zwischen mehreren Terminkonflikten ab; das Werkzeug legt nur an, es entscheidet nicht."
-summary_en = "Restricted to Outlook Mail and Calendar — Files, Teams, Word/Excel/PowerPoint are unreachable. Does not cover prioritizing between conflicting appointments; the tool only creates, it doesn't decide."
+label = "Mail and Calendar only"
+summary = "Restricted to Outlook Mail and Calendar — Files, Teams, Word/Excel/PowerPoint are unreachable. Does not cover prioritizing between conflicting appointments; the tool only creates, it doesn't decide."
 use_case = "mail"
 read = true
 write = false

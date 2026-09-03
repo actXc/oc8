@@ -1,0 +1,7 @@
+#
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8\n"
+
+msgid "S3 bucket as a knowledge source — text files from a bucket or prefix"
+msgstr ""
+"S3-Bucket als Wissensquelle — Textdateien aus einem Bucket oder Prefix"

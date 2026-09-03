@@ -1,0 +1,9 @@
+#
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8\n"
+
+msgid ""
+"First response to a support ticket: clear, concrete, no promises made blind"
+msgstr ""
+"Erstantwort auf ein Support-Ticket: verständlich, konkret, ohne Zusagen ins "
+"Blaue"

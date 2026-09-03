@@ -46,7 +46,6 @@ class GuardrailAdjustable(BaseModel):
     model_config = ConfigDict(extra="forbid")
     field: str
     label: str
-    label_en: str
     unit: str | None = None
     min: float | int | None = None
     max: float | int | None = None
@@ -59,9 +58,7 @@ class Guardrail(BaseModel):
     model_config = ConfigDict(extra="forbid")
     key: str
     label: str
-    label_en: str
     summary: str
-    summary_en: str
     #: Groups the library (`sales`, `helpdesk`, `purchasing`, ...). A plain
     #: string, not an enum: a plugin for a system oc8 has never seen must be
     #: able to name its own domains.

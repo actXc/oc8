@@ -3,10 +3,8 @@
 kind = "preset"
 connection = "primary"
 key = "assist_with_approval"
-label = "Unterstützen mit Freigabe"
-label_en = "Assist with approval"
-summary = "Arbeitet mit, aber kein Vorgang verlässt das System ohne eine Freigabe."
-summary_en = "Works alongside you, but nothing goes out without a person approving it."
+label = "Assist with approval"
+summary = "Works alongside you, but nothing goes out without a person approving it."
 recommended = true
 read = true
 # `write` stays false in every preset here on purpose: this connection's

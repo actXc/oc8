@@ -6,9 +6,7 @@
 kind = "library"
 key = "dev_assistant_merge_needs_approval"
 label = "Dev assistant, merging needs approval"
-label_en = "Dev assistant, merging needs approval"
 summary = "Branches, commits, pushes, opens pull requests, reviews and comments on its own; only merge_pull_request needs a human -- the one action that lands code on the default branch. Does not cover delete_file."
-summary_en = "Branches, commits, pushes, opens pull requests, reviews and comments on its own; only merge_pull_request needs a human -- the one action that lands code on the default branch. Does not cover delete_file."
 use_case = "engineering"
 read = true
 write = false

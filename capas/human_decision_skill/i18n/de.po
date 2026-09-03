@@ -1,0 +1,10 @@
+#
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8\n"
+
+msgid ""
+"Hand a decision to a person so they can make it without needing to ask "
+"follow-up questions"
+msgstr ""
+"Eine Entscheidung so an einen Menschen geben, dass er sie ohne Rückfragen "
+"treffen kann"

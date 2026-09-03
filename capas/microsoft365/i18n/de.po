@@ -1,0 +1,111 @@
+#
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8\n"
+
+msgid "Assist with approval"
+msgstr "Unterstützen mit Freigabe"
+
+msgid "Autonomous with a limit"
+msgstr "Selbstständig mit Limit"
+
+msgid ""
+"Can read and search files in SharePoint/OneDrive, but change nothing, send "
+"nothing, and act in no other category."
+msgstr ""
+"Kann Dateien in SharePoint/OneDrive lesen und suchen, aber nichts verändern,"
+" versenden oder in anderen Kategorien agieren."
+
+msgid "Can read and search, but change nothing."
+msgstr "Darf lesen und suchen, aber nichts verändern."
+
+msgid "Document editor, no Mail/Teams"
+msgstr "Dokumenten-Editor ohne Mail/Teams"
+
+msgid ""
+"Every category is reachable; every action that reaches a person (sending and"
+" replying to mail) needs approval. Teams is read-only here — Microsoft Graph"
+" does not allow sending Teams messages without a signed-in person. Does not "
+"cover a monetary threshold — no tool in this pack carries an amount."
+msgstr ""
+"Jede Kategorie ist erreichbar; jede Aktion, die eine Person erreicht (Mail "
+"senden und antworten), braucht eine Freigabe. Teams ist hier nur lesend — "
+"Microsoft Graph lässt das Senden von Teams-Nachrichten ohne angemeldete "
+"Person nicht zu. Deckt keine finanzielle Betragsgrenze ab — es gibt kein "
+"Werkzeug in diesem Paket, das einen Betrag trägt."
+
+msgid "Full assistant with send approval"
+msgstr "Voller Assistent mit Freigabe beim Senden"
+
+msgid "Internal only"
+msgstr "Nur intern"
+
+msgid ""
+"Like \"Assist with approval\", except deleting is not possible at all — nor "
+"is cancelling a calendar event or moving emails between folders."
+msgstr ""
+"Wie \"Unterstützen mit Freigabe\", aber Löschen ist gar nicht erst möglich —"
+" ebenso wenig das Absagen von Terminen oder das Verschieben von E-Mails."
+
+msgid "Mail and Calendar only"
+msgstr "Nur Mail und Kalender"
+
+msgid "Mail assistant, drafts only"
+msgstr "Mail-Assistent, nur Entwürfe"
+
+msgid "Read only"
+msgstr "Nur lesen"
+
+msgid ""
+"Reads and drafts, but never sends on its own — mail_send and mail_reply are "
+"unreachable entirely, not merely approval-gated."
+msgstr ""
+"Liest und erstellt Entwürfe, sendet aber niemals selbstständig — mail_send "
+"und mail_reply sind gar nicht erreichbar, nicht nur freigabepflichtig."
+
+msgid ""
+"Restricted to Outlook Mail and Calendar — Files, Teams, "
+"Word/Excel/PowerPoint are unreachable. Does not cover prioritizing between "
+"conflicting appointments; the tool only creates, it doesn't decide."
+msgstr ""
+"Beschränkt auf Outlook-Mail und Kalender — Dateien, Teams, "
+"Word/Excel/PowerPoint sind unerreichbar. Deckt keine Priorisierung zwischen "
+"mehreren Terminkonflikten ab; das Werkzeug legt nur an, es entscheidet "
+"nicht."
+
+msgid "SharePoint knowledge worker, read only"
+msgstr "SharePoint-Wissensarbeit, nur lesen"
+
+msgid "With approval, never deletes"
+msgstr "Mit Freigabe, ohne Löschen"
+
+msgid ""
+"Word, Excel, PowerPoint and Files are reachable — deleting a file is not. "
+"Mail, Calendar, Teams and Contacts are not reachable at all. Fits an agent "
+"that only works on documents."
+msgstr ""
+"Word, Excel, PowerPoint und Dateien sind erreichbar — Dateien löschen aber "
+"nicht. Mail, Kalender, Teams und Kontakte sind es gar nicht. Passt für einen"
+" Agenten, der nur an Dokumenten arbeitet."
+
+msgid ""
+"Works alongside you, but nothing goes out without a person approving it."
+msgstr "Arbeitet mit, aber nichts wird versendet ohne eine Freigabe."
+
+msgid ""
+"Works on its own, but cannot delete anything, cannot cancel a calendar "
+"event, and cannot move emails between folders or mark them read."
+msgstr ""
+"Arbeitet selbstständig, kann aber nichts löschen, keine Termine absagen und "
+"E-Mails weder verschieben noch als gelesen markieren."
+
+msgid ""
+"Works on its own, but nothing goes out: no email, not even a draft. It also "
+"cannot delete anything, cancel a calendar event, or move emails between "
+"folders or mark them read. (This pack cannot send Teams messages at all — "
+"Microsoft Graph does not allow it without a signed-in person.)"
+msgstr ""
+"Arbeitet selbstständig, aber nichts geht hinaus: keine E-Mail, nicht einmal "
+"ein Entwurf. Löschen, Termine absagen, E-Mails verschieben oder als gelesen "
+"markieren ist ebenfalls nicht möglich. (Teams-Nachrichten kann dieses Paket "
+"ohnehin nicht senden — Microsoft Graph erlaubt das ohne angemeldete Person "
+"nicht.)"

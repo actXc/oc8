@@ -23,13 +23,13 @@ import { toQueryString, type ListQueryParams, type Page } from "@/lib/hooks";
  *  question on the screen where it was asked. */
 export interface PermissionInfo {
   permission: string;
-  /** German. `labelEn` / `descriptionEn` carry the English; the screen picks by
-   *  language rather than the backend picking for it, so one response serves
-   *  both and a language switch needs no refetch. */
+  /** English -- oc8's default. `labelDe` / `descriptionDe` carry the German;
+   *  the screen picks by language rather than the backend picking for it, so
+   *  one response serves both and a language switch needs no refetch. */
   label: string;
   description: string;
-  labelEn: string;
-  descriptionEn: string;
+  labelDe: string;
+  descriptionDe: string;
   delegatable: boolean;
   /** Why a tenant-defined role may not hold it. Empty when it may. */
   reason: string;

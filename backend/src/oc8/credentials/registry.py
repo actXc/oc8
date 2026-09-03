@@ -10,6 +10,7 @@ either.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +19,9 @@ from oc8.capas.loader import load_plugin
 from oc8.capas.manifest import CredentialTypeSpec, parse_manifest
 from oc8.knowledge.connectors.registry import enabled_plugin_names
 
+#: A credential_type's owning capa's `i18n/*.po` catalogs, `{locale: {msgid: msgstr}}`.
+CredentialTypeI18n = Mapping[str, Mapping[str, str]]
+
 
 class CredentialTypeNotFound(Exception):
     """No credential_type with this name is reachable for this tenant."""
@@ -25,14 +29,15 @@ class CredentialTypeNotFound(Exception):
 
 # Populated by core features that own a credential type directly (LLM
 # provider keys, Task 14) -- never a Capa's own contribution, which is
-# always read fresh from its manifest below instead.
+# always read fresh from its manifest below instead. Core types have no
+# capas/<capa>/i18n/ folder to translate from.
 CORE_CREDENTIAL_TYPES: dict[str, CredentialTypeSpec] = {}
 
 
 async def _capa_credential_types(
     db: AsyncSession, *, tenant_id: uuid.UUID
-) -> dict[str, CredentialTypeSpec]:
-    out: dict[str, CredentialTypeSpec] = {}
+) -> dict[str, tuple[CredentialTypeSpec, CredentialTypeI18n]]:
+    out: dict[str, tuple[CredentialTypeSpec, CredentialTypeI18n]] = {}
     for name in await enabled_plugin_names(db, tenant_id):
         discovered = find_plugin(name)
         if discovered is None or discovered.manifest is None:
@@ -41,7 +46,7 @@ async def _capa_credential_types(
             continue
         manifest = parse_manifest(discovered.manifest)
         for credential_type in manifest.credential_types:
-            out[credential_type.name] = credential_type
+            out[credential_type.name] = (credential_type, discovered.i18n)
     return out
 
 
@@ -80,9 +85,25 @@ async def list_credential_types(
     db: AsyncSession, *, tenant_id: uuid.UUID
 ) -> list[CredentialTypeSpec]:
     """Every credential_type this tenant may actually use, core first."""
-    capa_types = await _capa_credential_types(db, tenant_id=tenant_id)
+    all_types = await _capa_credential_types(db, tenant_id=tenant_id)
+    capa_types = {name: pair[0] for name, pair in all_types.items()}
     merged = {**capa_types, **CORE_CREDENTIAL_TYPES}
     return sorted(merged.values(), key=lambda t: t.name)
+
+
+async def list_credential_types_with_i18n(
+    db: AsyncSession, *, tenant_id: uuid.UUID
+) -> list[tuple[CredentialTypeSpec, CredentialTypeI18n]]:
+    """Same merge as `list_credential_types`, but keeps each type's owning
+    capa's `i18n/*.po` catalog alongside it, for a caller that needs to
+    resolve `display_name`/field prose into every translated locale (design:
+    capa-i18n) -- core-owned types pair with an empty catalog, since they
+    have no `capas/<capa>/i18n/` folder to read."""
+    capa_types = await _capa_credential_types(db, tenant_id=tenant_id)
+    merged: dict[str, tuple[CredentialTypeSpec, CredentialTypeI18n]] = dict(capa_types)
+    for name, spec in CORE_CREDENTIAL_TYPES.items():
+        merged[name] = (spec, {})
+    return sorted(merged.values(), key=lambda pair: pair[0].name)
 
 
 async def get_credential_type(
@@ -95,7 +116,7 @@ async def get_credential_type(
     found = capa_types.get(name)
     if found is None:
         raise CredentialTypeNotFound(name)
-    return found
+    return found[0]
 
 
 # Populates CORE_CREDENTIAL_TYPES as a side effect of import (Task 14) --

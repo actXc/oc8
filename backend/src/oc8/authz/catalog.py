@@ -42,23 +42,27 @@ class PermissionInfo:
     """One permission, as a person reads it.
 
     `label` is what goes on the checkbox; `description` is the sentence
-    underneath. Both in both languages, because the product's screens are German
-    and its API is not, and a single-language catalogue would force one of the
-    two to be translated at the wrong layer.
+    underneath. Both in both languages: `label`/`description` are English --
+    oc8's default -- and `label_de`/`description_de` carry the German
+    translation, because the product ships a German screen and an English
+    API, and a single-language catalogue would force one of the two to be
+    translated at the wrong layer.
     """
 
     permission: str
     label: str
     description: str
-    label_en: str
-    description_en: str
+    label_de: str
+    description_de: str
     delegatable: bool
     #: Why a tenant-defined role may not hold it, verbatim from
     #: `delegation_refusal`. Empty for anything delegatable.
     reason: str = ""
 
 
-#: (label_de, description_de, label_en, description_en) per permission.
+#: (label_de, description_de, label, description) per permission -- German
+#: label/sentence first, then the English (`PermissionInfo`'s default,
+#: unsuffixed pair), read out by position in `describe()` below.
 #:
 #: The order is the order of `sorted(ALL_PERMISSIONS)`, so a new permission's
 #: absence is visible in review as a gap in an alphabet rather than as a missing
@@ -427,15 +431,15 @@ def describe(permission: str) -> PermissionInfo:
     `test_the_catalogue_offers_the_delegatable_and_explains_the_rest` is what
     makes the gap visible in CI instead of in production.
     """
-    label, description, label_en, description_en = _PROSE.get(
+    label_de, description_de, label, description = _PROSE.get(
         permission, (permission, "", permission, "")
     )
     return PermissionInfo(
         permission=permission,
         label=label,
         description=description,
-        label_en=label_en,
-        description_en=description_en,
+        label_de=label_de,
+        description_de=description_de,
         delegatable=permission in DELEGATABLE_PERMISSIONS,
         reason=delegation_refusal(permission) or "",
     )

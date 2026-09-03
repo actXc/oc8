@@ -1,9 +1,7 @@
 kind = "library"
 key = "full_assistant_with_send_approval"
-label = "Voller Assistent mit Freigabe beim Senden"
-label_en = "Full assistant with send approval"
-summary = "Jede Kategorie ist erreichbar; jede Aktion, die eine Person erreicht (Mail senden und antworten), braucht eine Freigabe. Teams ist hier nur lesend — Microsoft Graph lässt das Senden von Teams-Nachrichten ohne angemeldete Person nicht zu. Deckt keine finanzielle Betragsgrenze ab — es gibt kein Werkzeug in diesem Paket, das einen Betrag trägt."
-summary_en = "Every category is reachable; every action that reaches a person (sending and replying to mail) needs approval. Teams is read-only here — Microsoft Graph does not allow sending Teams messages without a signed-in person. Does not cover a monetary threshold — no tool in this pack carries an amount."
+label = "Full assistant with send approval"
+summary = "Every category is reachable; every action that reaches a person (sending and replying to mail) needs approval. Teams is read-only here — Microsoft Graph does not allow sending Teams messages without a signed-in person. Does not cover a monetary threshold — no tool in this pack carries an amount."
 use_case = "general"
 read = true
 write = false

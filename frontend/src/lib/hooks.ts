@@ -1667,6 +1667,7 @@ export interface DiscoveredCapa {
   type: string;
   trust: string;
   summary: string;
+  summaryTranslations: Record<string, string>;
   valid: boolean;
   error?: string | null;
   installed: boolean;
@@ -1686,7 +1687,14 @@ export interface DiscoveredCapa {
   // docstring (backend/src/oc8/capas/manifest.py). `location` names WHERE it
   // renders; today only "approval_channels" (Profile page) is a real
   // listener.
-  personalSettings?: { label: string; labelEn?: string; location: string } | null;
+  personalSettings?: {
+    label: string;
+    location: string;
+    // Present only when the capa's `i18n/<locale>.po` catalogs have a
+    // translation for `label` -- see capa-i18n's resolver
+    // (backend/src/oc8/capas/i18n.py). Absent locales fall back to `label`.
+    translations?: { label?: Record<string, string> };
+  } | null;
 }
 
 export interface PluginSetupField {
@@ -1718,6 +1726,16 @@ export interface PluginSetupSpec {
   // channel just needs its values stored and, if it declared one, proven by
   // a server-side check) -- see capa-setup-dialog.tsx's submit().
   mcp?: Record<string, unknown>;
+  // Sibling translations map keyed the same snake_case way as the rest of
+  // this raw-dict-passthrough object (see credential_type/options above) --
+  // populated by capa-i18n's resolver when the capa's `i18n/<locale>.po`
+  // catalogs have a match. Absent keys/locales fall back to the source text.
+  translations?: {
+    title?: Record<string, string>;
+    description?: Record<string, string>;
+    submit_label?: Record<string, string>;
+    fields?: Record<string, { label?: Record<string, string>; help?: Record<string, string> }>;
+  };
 }
 
 // Only installed Capas have a Plugin row (a database id) to fetch an icon
@@ -1964,11 +1982,21 @@ export interface CredentialTypeFieldDTO {
   default: string;
   placeholder: string;
   help: string;
+  // Each field is passed through from the owning capa's manifest as a raw
+  // dict (see CredentialTypeDTO.fields on the backend), not through a
+  // CamelModel -- so, like PluginSetupField's snake_case passthrough above,
+  // these translation maps keep the backend's snake_case keys. Populated by
+  // capa-i18n's resolver when the capa's `i18n/<locale>.po` catalogs have a
+  // match; absent keys/locales fall back to the source text.
+  label_translations?: Record<string, string>;
+  help_translations?: Record<string, string>;
+  placeholder_translations?: Record<string, string>;
 }
 
 export interface CredentialTypeDTO {
   name: string;
   displayName: string;
+  displayNameTranslations: Record<string, string>;
   fields: CredentialTypeFieldDTO[];
 }
 

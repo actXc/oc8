@@ -21,6 +21,6 @@ def test_both_permissions_exist_and_are_never_delegatable() -> None:
 def test_both_permissions_are_described_in_both_languages() -> None:
     for permission in ("backup:export", "backup:restore"):
         info = describe(permission)
-        assert info.label and info.label_en
-        assert info.description and info.description_en
+        assert info.label and info.label_de
+        assert info.description and info.description_de
         assert info.delegatable is False and info.reason

@@ -9,10 +9,8 @@
 
 kind = "library"
 key = "purchasing_draft_only_no_outward"
-label = "Anfragen vorbereiten, nie direkt an Lieferanten senden"
-label_en = "Draft requisitions, never contact suppliers directly"
-summary = "Legt Anfragen und Bestellungen an und pflegt sie, aber post_message und delete_record stehen nicht zur Verfügung. Deckt nicht ab, ob eine Bestellung per E-Mail-Anhang außerhalb von Odoo verschickt wird. Deckt auch keine Bereichsgrenze ab: dieselbe Regel gilt für jedes Odoo-Modell, das die Verbindung erreicht, nicht nur für den Einkauf."
-summary_en = "Creates and maintains requisitions and orders, but post_message and delete_record are withheld. Does not cover an order being emailed as an attachment from outside Odoo. Also does not cover a domain boundary: the same rule applies to any Odoo model the connection reaches, not only purchasing."
+label = "Draft requisitions, never contact suppliers directly"
+summary = "Creates and maintains requisitions and orders, but post_message and delete_record are withheld. Does not cover an order being emailed as an attachment from outside Odoo. Also does not cover a domain boundary: the same rule applies to any Odoo model the connection reaches, not only purchasing."
 use_case = "purchasing"
 read = true
 write = false

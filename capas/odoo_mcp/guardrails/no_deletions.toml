@@ -3,10 +3,8 @@
 kind = "preset"
 connection = "primary"
 key = "no_deletions"
-label = "Mit Freigabe, ohne Löschen"
-label_en = "With approval, never deletes"
-summary = "Wie \"Unterstützen mit Freigabe\", aber Löschen ist gar nicht erst möglich."
-summary_en = "Like \"Assist with approval\", except deleting is not possible at all."
+label = "With approval, never deletes"
+summary = "Like \"Assist with approval\", except deleting is not possible at all."
 recommended = false
 read = true
 write = false

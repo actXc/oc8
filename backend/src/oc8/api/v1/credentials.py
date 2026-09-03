@@ -6,13 +6,20 @@ secret field values are write-only, exactly like /secrets already is.
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from oc8 import models as m
 from oc8.api.deps import CurrentPrincipal, DbSession, require_permission
 from oc8.authz.permissions import MANAGE, SECRET, VIEW, perm
-from oc8.credentials.registry import CredentialTypeNotFound, list_credential_types
+from oc8.capas.i18n import translations_for
+from oc8.capas.manifest import SetupFieldSpec
+from oc8.credentials.registry import (
+    CredentialTypeI18n,
+    CredentialTypeNotFound,
+    list_credential_types_with_i18n,
+)
 from oc8.credentials.service import (
     CredentialFieldNotSet,
     CredentialInUse,
@@ -173,12 +180,24 @@ async def test_credential_endpoint(
 async def list_credential_types_endpoint(
     db: DbSession, principal: CurrentPrincipal
 ) -> list[CredentialTypeDTO]:
-    types = await list_credential_types(db, tenant_id=principal.tenant_id)
+    types = await list_credential_types_with_i18n(db, tenant_id=principal.tenant_id)
     return [
         CredentialTypeDTO(
             name=t.name,
             display_name=t.display_name,
-            fields=[f.model_dump(mode="json") for f in t.fields],
+            display_name_translations=translations_for(i18n, t.display_name),
+            fields=[_translate_field(f, i18n) for f in t.fields],
         )
-        for t in types
+        for t, i18n in types
     ]
+
+
+def _translate_field(field: SetupFieldSpec, i18n: CredentialTypeI18n) -> dict[str, Any]:
+    out = field.model_dump(mode="json")
+    for prop in ("label", "help", "placeholder"):
+        value = out.get(prop)
+        if isinstance(value, str) and value:
+            resolved = translations_for(i18n, value)
+            if resolved:
+                out[f"{prop}_translations"] = resolved
+    return out

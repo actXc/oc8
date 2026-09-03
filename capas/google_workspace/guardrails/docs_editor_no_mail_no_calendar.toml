@@ -9,10 +9,8 @@
 # every library file.
 kind = "library"
 key = "docs_editor_no_mail_no_calendar"
-label = "Nur Dokumente, ohne E-Mail/Kalender"
-label_en = "Docs editor, no mail/calendar"
-summary = "Docs, Sheets, Slides und Drive; E-Mail und Kalender sind ausgeschlossen -- passend für einen Mandanten, der nur die Shared-Drive-Freigabe eingerichtet hat und den Domain-Wide-Delegation-Schritt übersprungen hat."
-summary_en = "Docs, Sheets, Slides and Drive; mail and calendar are excluded -- what a tenant that only completed the Shared Drive step (and skipped domain-wide delegation) can actually use."
+label = "Docs editor, no mail/calendar"
+summary = "Docs, Sheets, Slides and Drive; mail and calendar are excluded -- what a tenant that only completed the Shared Drive step (and skipped domain-wide delegation) can actually use."
 use_case = "files"
 read = true
 write = false

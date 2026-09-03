@@ -9,10 +9,8 @@
 
 kind = "library"
 key = "sales_opportunity_update_approval"
-label = "Änderungen an werthaltigen Opportunities freigeben"
-label_en = "Approve changes to high-value opportunities"
-summary = "Bearbeitet Opportunities selbstständig; ab dem eingestellten Betrag entscheidet ein Mensch. Erkennt das Schließen einer Opportunity nicht gezielt -- jede Änderung am Datensatz ab diesem Betrag braucht die Freigabe, nicht nur das Setzen auf 'gewonnen'."
-summary_en = "Updates opportunities on its own; at or above the configured amount a human decides. Does not specifically detect closing an opportunity -- any change to the record at or above the amount needs approval, not only setting it to 'won'."
+label = "Approve changes to high-value opportunities"
+summary = "Updates opportunities on its own; at or above the configured amount a human decides. Does not specifically detect closing an opportunity -- any change to the record at or above the amount needs approval, not only setting it to 'won'."
 use_case = "sales"
 read = true
 write = false
@@ -23,8 +21,7 @@ only = ["search_records", "get_record", "list_models", "list_resource_templates"
 
 [[adjustable]]
 field = "approval_eur"
-label = "Freigabe ab"
-label_en = "Approval from"
+label = "Approval from"
 unit = "EUR"
 min = 0
 max = 100000

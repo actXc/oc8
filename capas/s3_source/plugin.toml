@@ -9,7 +9,7 @@ name = "s3_source"
 version = "1.0.0"
 type = "connector"
 trust = "first_party"
-summary = "S3-Bucket als Wissensquelle — Textdateien aus einem Bucket oder Prefix"
+summary = "S3 bucket as a knowledge source — text files from a bucket or prefix"
 permissions = ["knowledge:write"]
 
 [plugin.entry_points]

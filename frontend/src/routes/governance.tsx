@@ -927,9 +927,9 @@ function PermissionPicker({
   const grouped = useMemo(() => byResource(catalogue.map((c) => c.permission)), [catalogue]);
 
   const label = (entry: PermissionInfo) =>
-    lang === "de" ? entry.label : entry.labelEn || entry.label;
+    lang === "de" ? entry.labelDe || entry.label : entry.label;
   const describe = (entry: PermissionInfo) =>
-    lang === "de" ? entry.description : entry.descriptionEn || entry.description;
+    lang === "de" ? entry.descriptionDe || entry.description : entry.description;
 
   if (catalogue.length === 0) {
     return (

@@ -1,10 +1,8 @@
 kind = "preset"
 connection = "primary"
 key = "no_deletions"
-label = "Mit Freigabe, ohne Löschen"
-label_en = "With approval, never deletes"
-summary = "Wie \"Unterstützen mit Freigabe\", aber Löschen ist gar nicht erst möglich — ebenso wenig das Absagen von Terminen oder das Verschieben von E-Mails."
-summary_en = "Like \"Assist with approval\", except deleting is not possible at all — nor is cancelling a calendar event or moving emails between folders."
+label = "With approval, never deletes"
+summary = "Like \"Assist with approval\", except deleting is not possible at all — nor is cancelling a calendar event or moving emails between folders."
 recommended = false
 read = true
 write = false

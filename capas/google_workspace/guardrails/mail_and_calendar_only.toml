@@ -1,9 +1,7 @@
 kind = "library"
 key = "mail_and_calendar_only"
-label = "Nur E-Mail und Kalender"
-label_en = "Mail and calendar only"
-summary = "Voller Zugriff auf E-Mail und Kalender; Drive, Docs, Sheets und Slides bleiben unerreichbar."
-summary_en = "Full access to mail and calendar; Drive, Docs, Sheets and Slides stay unreachable."
+label = "Mail and calendar only"
+summary = "Full access to mail and calendar; Drive, Docs, Sheets and Slides stay unreachable."
 use_case = "mail"
 read = true
 write = false

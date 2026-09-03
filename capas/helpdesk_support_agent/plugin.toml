@@ -15,7 +15,7 @@ name = "helpdesk_support_agent"
 version = "2.2.0"
 type = "department_template"
 trust = "first_party"
-summary = "Kundenservice-Abteilung mit einer Agentin, die Support-Tickets eigenständig bearbeitet"
+summary = "Customer service department with an agent that handles support tickets autonomously"
 depends = ["integration:odoo"]
 
 [plugin.department_template]

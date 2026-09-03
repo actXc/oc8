@@ -19,7 +19,7 @@ name = "whatsapp_approvals"
 version = "1.1.0"
 type = "approval_channel"
 trust = "first_party"
-summary = "Freigaben auf WhatsApp erhalten und dort entscheiden"
+summary = "Receive approvals on WhatsApp and decide right there"
 permissions = ["approvals:notify"]
 
 [plugin.entry_points]
@@ -43,6 +43,5 @@ template_language = "de"
 # telegram_approvals/plugin.toml's identical block and
 # PersonalSettingsSpec's docstring (capas/manifest.py).
 [plugin.personal_settings]
-label = "WhatsApp verbinden"
-label_en = "Link WhatsApp"
+label = "Link WhatsApp"
 location = "approval_channels"

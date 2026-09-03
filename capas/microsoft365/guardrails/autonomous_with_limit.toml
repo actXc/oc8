@@ -1,10 +1,8 @@
 kind = "preset"
 connection = "primary"
 key = "autonomous_with_limit"
-label = "Selbstständig mit Limit"
-label_en = "Autonomous with a limit"
-summary = "Arbeitet selbstständig, kann aber nichts löschen, keine Termine absagen und E-Mails weder verschieben noch als gelesen markieren."
-summary_en = "Works on its own, but cannot delete anything, cannot cancel a calendar event, and cannot move emails between folders or mark them read."
+label = "Autonomous with a limit"
+summary = "Works on its own, but cannot delete anything, cannot cancel a calendar event, and cannot move emails between folders or mark them read."
 recommended = false
 read = true
 write = false

@@ -605,9 +605,12 @@ class GuardrailPresetDTO(CamelModel):
 
     key: str
     label: str
-    label_en: str
+    #: Every translation of `label` this connection's plugin ships, keyed by
+    #: locale (design: capa-i18n). Missing a locale means the browser falls
+    #: back to `label` itself for that locale, never a stale copy.
+    label_translations: dict[str, str] = {}
     summary: str
-    summary_en: str
+    summary_translations: dict[str, str] = {}
     recommended: bool
     read: bool
     write: bool
@@ -633,7 +636,7 @@ class GuardrailAdjustableDTO(CamelModel):
 
     field: str
     label: str
-    label_en: str
+    label_translations: dict[str, str] = {}
     unit: str | None = None
     min: float | int | None = None
     max: float | int | None = None
@@ -646,9 +649,9 @@ class GuardrailDTO(CamelModel):
 
     key: str
     label: str
-    label_en: str
+    label_translations: dict[str, str] = {}
     summary: str
-    summary_en: str
+    summary_translations: dict[str, str] = {}
     use_case: str
     read: bool = False
     write: bool = False
@@ -886,6 +889,7 @@ class CredentialDTO(CamelModel):
 class CredentialTypeDTO(CamelModel):
     name: str
     display_name: str
+    display_name_translations: dict[str, str] = {}
     fields: list[dict[str, Any]]
 
 
@@ -991,8 +995,8 @@ class PermissionInfoDTO(CamelModel):
     permission: str
     label: str
     description: str = ""
-    label_en: str = ""
-    description_en: str = ""
+    label_de: str = ""
+    description_de: str = ""
     delegatable: bool
     #: Why a tenant-defined role may not hold it. Empty when it may.
     reason: str = ""
