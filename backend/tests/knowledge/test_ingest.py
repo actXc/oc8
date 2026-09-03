@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import base64
+import io
 import uuid
 from typing import Any
 
+import docx
+import openpyxl
 import pytest
 from sqlalchemy import select
 
@@ -218,3 +221,55 @@ async def test_ingest_document_rejects_oversized_content(
         )
         assert len(jobs) == 1
         assert jobs[0].status == "failed"
+
+
+def _docx_bytes(paragraphs: list[str]) -> bytes:
+    doc = docx.Document()
+    for p in paragraphs:
+        doc.add_paragraph(p)
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def test_extract_text_handles_docx() -> None:
+    raw = _docx_bytes(["First paragraph.", "Second paragraph."])
+    content = base64.b64encode(raw).decode()
+    result = extract_text(
+        content=content,
+        content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+    assert "First paragraph." in result
+    assert "Second paragraph." in result
+
+
+def _xlsx_bytes(rows: list[list[str]]) -> bytes:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    for row in rows:
+        ws.append(row)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_extract_text_handles_xlsx() -> None:
+    raw = _xlsx_bytes([["Name", "Amount"], ["Acme", "100"]])
+    content = base64.b64encode(raw).decode()
+    result = extract_text(
+        content=content,
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    assert "Acme" in result
+    assert "100" in result
+
+
+def test_extract_text_handles_csv() -> None:
+    result = extract_text(content="Name,Amount\nAcme,100\n", content_type="text/csv")
+    assert "Acme" in result
+    assert "100" in result
+
+
+def test_extract_text_still_refuses_images() -> None:
+    with pytest.raises(IngestionError, match="unsupported content_type"):
+        extract_text(content="", content_type="image/png")

@@ -109,6 +109,40 @@ def extract_text(*, content: str, content_type: str) -> str:
         except (PdfReadError, ValueError) as exc:
             raise IngestionError(f"failed to parse PDF: {exc}") from exc
         return "\n\n".join(pages).strip()
+    if content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        import docx
+
+        try:
+            raw = base64.b64decode(content)
+            doc = docx.Document(io.BytesIO(raw))
+            text = "\n".join(p.text for p in doc.paragraphs if p.text)
+        except Exception as exc:  # python-docx raises assorted zip/xml errors on garbage input
+            raise IngestionError(f"failed to parse DOCX: {exc}") from exc
+        return text.strip()
+    if content_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+        import openpyxl
+
+        try:
+            raw = base64.b64decode(content)
+            wb = openpyxl.load_workbook(io.BytesIO(raw), data_only=True)
+            lines = []
+            for sheet in wb.worksheets:
+                for row in sheet.iter_rows(values_only=True):
+                    cells = [str(c) for c in row if c is not None]
+                    if cells:
+                        lines.append(" | ".join(cells))
+        except Exception as exc:
+            raise IngestionError(f"failed to parse XLSX: {exc}") from exc
+        return "\n".join(lines).strip()
+    if content_type == "text/csv":
+        import csv as csv_module
+
+        try:
+            reader = csv_module.reader(io.StringIO(content))
+            lines = [" | ".join(row) for row in reader if row]
+        except csv_module.Error as exc:
+            raise IngestionError(f"failed to parse CSV: {exc}") from exc
+        return "\n".join(lines).strip()
     raise IngestionError(f"unsupported content_type: {content_type!r}")
 
 
