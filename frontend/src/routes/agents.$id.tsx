@@ -36,11 +36,13 @@ import {
   useAgentKpis,
   useAgentMemory,
   useAgents,
+  useAgentSkills,
   useAgentSupervisor,
   useAgentTriggers,
   useAgentWorkspaceFile,
   useAgentWorkspaceFiles,
   useAnswerRun,
+  useAssignSkill,
   useCancelRun,
   useCreateAgentTrigger,
   useCreateGrant,
@@ -54,6 +56,7 @@ import {
   useModels,
   useSwitchAgentModel,
   useTenantKpis,
+  useUnassignSkill,
   useUpdateAgentTrigger,
   useMcpConnections,
   useMcpLogins,
@@ -70,7 +73,6 @@ import { SUBSCRIPTION_PROVIDER, SubscriptionRiskBadge } from "@/routes/models";
 import { CronBuilder } from "@/components/cron-builder";
 import {
   useAgent,
-  useAssignSkill,
   useUpdateNarrowing,
   type AgentDetail as AgentDetailData,
 } from "@/lib/hooks-agent-detail";
@@ -757,7 +759,7 @@ function AgentMemoryTab({ agentId, mayManage }: { agentId: string; mayManage: bo
   );
 }
 
-function AgentSkillsTab({
+export function AgentSkillsTab({
   agentId,
   agentName,
   mayManage,
@@ -770,15 +772,16 @@ function AgentSkillsTab({
   // Skill-assignment picker for this agent, not a paginated list view.
   const { data: skillsPage } = useSkills({ pageSize: 200 });
   const skills = skillsPage?.items ?? [];
-  const assignSkill = useAssignSkill(agentId);
-  // No assigned-skills field is exposed on AgentDetail yet, so the assigned set
-  // is optimistic/session-local; the assignment itself is persisted server-side.
-  const [assigned, setAssigned] = useState<string[]>([]);
+  const { data: agentSkills } = useAgentSkills(agentId);
+  const assignSkill = useAssignSkill();
+  const unassignSkill = useUnassignSkill();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [search, setSearch] = useState("");
 
-  const assignedSkills = skills.filter((s) => assigned.includes(s.id));
-  const available = skills.filter((s) => !assigned.includes(s.id));
+  const assigned = agentSkills ?? [];
+  const assignedSkillIds = new Set(assigned.map((a) => a.skillId));
+  const assignedSkills = skills.filter((s) => assignedSkillIds.has(s.id));
+  const available = skills.filter((s) => !assignedSkillIds.has(s.id));
   const searchTerm = search.trim().toLowerCase();
   const filteredAvailable = searchTerm
     ? available.filter(
@@ -795,10 +798,9 @@ function AgentSkillsTab({
     // Backend expects a SkillVersion UUID; SkillDTO.currentVersionId carries the
     // current published version (null when the skill has none yet).
     assignSkill.mutate(
-      { skillVersionId: versionId },
+      { agentId, skillVersionId: versionId },
       {
         onSuccess: () => {
-          setAssigned((prev) => (prev.includes(s.id) ? prev : [...prev, s.id]));
           toast.success(t("Skill assigned", "Skill zugewiesen"), {
             description: `${s.name} → ${agentName}`,
           });
@@ -811,8 +813,18 @@ function AgentSkillsTab({
     );
   };
   const remove = (s: Skill) => {
-    setAssigned((prev) => prev.filter((id) => id !== s.id));
-    toast(t("Skill removed", "Skill entfernt"), { description: s.name });
+    const assignment = assigned.find((a) => a.skillId === s.id);
+    if (!assignment) return;
+    unassignSkill.mutate(
+      { agentId, assignmentId: assignment.id },
+      {
+        onSuccess: () => toast(t("Skill removed", "Skill entfernt"), { description: s.name }),
+        onError: () =>
+          toast.error(t("Couldn't remove skill", "Skill konnte nicht entfernt werden"), {
+            description: s.name,
+          }),
+      },
+    );
   };
 
   return (
