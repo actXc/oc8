@@ -278,6 +278,8 @@ class TeamsChannel:
         self._app_password = app_password
         self._tenant = tenant_id
         self._max_classification = max_classification
+        self._token: str = ""
+        self._token_expires_at: float = 0.0
 
     def capabilities(self) -> ChannelCapabilities:
         # `unsolicited=True`: like Telegram and unlike WhatsApp, a Bot
@@ -301,3 +303,154 @@ class TeamsChannel:
         self, update: Mapping[str, Any]
     ) -> ChannelDecision | ChannelLink | ChannelFreeText | None:
         return parse_activity(update)
+
+    async def _access_token(self) -> str:
+        now = time.monotonic()
+        if self._token and now < self._token_expires_at:
+            return self._token
+        body = await mint_access_token(
+            app_id=self._app_id, app_password=self._app_password, tenant=self._tenant
+        )
+        token = body.get("access_token")
+        if not token:
+            raise RuntimeError("Bot Framework token endpoint returned no access_token")
+        self._token = str(token)
+        expires_in = int(body.get("expires_in") or 0)
+        self._token_expires_at = now + max(expires_in - _TOKEN_REFRESH_MARGIN_SECONDS, 0)
+        return self._token
+
+    async def _post(self, service_url: str, conversation_id: str, activity: dict[str, Any]) -> dict[str, Any]:
+        token = await self._access_token()
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(
+                f"{service_url.rstrip('/')}/v3/conversations/{conversation_id}/activities",
+                json=activity,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        response.raise_for_status()
+        result: dict[str, Any] = response.json() if response.content else {}
+        return result
+
+    async def _put(
+        self, service_url: str, conversation_id: str, activity_id: str, activity: dict[str, Any]
+    ) -> None:
+        token = await self._access_token()
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.put(
+                f"{service_url.rstrip('/')}/v3/conversations/{conversation_id}/activities/{activity_id}",
+                json=activity,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        response.raise_for_status()
+
+    async def deliver(self, notice: ApprovalNotice, *, external_id: str) -> str | None:
+        conv_ref = json.loads(external_id)
+        activity = _activity_base(conv_ref)
+        activity["attachments"] = [
+            {"contentType": "application/vnd.microsoft.card.adaptive", "content": render_card(notice)}
+        ]
+        result = await self._post(conv_ref["serviceUrl"], conv_ref["conversationId"], activity)
+        activity_id = result.get("id")
+        return str(activity_id) if activity_id else None
+
+    async def withdraw(
+        self, notice: ApprovalNotice, *, external_id: str, handle: str | None, outcome: str
+    ) -> None:
+        """Edit the card in place so the buttons are gone and the outcome is
+        on it, mirroring Telegram's editMessageText. Falls back to a plain
+        text send if the edit fails (e.g. the activity is too old to edit);
+        never raises -- the decision is already recorded, and failing here
+        must not undo it."""
+        conv_ref = json.loads(external_id)
+        if handle is not None:
+            activity = _activity_base(conv_ref)
+            activity["attachments"] = [
+                {
+                    "contentType": "application/vnd.microsoft.card.adaptive",
+                    "content": render_outcome_card(notice, outcome=outcome),
+                }
+            ]
+            try:
+                await self._put(conv_ref["serviceUrl"], conv_ref["conversationId"], handle, activity)
+                return
+            except Exception:
+                logger.warning("could not edit a Teams card in place, falling back to text", exc_info=True)
+        said = {"approved": "freigegeben", "rejected": "abgelehnt"}.get(outcome, outcome)
+        activity = _activity_base(conv_ref)
+        activity["text"] = f"{notice.title}\n\nEntschieden: {said}."
+        try:
+            await self._post(conv_ref["serviceUrl"], conv_ref["conversationId"], activity)
+        except Exception:
+            logger.warning("could not close out a Teams approval", exc_info=True)
+
+    async def say(self, external_id: str, text: str) -> None:
+        conv_ref = json.loads(external_id)
+        activity = _activity_base(conv_ref)
+        activity["text"] = text
+        try:
+            await self._post(conv_ref["serviceUrl"], conv_ref["conversationId"], activity)
+        except Exception:
+            logger.warning("could not send a Teams reply", exc_info=True)
+
+
+_TOKEN_URL_TEMPLATE = "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
+_BOT_FRAMEWORK_SCOPE = "https://api.botframework.com/.default"
+#: Bot Framework's own multi-tenant placeholder, used when no single-tenant
+#: registration was configured.
+_DEFAULT_TENANT = "botframework.com"
+#: Refresh a bit before the token actually expires rather than racing a
+#: request against the exact expiry second.
+_TOKEN_REFRESH_MARGIN_SECONDS = 60
+
+
+async def mint_access_token(*, app_id: str, app_password: str, tenant: str) -> dict[str, Any]:
+    """POST a client_credentials token request, returns the raw JSON body.
+    Raises `httpx.HTTPStatusError` on a non-2xx response -- Microsoft's own
+    signal that this app id/password pair is not a valid registration.
+    """
+    async with httpx.AsyncClient(timeout=10) as client:
+        response = await client.post(
+            _TOKEN_URL_TEMPLATE.format(tenant=tenant or _DEFAULT_TENANT),
+            data={
+                "grant_type": "client_credentials",
+                "client_id": app_id,
+                "client_secret": app_password,
+                "scope": _BOT_FRAMEWORK_SCOPE,
+            },
+        )
+    response.raise_for_status()
+    result: dict[str, Any] = response.json()
+    return result
+
+
+def _activity_base(conv_ref: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "type": "message",
+        "from": {"id": conv_ref["botId"], "name": conv_ref.get("botName") or ""},
+        "recipient": {"id": conv_ref["userId"], "name": conv_ref.get("userName") or ""},
+        "conversation": {"id": conv_ref["conversationId"]},
+        "channelId": conv_ref["channelId"],
+    }
+
+
+def build(config: Mapping[str, str]) -> TeamsChannel:
+    """One tenant's channel, from that installation's resolved config.
+    `bot_token` arrives already resolved to the app password -- core reads
+    the secret store, not the plugin.
+    """
+    app_password = config.get("bot_token") or ""
+    if not app_password:
+        raise ValueError("teams_approvals needs a bot token (config secret_ref)")
+    app_id = config.get("app_id") or ""
+    if not app_id:
+        raise ValueError("teams_approvals needs an app_id")
+    return TeamsChannel(
+        app_id=app_id,
+        app_password=app_password,
+        tenant_id=config.get("tenant_id") or "",
+        max_classification=config.get("max_classification") or "public",
+    )
+
+
+def register(contrib: Any) -> None:
+    contrib.add_channel(CHANNEL_ID, build)
