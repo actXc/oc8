@@ -476,7 +476,8 @@ async def bind_from_free_text(
         tenant_id=tenant_id,
         message=text.text,
         originating_operator=None,
-        telegram_external_id=text.external_id,
+        chat_channel=channel,
+        chat_channel_external_id=text.external_id,
     )
     # send_message() committed via enqueue_run -- re-fetch nothing further needed here.
     if run is None:
