@@ -92,6 +92,7 @@ from collections.abc import Mapping
 
 from oc8.channels.notice import (
     ApprovalNotice,
+    ChannelCapabilities,
     ChannelDecision,
     ChannelFreeText,
     ChannelLink,
@@ -258,3 +259,45 @@ def parse_activity(
     if " " not in text:
         return ChannelLink(code=text, external_id=_external_id_for(activity))
     return ChannelFreeText(text=text, external_id=_external_id_for(activity))
+
+
+class TeamsChannel:
+    """Contributed to core as an `ApprovalChannel`."""
+
+    channel_id = CHANNEL_ID
+
+    def __init__(
+        self,
+        *,
+        app_id: str,
+        app_password: str,
+        tenant_id: str = "",
+        max_classification: str = "public",
+    ) -> None:
+        self._app_id = app_id
+        self._app_password = app_password
+        self._tenant = tenant_id
+        self._max_classification = max_classification
+
+    def capabilities(self) -> ChannelCapabilities:
+        # `unsolicited=True`: like Telegram and unlike WhatsApp, a Bot
+        # Framework bot may proactively message anyone it holds a
+        # conversationReference for, with no 24-hour window.
+        return ChannelCapabilities(
+            max_classification=self._max_classification,
+            unsolicited=True,
+            supports_options=True,
+        )
+
+    async def verify_inbound(self, *, headers: Mapping[str, str], body: bytes) -> bool:
+        auth = headers.get("authorization") or headers.get("Authorization", "")
+        if not auth.lower().startswith("bearer "):
+            logger.warning("rejected a Teams webhook call with no bearer token")
+            return False
+        token = auth[len("Bearer ") :]
+        return await _verify_activity_jwt(token, app_id=self._app_id)
+
+    def parse_inbound(
+        self, update: Mapping[str, Any]
+    ) -> ChannelDecision | ChannelLink | ChannelFreeText | None:
+        return parse_activity(update)

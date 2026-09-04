@@ -165,3 +165,37 @@ async def test_a_malformed_token_fails_closed(monkeypatch: pytest.MonkeyPatch) -
     _install_jwks(monkeypatch, {"keys": []})
 
     assert await _verify_activity_jwt("not-a-jwt-at-all", app_id="app-1") is False
+
+
+async def test_verify_inbound_requires_a_bearer_authorization_header() -> None:
+    from channel.channel import TeamsChannel
+
+    channel = TeamsChannel(app_id="app-1", app_password="pw")
+    assert await channel.verify_inbound(headers={}, body=b"{}") is False
+
+
+async def test_verify_inbound_rejects_a_non_bearer_scheme() -> None:
+    from channel.channel import TeamsChannel
+
+    channel = TeamsChannel(app_id="app-1", app_password="pw")
+    assert await channel.verify_inbound(headers={"Authorization": "Basic xyz"}, body=b"{}") is False
+
+
+async def test_verify_inbound_delegates_the_bearer_token_to_jwt_verification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import channel.channel as channel_module
+    from channel.channel import TeamsChannel
+
+    seen: dict[str, str] = {}
+
+    async def fake_verify(token: str, *, app_id: str) -> bool:
+        seen["token"] = token
+        seen["app_id"] = app_id
+        return True
+
+    monkeypatch.setattr(channel_module, "_verify_activity_jwt", fake_verify)
+    channel = TeamsChannel(app_id="app-1", app_password="pw")
+
+    assert await channel.verify_inbound(headers={"Authorization": "Bearer tok123"}, body=b"{}") is True
+    assert seen == {"token": "tok123", "app_id": "app-1"}
