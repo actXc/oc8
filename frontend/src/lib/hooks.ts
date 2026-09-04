@@ -1010,8 +1010,25 @@ export function useTestModel() {
 export function useSwitchAgentModel() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ agentId, modelConfigId }: { agentId: string; modelConfigId: string }) =>
-      api.patch<AgentDetail>(`/agents/${agentId}/model-config`, { modelConfigId }),
+    mutationFn: ({
+      agentId,
+      modelConfigId,
+      temperature,
+      maxTokens,
+      effort,
+    }: {
+      agentId: string;
+      modelConfigId: string;
+      temperature?: number | null;
+      maxTokens?: number | null;
+      effort?: string | null;
+    }) =>
+      api.patch<AgentDetail>(`/agents/${agentId}/model-config`, {
+        modelConfigId,
+        ...(temperature !== undefined ? { temperature } : {}),
+        ...(maxTokens !== undefined ? { maxTokens } : {}),
+        ...(effort !== undefined ? { effort } : {}),
+      }),
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: keys.agent(variables.agentId) });
       qc.invalidateQueries({ queryKey: keys.agents });

@@ -65,6 +65,14 @@ class NarrowingRequest(CamelModel):
 
 class ModelConfigRequest(CamelModel):
     model_config_id: uuid.UUID
+    #: Per-agent sampling overrides, written into agent.definition["model_params"]
+    #: (modelrouter/sampling.py's resolve_params reads this as its narrowest-first
+    #: source). None/absent on a field means "inherit the assigned ModelConfig's
+    #: own value" -- these three are independent, matching ModelConfigWrite's own
+    #: per-field semantics, not "unset the whole override on any partial save".
+    temperature: float | None = None
+    max_tokens: int | None = None
+    effort: str | None = None
 
 
 class InstructionsRequest(CamelModel):

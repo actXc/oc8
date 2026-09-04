@@ -32,6 +32,9 @@ const AGENT: AgentDetail = {
   narrowingTools: {},
   runtimeRef: null,
   currentRunId: null,
+  temperature: null,
+  maxTokens: null,
+  effort: null,
 };
 
 function model(overrides: Partial<ModelDTO> = {}): ModelDTO {

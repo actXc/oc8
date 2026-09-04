@@ -556,6 +556,13 @@ class AgentDetailDTO(AgentDTO):
     #: detail screen can only show a live log for a run started in that same
     #: browser tab, so a scheduled run happens invisibly.
     current_run_id: str | None = None
+    #: Per-agent sampling overrides (agent.definition["model_params"]),
+    #: narrowest-first ahead of the assigned ModelConfig's own defaults --
+    #: see modelrouter/sampling.py's resolve_params(). None means "inherit
+    #: the model's value", not "use a framework default directly".
+    temperature: float | None = None
+    max_tokens: int | None = None
+    effort: str | None = None
 
 
 class AgentInstructionRevisionDTO(CamelModel):

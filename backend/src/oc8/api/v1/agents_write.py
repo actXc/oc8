@@ -398,6 +398,34 @@ async def switch_model(
     pres["llm"] = mc.display_name or mc.model
     pres["provider"] = mc.provider
     agent.presentation = pres
+    # jsonb: replaced whole, or SQLAlchemy never notices the mutation. Each
+    # of the three sampling overrides is independent -- a save that doesn't
+    # mention a field (not in model_fields_set) leaves whatever this agent
+    # already had for it untouched, matching catalog.py's update_model's own
+    # per-field semantics; a field present but null clears it back to
+    # "inherit the assigned ModelConfig's own value" (resolve_params).
+    definition = dict(agent.definition or {})
+    model_params = dict(definition.get("model_params") or {})
+    if "temperature" in body.model_fields_set:
+        if body.temperature is not None:
+            model_params["temperature"] = body.temperature
+        else:
+            model_params.pop("temperature", None)
+    if "max_tokens" in body.model_fields_set:
+        if body.max_tokens is not None:
+            model_params["max_tokens"] = body.max_tokens
+        else:
+            model_params.pop("max_tokens", None)
+    if "effort" in body.model_fields_set:
+        if body.effort and body.effort.strip():
+            model_params["effort"] = body.effort.strip()
+        else:
+            model_params.pop("effort", None)
+    if model_params:
+        definition["model_params"] = model_params
+    else:
+        definition.pop("model_params", None)
+    agent.definition = definition
     await db.flush()
     await append_event(
         db,

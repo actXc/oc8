@@ -1415,6 +1415,64 @@ export function AssignedModelPanel({
   const t = useT();
   const switchModel = useSwitchAgentModel();
   const assigned = models.find((model) => model.id === agent.modelConfigId);
+  const showEffort = assigned?.provider === "anthropic";
+
+  const [temperature, setTemperature] = useState(
+    agent.temperature != null ? String(agent.temperature) : "",
+  );
+  const [maxTokens, setMaxTokens] = useState(
+    agent.maxTokens != null ? String(agent.maxTokens) : "",
+  );
+  const [effort, setEffort] = useState(agent.effort ?? "");
+  // Route param change remounts this whole page in the common case, but
+  // nothing here guarantees it -- a prior bug in this exact codebase (the
+  // Chat window carrying a previous agent's session across a switch) showed
+  // that assumption can quietly fail. Sync local edit state to the loaded
+  // agent explicitly instead of trusting a remount to reset it.
+  useEffect(() => {
+    setTemperature(agent.temperature != null ? String(agent.temperature) : "");
+    setMaxTokens(agent.maxTokens != null ? String(agent.maxTokens) : "");
+    setEffort(agent.effort ?? "");
+  }, [agent.id, agent.temperature, agent.maxTokens, agent.effort]);
+
+  function saveSamplingOverrides() {
+    if (!agent.modelConfigId) return;
+    const trimmedTemp = temperature.trim();
+    const parsedTemp = trimmedTemp ? Number(trimmedTemp) : null;
+    if (parsedTemp !== null && !Number.isFinite(parsedTemp)) {
+      toast.error(t("Temperature must be a number", "Temperature muss eine Zahl sein"));
+      return;
+    }
+    const trimmedTokens = maxTokens.trim();
+    const parsedTokens = trimmedTokens ? Number(trimmedTokens) : null;
+    if (parsedTokens !== null && (!Number.isInteger(parsedTokens) || parsedTokens < 1)) {
+      toast.error(
+        t(
+          "Max tokens must be a positive whole number",
+          "Max. Tokens muss eine positive Ganzzahl sein",
+        ),
+      );
+      return;
+    }
+    switchModel.mutate(
+      {
+        agentId: agent.id,
+        modelConfigId: agent.modelConfigId,
+        temperature: parsedTemp,
+        maxTokens: parsedTokens,
+        // Never send an override for a field this model's provider doesn't
+        // expose -- switching away from anthropic must not silently wipe an
+        // effort value the operator can no longer even see to restore.
+        effort: showEffort ? effort.trim() || null : undefined,
+      },
+      {
+        onSuccess: () =>
+          toast.success(t("Sampling settings saved", "Sampling-Einstellungen gespeichert")),
+        onError: (error) => toast.error(error.message),
+      },
+    );
+  }
+
   return (
     <Panel className="p-5">
       <ConfigSectionHeader
@@ -1465,6 +1523,76 @@ export function AssignedModelPanel({
         {!mayManage &&
           ` ${t("Your role does not include agent:manage, so this assignment is read-only for you.", "Ihre Rolle enthält agent:manage nicht, deshalb ist diese Zuweisung für Sie schreibgeschützt.")}`}
       </p>
+
+      {agent.modelConfigId && (
+        <div className="mt-5 border-t border-border pt-4">
+          <ConfigSectionHeader
+            hint={t("per-agent, optional", "pro Agent, optional")}
+            title={t("Sampling overrides", "Sampling-Overrides")}
+          />
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            {t(
+              "Blank fields inherit this agent's assigned model's own setting.",
+              "Leere Felder übernehmen die Einstellung des zugewiesenen Modells.",
+            )}
+          </p>
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className="mb-1 block text-[10px] uppercase tracking-widest text-muted-foreground">
+                {t("Temperature", "Temperature")}
+              </span>
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder={t("Inherited", "Geerbt")}
+                value={temperature}
+                disabled={!mayManage}
+                onChange={(e) => setTemperature(e.target.value)}
+                className="w-full rounded-md border border-border bg-background/40 px-3 py-2 text-sm outline-none focus:border-primary/50 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[10px] uppercase tracking-widest text-muted-foreground">
+                {t("Max tokens", "Max. Tokens")}
+              </span>
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder={t("Inherited", "Geerbt")}
+                value={maxTokens}
+                disabled={!mayManage}
+                onChange={(e) => setMaxTokens(e.target.value)}
+                className="w-full rounded-md border border-border bg-background/40 px-3 py-2 text-sm outline-none focus:border-primary/50 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+            </label>
+            {showEffort && (
+              <label className="col-span-2 block">
+                <span className="mb-1 block text-[10px] uppercase tracking-widest text-muted-foreground">
+                  {t("Effort", "Effort")}
+                </span>
+                <input
+                  type="text"
+                  placeholder={t("Inherited", "Geerbt")}
+                  value={effort}
+                  disabled={!mayManage}
+                  onChange={(e) => setEffort(e.target.value)}
+                  className="w-full rounded-md border border-border bg-background/40 px-3 py-2 text-sm outline-none focus:border-primary/50 disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </label>
+            )}
+          </div>
+          {mayManage && (
+            <button
+              type="button"
+              onClick={saveSamplingOverrides}
+              disabled={switchModel.isPending}
+              className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-accent disabled:opacity-50"
+            >
+              {t("Save sampling settings", "Sampling-Einstellungen speichern")}
+            </button>
+          )}
+        </div>
+      )}
     </Panel>
   );
 }

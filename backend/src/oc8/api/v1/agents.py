@@ -233,6 +233,10 @@ async def _agent_detail_dto(db: DbSession, agent: m.Agent) -> AgentDetailDTO:
         if isinstance(v, dict)
     }
     base = agent_to_dto(agent).model_dump(by_alias=False)
+    # Same key `resolve_params` (modelrouter/sampling.py) reads as the
+    # narrowest-first sampling source -- unset here means "inherit the
+    # assigned ModelConfig's own value", not "use a framework default".
+    model_params = (agent.definition or {}).get("model_params") or {}
     # The newest run that has not finished. Newest, because a run abandoned by a
     # dead worker can sit in `running` indefinitely and the one worth watching is
     # the latest; queued counts, so a scheduled fire is visible before its
@@ -260,6 +264,9 @@ async def _agent_detail_dto(db: DbSession, agent: m.Agent) -> AgentDetailDTO:
         narrowing_tools=narrowing_tools,
         runtime_ref=agent.runtime_ref,
         current_run_id=str(current_run) if current_run else None,
+        temperature=model_params.get("temperature"),
+        max_tokens=model_params.get("max_tokens"),
+        effort=model_params.get("effort"),
     )
 
 

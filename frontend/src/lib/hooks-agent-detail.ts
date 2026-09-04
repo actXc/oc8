@@ -42,6 +42,12 @@ export interface AgentDetail {
   // log can only follow a run started in this browser tab, so a scheduled run
   // happens invisibly.
   currentRunId: string | null;
+  // Per-agent sampling overrides (resolve_params's narrowest-first source,
+  // backend/src/oc8/modelrouter/sampling.py). null means "inherit the
+  // assigned model's own value", not "use a framework default directly".
+  temperature: number | null;
+  maxTokens: number | null;
+  effort: string | null;
 }
 
 // Reuses the ["agents", id] key already invalidated by the "agent.status"

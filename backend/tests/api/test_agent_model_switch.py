@@ -78,6 +78,85 @@ async def test_admin_can_switch_agent_model_and_receives_current_assignment(
             assert switched.json()["llm"] == "second"
 
 
+async def test_agent_sampling_overrides_persist_independently_and_clear_on_blank(
+    app_session: AppSessionFactory,
+) -> None:
+    """agent.definition["model_params"] -- resolve_params's narrowest-first
+    source (modelrouter/sampling.py). Each of the three fields is independent
+    (a save touching only one must not disturb the others), and a field
+    present but null/blank clears back to "inherit the model's own value",
+    matching catalog.py's update_model's own per-field semantics."""
+    tenant = uuid.UUID(str(ACME_TENANT_ID))
+    async with app_session(tenant) as db:
+        department = m.Department(tenant_id=tenant, name=f"D-{uuid.uuid4().hex}", frame={})
+        model = m.ModelConfig(
+            tenant_id=tenant, provider="anthropic", model="claude-sonnet-5", locality="cloud"
+        )
+        db.add_all([department, model])
+        await db.flush()
+        agent = m.Agent(
+            tenant_id=tenant,
+            department_id=department.id,
+            name="Tuned",
+            model_config_id=model.id,
+        )
+        db.add(agent)
+        await db.flush()
+        agent_id, model_id = agent.id, model.id
+
+    app = create_app()
+    async with LifespanManager(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            headers = {"Authorization": f"Bearer {_token(tenant)}"}
+
+            # Set all three.
+            r = await client.patch(
+                f"/api/v1/agents/{agent_id}/model-config",
+                json={
+                    "modelConfigId": str(model_id),
+                    "temperature": 0.9,
+                    "maxTokens": 4096,
+                    "effort": "high",
+                },
+                headers=headers,
+            )
+            assert r.status_code == 200, r.text
+            detail = await client.get(f"/api/v1/agents/{agent_id}", headers=headers)
+            assert detail.json()["temperature"] == 0.9
+            assert detail.json()["maxTokens"] == 4096
+            assert detail.json()["effort"] == "high"
+
+            # A save mentioning only temperature must not disturb maxTokens/effort.
+            r = await client.patch(
+                f"/api/v1/agents/{agent_id}/model-config",
+                json={"modelConfigId": str(model_id), "temperature": 0.5},
+                headers=headers,
+            )
+            assert r.status_code == 200, r.text
+            detail = await client.get(f"/api/v1/agents/{agent_id}", headers=headers)
+            assert detail.json()["temperature"] == 0.5
+            assert detail.json()["maxTokens"] == 4096
+            assert detail.json()["effort"] == "high"
+
+            # Explicit null/blank on all three clears them back to "inherit".
+            r = await client.patch(
+                f"/api/v1/agents/{agent_id}/model-config",
+                json={
+                    "modelConfigId": str(model_id),
+                    "temperature": None,
+                    "maxTokens": None,
+                    "effort": "",
+                },
+                headers=headers,
+            )
+            assert r.status_code == 200, r.text
+            detail = await client.get(f"/api/v1/agents/{agent_id}", headers=headers)
+            assert detail.json()["temperature"] is None
+            assert detail.json()["maxTokens"] is None
+            assert detail.json()["effort"] is None
+
+
 async def test_non_admin_cannot_switch_agent_model(app_session: AppSessionFactory) -> None:
     tenant = uuid.UUID(str(ACME_TENANT_ID))
     async with app_session(tenant) as db:
