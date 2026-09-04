@@ -6,16 +6,7 @@
 // autonomous run.
 
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
-import {
-  ChevronDown,
-  MessageSquare,
-  Paperclip,
-  Pencil,
-  Plus,
-  Send,
-  Trash2,
-  X,
-} from "lucide-react";
+import { ChevronDown, MessageSquare, Paperclip, Pencil, Plus, Send, Trash2, X } from "lucide-react";
 import { Panel } from "@/components/app-shell";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { RUN_COMPONENT_REGISTRY } from "@/components/run-record-card";

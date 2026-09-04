@@ -1114,7 +1114,10 @@ function ModelFormDialog({ editing, onClose }: { editing: ModelDTO | null; onClo
                   checked={supportsVision}
                   onChange={(e) => setSupportsVision(e.target.checked)}
                 />
-                {t("This model can see images (vision)", "Dieses Modell kann Bilder verarbeiten (Vision)")}
+                {t(
+                  "This model can see images (vision)",
+                  "Dieses Modell kann Bilder verarbeiten (Vision)",
+                )}
               </label>
 
               {editing && (

@@ -33,8 +33,11 @@ def test_exported_tables_excludes_the_denylist() -> None:
     # no durations at all; imported_skill_file, added by migration 0085, stays
     # INCLUDED -- it is a directly-imported skill's own bundled reference
     # files, portable company data exactly like the skill_version it is
-    # pinned to, not instance-bound like secret/tenant_dek).
-    assert len(exported) == 53
+    # pinned to, not instance-bound like secret/tenant_dek; file_attachment,
+    # added by migration 0086, stays INCLUDED -- a chat/instruction
+    # attachment's row is portable company data exactly like
+    # kb_chunk.raw_object_key, not instance-bound).
+    assert len(exported) == 54
 
 
 def test_table_by_name_returns_a_real_table() -> None:
