@@ -1,9 +1,9 @@
 """`_verify_activity_jwt` -- Bot Framework's own inbound auth scheme: a
 bearer JWT signed by a key published at Microsoft's JWKS endpoint. Every
 case here must fail closed: a malformed token, an unknown key id, a wrong
-audience, an expired signature, or a signature from the wrong key must all
-come back False, the same discipline Telegram's/WhatsApp's own
-verify_inbound already follow."""
+audience, an expired signature, a signature from the wrong key, or a
+`serviceUrl` the token does not itself claim must all come back None/False,
+the same discipline Telegram's/WhatsApp's own verify_inbound already follow."""
 
 from __future__ import annotations
 
@@ -65,6 +65,11 @@ def _jwk_for(private_key: rsa.RSAPrivateKey, *, kid: str) -> dict[str, Any]:
     return public_jwk
 
 
+#: The `serviceUrl` Bot Framework stamps into both the token and the Activity
+#: body. Every outbound call this channel later makes goes to this host.
+_SERVICE_URL = "https://smba.trafficmanager.net/teams/"
+
+
 def _token_for(
     private_key: rsa.RSAPrivateKey,
     *,
@@ -72,10 +77,25 @@ def _token_for(
     audience: str,
     issuer: str = "https://api.botframework.com",
     exp_delta: int = 3600,
+    service_url: str | None = _SERVICE_URL,
 ) -> str:
     now = int(time.time())
-    payload = {"aud": audience, "iss": issuer, "iat": now, "exp": now + exp_delta}
+    payload: dict[str, Any] = {
+        "aud": audience,
+        "iss": issuer,
+        "iat": now,
+        "exp": now + exp_delta,
+    }
+    if service_url is not None:
+        payload["serviceUrl"] = service_url
     return jwt.encode(payload, private_key, algorithm="RS256", headers={"kid": kid})
+
+
+def _body(service_url: str | None = _SERVICE_URL) -> bytes:
+    activity: dict[str, Any] = {"type": "message"}
+    if service_url is not None:
+        activity["serviceUrl"] = service_url
+    return json.dumps(activity).encode()
 
 
 def _install_jwks(monkeypatch: pytest.MonkeyPatch, jwks: dict[str, Any]) -> None:
@@ -96,7 +116,11 @@ async def test_a_validly_signed_token_verifies(monkeypatch: pytest.MonkeyPatch) 
     _install_jwks(monkeypatch, jwks)
     token = _token_for(key, kid="k1", audience="app-1")
 
-    assert await _verify_activity_jwt(token, app_id="app-1") is True
+    claims = await _verify_activity_jwt(token, app_id="app-1")
+    assert claims is not None
+    # The CLAIMS come back, not a bool: verify_inbound has to compare the
+    # token's own serviceUrl against the (unsigned) Activity body's.
+    assert claims["serviceUrl"] == _SERVICE_URL
 
 
 @pytest.mark.asyncio
@@ -108,7 +132,7 @@ async def test_an_expired_token_fails_closed(monkeypatch: pytest.MonkeyPatch) ->
     _install_jwks(monkeypatch, jwks)
     token = _token_for(key, kid="k1", audience="app-1", exp_delta=-3600)
 
-    assert await _verify_activity_jwt(token, app_id="app-1") is False
+    assert await _verify_activity_jwt(token, app_id="app-1") is None
 
 
 @pytest.mark.asyncio
@@ -120,7 +144,7 @@ async def test_a_token_for_the_wrong_audience_fails_closed(monkeypatch: pytest.M
     _install_jwks(monkeypatch, jwks)
     token = _token_for(key, kid="k1", audience="some-other-app")
 
-    assert await _verify_activity_jwt(token, app_id="app-1") is False
+    assert await _verify_activity_jwt(token, app_id="app-1") is None
 
 
 @pytest.mark.asyncio
@@ -138,7 +162,7 @@ async def test_a_token_signed_by_the_wrong_key_fails_closed(
     _install_jwks(monkeypatch, jwks)
     token = _token_for(forged_key, kid="k1", audience="app-1")
 
-    assert await _verify_activity_jwt(token, app_id="app-1") is False
+    assert await _verify_activity_jwt(token, app_id="app-1") is None
 
 
 @pytest.mark.asyncio
@@ -162,7 +186,7 @@ async def test_an_unknown_key_id_refreshes_once_then_fails_closed(
     monkeypatch.setattr(channel_module, "_fetch_jwks", counting_fetch)
     token = _token_for(key, kid="never-published", audience="app-1")
 
-    assert await _verify_activity_jwt(token, app_id="app-1") is False
+    assert await _verify_activity_jwt(token, app_id="app-1") is None
     assert fetch_calls == 2, "one fetch to populate the cache, one forced refresh on the miss"
 
 
@@ -172,7 +196,7 @@ async def test_a_malformed_token_fails_closed(monkeypatch: pytest.MonkeyPatch) -
 
     _install_jwks(monkeypatch, {"keys": []})
 
-    assert await _verify_activity_jwt("not-a-jwt-at-all", app_id="app-1") is False
+    assert await _verify_activity_jwt("not-a-jwt-at-all", app_id="app-1") is None
 
 
 @pytest.mark.asyncio
@@ -200,15 +224,127 @@ async def test_verify_inbound_delegates_the_bearer_token_to_jwt_verification(
 
     seen: dict[str, str] = {}
 
-    async def fake_verify(token: str, *, app_id: str) -> bool:
+    async def fake_verify(token: str, *, app_id: str) -> dict[str, Any]:
         seen["token"] = token
         seen["app_id"] = app_id
-        return True
+        return {"serviceUrl": _SERVICE_URL}
 
     monkeypatch.setattr(channel_module, "_verify_activity_jwt", fake_verify)
     channel = TeamsChannel(app_id="app-1", app_password="pw")
 
     assert (
-        await channel.verify_inbound(headers={"Authorization": "Bearer tok123"}, body=b"{}") is True
+        await channel.verify_inbound(headers={"Authorization": "Bearer tok123"}, body=_body())
+        is True
     )
     assert seen == {"token": "tok123", "app_id": "app-1"}
+
+
+@pytest.mark.asyncio
+async def test_verify_inbound_accepts_a_token_whose_service_url_matches_the_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from channel.channel import TeamsChannel
+
+    key = _keypair()
+    _install_jwks(monkeypatch, {"keys": [_jwk_for(key, kid="k1")]})
+    token = _token_for(key, kid="k1", audience="app-1")
+    channel = TeamsChannel(app_id="app-1", app_password="pw")
+
+    verified = await channel.verify_inbound(
+        headers={"Authorization": f"Bearer {token}"}, body=_body()
+    )
+    assert verified is True
+
+
+@pytest.mark.asyncio
+async def test_verify_inbound_rejects_a_service_url_the_token_does_not_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The JWT signs nothing about the request body, so a VALID token replayed
+    against a body naming the attacker's own `serviceUrl` would otherwise be
+    accepted -- and that host is exactly what `deliver`/`withdraw`/`say` hand
+    the bot's AAD access token to afterwards. Bot Framework's own auth
+    contract requires this comparison."""
+    from channel.channel import TeamsChannel
+
+    key = _keypair()
+    _install_jwks(monkeypatch, {"keys": [_jwk_for(key, kid="k1")]})
+    token = _token_for(key, kid="k1", audience="app-1")
+    channel = TeamsChannel(app_id="app-1", app_password="pw")
+
+    verified = await channel.verify_inbound(
+        headers={"Authorization": f"Bearer {token}"},
+        body=_body("https://evil.example.com/teams/"),
+    )
+    assert verified is False
+
+
+@pytest.mark.asyncio
+async def test_verify_inbound_rejects_a_body_with_no_service_url_at_all(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from channel.channel import TeamsChannel
+
+    key = _keypair()
+    _install_jwks(monkeypatch, {"keys": [_jwk_for(key, kid="k1")]})
+    token = _token_for(key, kid="k1", audience="app-1")
+    channel = TeamsChannel(app_id="app-1", app_password="pw")
+
+    assert (
+        await channel.verify_inbound(headers={"Authorization": f"Bearer {token}"}, body=_body(None))
+        is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_verify_inbound_rejects_a_body_that_is_not_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from channel.channel import TeamsChannel
+
+    key = _keypair()
+    _install_jwks(monkeypatch, {"keys": [_jwk_for(key, kid="k1")]})
+    token = _token_for(key, kid="k1", audience="app-1")
+    channel = TeamsChannel(app_id="app-1", app_password="pw")
+
+    assert (
+        await channel.verify_inbound(
+            headers={"Authorization": f"Bearer {token}"}, body=b"not json at all"
+        )
+        is False
+    )
+
+
+def test_only_microsofts_own_connector_hosts_may_receive_the_bots_token() -> None:
+    """The allowlist is the second half of the serviceUrl defence: even a
+    serviceUrl that matched its token must still be a Bot Framework host
+    before `_post`/`_put` attach a live AAD access token to it."""
+    from channel.channel import _is_allowed_service_url
+
+    assert _is_allowed_service_url("https://smba.trafficmanager.net/teams/") is True
+    assert _is_allowed_service_url("https://smba.trafficmanager.net/emea/") is True
+    assert _is_allowed_service_url("https://api.botframework.com/") is True
+
+    assert _is_allowed_service_url("https://evil.example.com/") is False
+    # http, not https -- the token would go over the wire in clear.
+    assert _is_allowed_service_url("http://smba.trafficmanager.net/teams/") is False
+    # A suffix match on the STRING, not the host, would let both of these
+    # through.
+    assert _is_allowed_service_url("https://evil.com/?x=.botframework.com") is False
+    assert _is_allowed_service_url("https://notbotframework.com/") is False
+    assert _is_allowed_service_url("") is False
+
+
+@pytest.mark.asyncio
+async def test_post_and_put_refuse_a_service_url_off_the_allowlist() -> None:
+    """No HTTP is mocked here on purpose: if the guard fails, the call would
+    have to actually reach out, and this test would fail loudly rather than
+    quietly passing against a mock."""
+    from channel.channel import TeamsChannel
+
+    channel = TeamsChannel(app_id="app-1", app_password="pw")
+
+    with pytest.raises(ValueError, match="refusing to send"):
+        await channel._post("https://evil.example.com", "conv-1", {"type": "message"})
+    with pytest.raises(ValueError, match="refusing to send"):
+        await channel._put("https://evil.example.com", "conv-1", "act-1", {"type": "message"})

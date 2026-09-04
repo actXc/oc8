@@ -16,6 +16,7 @@ import time
 import uuid as _uuid
 from collections.abc import Mapping
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 import jwt
@@ -64,20 +65,45 @@ async def _get_jwks(*, force_refresh: bool = False) -> dict[str, Any]:
     return _jwks_cache
 
 
-async def _verify_activity_jwt(token: str, *, app_id: str) -> bool:
-    """Fails closed on anything unexpected -- a malformed token, an unknown
-    key id, a wrong audience or issuer, an expired signature -- because an
-    unauthenticated webhook that reaches the decision path is an open door
-    to approving anything, same discipline as Telegram's/WhatsApp's own
-    verify_inbound.
+#: The only hosts the bot's own access token may ever be sent to. `serviceUrl`
+#: arrives in an UNSIGNED request body (the inbound JWT covers no part of it),
+#: so without this an attacker who got one activity past `verify_inbound`
+#: could name their own host and be handed a live AAD token for it.
+_ALLOWED_SERVICE_URL_SUFFIXES = (".botframework.com", ".trafficmanager.net")
+
+
+def _is_allowed_service_url(url: str) -> bool:
+    """HTTPS, on one of Microsoft's own Connector hosts. Anything else is not
+    Bot Framework, whatever the Activity claims."""
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return False
+    if parsed.scheme != "https":
+        return False
+    host = (parsed.hostname or "").lower()
+    return any(host.endswith(suffix) for suffix in _ALLOWED_SERVICE_URL_SUFFIXES)
+
+
+async def _verify_activity_jwt(token: str, *, app_id: str) -> dict[str, Any] | None:
+    """The token's claims when it verifies, None when it does not.
+
+    Fails closed on anything unexpected -- a malformed token, an unknown key
+    id, a wrong audience or issuer, an expired signature -- because an
+    unauthenticated webhook that reaches the decision path is an open door to
+    approving anything, same discipline as Telegram's/WhatsApp's own
+    verify_inbound. The CLAIMS come back rather than a bare bool because the
+    caller has one more check to make that only they can: Bot Framework's auth
+    contract binds a token to a `serviceUrl`, and only the caller holds the
+    request body to compare it against.
     """
     try:
         header = jwt.get_unverified_header(token)
     except jwt.PyJWTError:
-        return False
+        return None
     kid = header.get("kid")
     if not kid:
-        return False
+        return None
     jwks = await _get_jwks()
     key_data = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
     if key_data is None:
@@ -86,10 +112,10 @@ async def _verify_activity_jwt(token: str, *, app_id: str) -> bool:
         jwks = await _get_jwks(force_refresh=True)
         key_data = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
         if key_data is None:
-            return False
+            return None
     try:
         public_key = RSAAlgorithm.from_jwk(json.dumps(key_data))
-        jwt.decode(
+        claims: dict[str, Any] = jwt.decode(
             token,
             key=public_key,  # type: ignore[arg-type]
             algorithms=["RS256"],
@@ -97,8 +123,8 @@ async def _verify_activity_jwt(token: str, *, app_id: str) -> bool:
             issuer=_JWKS_ISSUER,
         )
     except jwt.PyJWTError:
-        return False
-    return True
+        return None
+    return claims
 
 
 def render_body(notice: ApprovalNotice) -> list[dict[str, Any]]:
@@ -309,7 +335,29 @@ class TeamsChannel:
             logger.warning("rejected a Teams webhook call with no bearer token")
             return False
         token = auth[len("Bearer ") :]
-        return await _verify_activity_jwt(token, app_id=self._app_id)
+        # The JWT signs none of the body, so `serviceUrl` -- the host this
+        # channel will later hand its own AAD token to -- is caller-controlled
+        # until it has been matched against the token's own claim. Microsoft's
+        # auth contract requires exactly this comparison, and without it a
+        # replayed-but-valid token could redirect every outbound call.
+        try:
+            activity = json.loads(body)
+        except ValueError:
+            logger.warning("rejected a Teams webhook call whose body is not JSON")
+            return False
+        body_service_url = activity.get("serviceUrl") if isinstance(activity, dict) else None
+        if not body_service_url:
+            logger.warning("rejected a Teams webhook call with no serviceUrl in its body")
+            return False
+        claims = await _verify_activity_jwt(token, app_id=self._app_id)
+        if claims is None:
+            return False
+        if claims.get("serviceUrl") != body_service_url:
+            logger.warning(
+                "rejected a Teams webhook call whose serviceUrl claim does not match its body"
+            )
+            return False
+        return True
 
     def parse_inbound(
         self, update: Mapping[str, Any]
@@ -334,6 +382,8 @@ class TeamsChannel:
     async def _post(
         self, service_url: str, conversation_id: str, activity: dict[str, Any]
     ) -> dict[str, Any]:
+        if not _is_allowed_service_url(service_url):
+            raise ValueError(f"refusing to send a Teams activity to {service_url!r}")
         token = await self._access_token()
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.post(
@@ -348,6 +398,8 @@ class TeamsChannel:
     async def _put(
         self, service_url: str, conversation_id: str, activity_id: str, activity: dict[str, Any]
     ) -> None:
+        if not _is_allowed_service_url(service_url):
+            raise ValueError(f"refusing to send a Teams activity to {service_url!r}")
         token = await self._access_token()
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.put(
