@@ -269,6 +269,21 @@ describe("ChatWindow attachments", () => {
     expect(screen.getByText("notes.txt")).toBeInTheDocument();
   });
 
+  it("refuses a file over the 25 MB cap without calling the upload", () => {
+    // Client half of the cap: fast feedback only -- the server's own check is
+    // authoritative. Without this the browser uploaded the whole thing just to
+    // be told 413.
+    messagesMock.mockReturnValue({ data: [], isLoading: false });
+    renderChat();
+
+    const huge = new File(["x"], "huge.pdf", { type: "application/pdf" });
+    Object.defineProperty(huge, "size", { value: 26 * 1024 * 1024 });
+    fireEvent.change(screen.getByLabelText(/attach a file/i), { target: { files: [huge] } });
+
+    expect(uploadAttachmentMock).not.toHaveBeenCalled();
+    expect(screen.queryByText("huge.pdf")).not.toBeInTheDocument();
+  });
+
   it("removing a pending chip before send removes it", () => {
     messagesMock.mockReturnValue({ data: [], isLoading: false });
     uploadAttachmentMock.mockImplementation(

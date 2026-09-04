@@ -890,3 +890,112 @@ async def test_send_message_with_an_image_attachment_populates_task_images(
         assert run.context["task_images"] == [
             {"bucket_key": att.bucket_key, "content_type": "image/png"}
         ]
+
+
+async def test_send_message_ignores_an_attachment_from_another_session(
+    app_session: AppSessionFactory, redis_url: str, minio_url: str
+) -> None:
+    """The re-point is scoped to THIS session's own pending uploads, not just
+    to the tenant: re-pointing is the one act that makes an attachment
+    readable through `files.py`'s `_owned_attachment` (which resolves a sent
+    attachment through its message's session), so an id naming someone
+    else's upload must simply not be found."""
+    tenant = uuid.uuid4()
+    agent_id = await _seed_agent(app_session, tenant)
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            sessions = [
+                (
+                    await c.post(
+                        "/api/v1/chat/sessions",
+                        json={"agentId": str(agent_id)},
+                        headers=_headers(tenant),
+                    )
+                ).json()["id"]
+                for _ in range(2)
+            ]
+            other_attachment_id = (
+                await c.post(
+                    f"/api/v1/chat/sessions/{sessions[1]}/attachments",
+                    files={"file": ("theirs.txt", b"not yours", "text/plain")},
+                    headers=_headers(tenant),
+                )
+            ).json()["id"]
+
+            send_r = await c.post(
+                f"/api/v1/chat/sessions/{sessions[0]}/messages",
+                json={"message": "see attached", "attachmentIds": [other_attachment_id]},
+                headers=_headers(tenant),
+            )
+            assert send_r.status_code == 201, send_r.text
+            run_id = send_r.json()["runId"]
+
+    async with app_session(tenant) as db:
+        run = await db.get(m.AgentRun, uuid.UUID(run_id))
+        assert run is not None
+        assert "not yours" not in run.context["task"]
+        att = await db.get(m.FileAttachment, uuid.UUID(other_attachment_id))
+        assert att is not None
+        assert str(att.owner_id) == sessions[1]  # untouched, still the other session's
+
+
+async def test_deleting_a_session_deletes_its_attachments_and_their_blobs(
+    app_session: AppSessionFactory, redis_url: str, minio_url: str
+) -> None:
+    """The design doc: a deleted session's attachments are cleaned up "the
+    same way (DB row + object-store blob)". Covers both shapes -- one sent
+    (owner_id is a ChatMessage) and one uploaded but never sent (owner_id is
+    still the ChatSession)."""
+    from oc8.storage import s3
+
+    tenant = uuid.uuid4()
+    agent_id = await _seed_agent(app_session, tenant)
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            session_id = (
+                await c.post(
+                    "/api/v1/chat/sessions",
+                    json={"agentId": str(agent_id)},
+                    headers=_headers(tenant),
+                )
+            ).json()["id"]
+
+            sent_id = (
+                await c.post(
+                    f"/api/v1/chat/sessions/{session_id}/attachments",
+                    files={"file": ("sent.txt", b"sent", "text/plain")},
+                    headers=_headers(tenant),
+                )
+            ).json()["id"]
+            unsent_id = (
+                await c.post(
+                    f"/api/v1/chat/sessions/{session_id}/attachments",
+                    files={"file": ("unsent.txt", b"unsent", "text/plain")},
+                    headers=_headers(tenant),
+                )
+            ).json()["id"]
+            send_r = await c.post(
+                f"/api/v1/chat/sessions/{session_id}/messages",
+                json={"message": "see attached", "attachmentIds": [sent_id]},
+                headers=_headers(tenant),
+            )
+            assert send_r.status_code == 201, send_r.text
+
+            async with app_session(tenant) as db:
+                keys = [
+                    (await db.get(m.FileAttachment, uuid.UUID(i))).bucket_key  # type: ignore[union-attr]
+                    for i in (sent_id, unsent_id)
+                ]
+            for key in keys:
+                assert await s3.object_exists(key)
+
+            del_r = await c.delete(f"/api/v1/chat/sessions/{session_id}", headers=_headers(tenant))
+            assert del_r.status_code == 204, del_r.text
+
+    async with app_session(tenant) as db:
+        for i in (sent_id, unsent_id):
+            assert await db.get(m.FileAttachment, uuid.UUID(i)) is None
+    for key in keys:
+        assert not await s3.object_exists(key)

@@ -18,6 +18,7 @@ from sqlalchemy import select
 
 from oc8 import models as m
 from oc8.auth import get_identity_provider
+from oc8.knowledge.ingest import MAX_DOCUMENT_LENGTH
 from oc8.main import create_app
 from tests.conftest import AppSessionFactory
 
@@ -239,3 +240,63 @@ async def test_delete_file_removes_the_row_and_the_object(
             )
         ).scalar_one_or_none()
         assert row is None
+
+
+async def test_download_forces_a_download_and_blocks_mime_sniffing(
+    app_session: AppSessionFactory, minio_url: str
+) -> None:
+    """`content_type` is the CLIENT-declared MIME type and `text/html` is on
+    the allowlist, while Caddy serves the API and the SSR frontend from ONE
+    origin -- so stored bytes must never be renderable as a same-origin
+    document."""
+    tenant = uuid.uuid4()
+    _agent_id, session_id = await _seed_agent_and_session(app_session, tenant)
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.post(
+                f"/api/v1/chat/sessions/{session_id}/attachments",
+                files={
+                    "file": (
+                        "note.html",
+                        io.BytesIO(b"<script>alert(1)</script>"),
+                        "text/html",
+                    )
+                },
+                headers=_headers(tenant),
+            )
+            attachment_id = r.json()["id"]
+
+            get_r = await c.get(f"/api/v1/files/{attachment_id}", headers=_headers(tenant))
+            assert get_r.status_code == 200, get_r.text
+            assert get_r.headers["content-disposition"].startswith("attachment")
+            assert get_r.headers["x-content-type-options"] == "nosniff"
+
+
+async def test_upload_truncates_extracted_text_to_the_document_cap(
+    app_session: AppSessionFactory, minio_url: str
+) -> None:
+    """The design doc's Extraction Pipeline applies the SAME 200,000-char cap
+    the KB ingest path uses -- truncating, never refusing. Without it a 25 MB
+    text-extractable file's whole content is appended verbatim to the run's
+    task text, and `trim_to_budget` always keeps the newest message."""
+    tenant = uuid.uuid4()
+    _agent_id, session_id = await _seed_agent_and_session(app_session, tenant)
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            oversized = b"a" * (MAX_DOCUMENT_LENGTH + 5_000)
+            r = await c.post(
+                f"/api/v1/chat/sessions/{session_id}/attachments",
+                files={"file": ("long.txt", io.BytesIO(oversized), "text/plain")},
+                headers=_headers(tenant),
+            )
+            assert r.status_code == 201, r.text  # truncated, NOT refused
+            attachment_id = r.json()["id"]
+
+    async with app_session(tenant) as db:
+        row = await db.get(m.FileAttachment, uuid.UUID(attachment_id))
+        assert row is not None
+        assert row.extracted_text is not None
+        assert len(row.extracted_text) == MAX_DOCUMENT_LENGTH
+        assert row.size_bytes == len(oversized)  # the stored blob is untouched

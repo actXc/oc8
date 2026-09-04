@@ -908,16 +908,34 @@ async def execute_control_tool(
         filename = str(tc.arguments.get("filename", "")).strip()
         if not filename:
             return ControlOutcome(output="ERROR: read_instruction_file requires `filename`")
+        # Newest-first + first(), NOT scalar_one_or_none(): nothing makes
+        # `filename` unique per agent -- the Instructions tab happily accepts
+        # the same name twice (attachments have no versioning, so re-uploading
+        # a corrected `policy.pdf` without deleting the old one is the obvious
+        # operator mistake). `scalar_one_or_none` raised MultipleResultsFound
+        # on that, which nothing around either dispatcher catches: it killed
+        # the whole run in-process and 500'd `/internal/runs/{id}/tool` in the
+        # container. The most recently attached copy wins, which is the one an
+        # operator who re-uploaded meant.
         attachment = (
-            await db.execute(
-                select(m.FileAttachment).where(
-                    m.FileAttachment.tenant_id == tenant_id,
-                    m.FileAttachment.owner_type == "agent_instructions",
-                    m.FileAttachment.owner_id == agent.id,
-                    m.FileAttachment.filename == filename,
+            (
+                await db.execute(
+                    select(m.FileAttachment)
+                    .where(
+                        m.FileAttachment.tenant_id == tenant_id,
+                        m.FileAttachment.owner_type == "agent_instructions",
+                        m.FileAttachment.owner_id == agent.id,
+                        m.FileAttachment.filename == filename,
+                    )
+                    # `id` only breaks a `created_at` tie (two uploads inside
+                    # one transaction share a timestamp) -- there to make the
+                    # pick deterministic, not to order anything meaningfully.
+                    .order_by(m.FileAttachment.created_at.desc(), m.FileAttachment.id.desc())
                 )
             )
-        ).scalar_one_or_none()
+            .scalars()
+            .first()
+        )
         if attachment is None:
             return ControlOutcome(output=f"ERROR: no such file: {filename}")
         if attachment.is_image:

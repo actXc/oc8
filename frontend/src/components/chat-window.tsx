@@ -7,6 +7,7 @@
 
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { ChevronDown, MessageSquare, Paperclip, Pencil, Plus, Send, Trash2, X } from "lucide-react";
+import { toast } from "sonner";
 import { Panel } from "@/components/app-shell";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { RUN_COMPONENT_REGISTRY } from "@/components/run-record-card";
@@ -16,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useConfirm } from "@/hooks/use-confirm";
+import { MAX_ATTACHMENT_BYTES } from "@/lib/api";
 import {
   useChatSessions,
   useCreateChatSession,
@@ -76,8 +78,23 @@ export function ChatWindow({ agentId, agentName }: { agentId: string; agentName:
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file || !sessionId) return;
+    // Client half of the 25 MB cap -- fast feedback only; the server's own
+    // check is what actually enforces it (see MAX_ATTACHMENT_BYTES).
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      toast.error(t("File is too large", "Datei ist zu groß"), {
+        description: t("Attachments are limited to 25 MB.", "Anhänge sind auf 25 MB begrenzt."),
+      });
+      return;
+    }
     uploadAttachment.mutate(file, {
       onSuccess: (dto) => setPendingAttachments((p) => [...p, dto]),
+      // Without this a rejected upload (413, 422 for a disallowed type, 503
+      // for an unreachable object store) did nothing visible at all: no chip
+      // appeared and no error was shown.
+      onError: (error: Error) =>
+        toast.error(t("Couldn't upload the file", "Datei konnte nicht hochgeladen werden"), {
+          description: error.message,
+        }),
     });
   }
 

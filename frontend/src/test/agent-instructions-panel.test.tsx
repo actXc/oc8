@@ -41,6 +41,9 @@ vi.mock("@/lib/api", () => ({
   listInstructionFiles: (agentId: string) => listInstructionFilesMock(agentId),
   uploadInstructionFile: (agentId: string, file: File) => uploadInstructionFileMock(agentId, file),
   deleteFile: (fileId: string) => deleteFileMock(fileId),
+  // Real value, not a stand-in: the panel's client-side size check reads it,
+  // and leaving it undefined would silently disable that check here.
+  MAX_ATTACHMENT_BYTES: 25 * 1024 * 1024,
 }));
 
 // Only useAssistant is mocked here -- useAgentInstructionHistory,
@@ -620,6 +623,20 @@ describe("AgentInstructionsPanel", () => {
 
       await waitFor(() => expect(uploadInstructionFileMock).toHaveBeenCalledWith("agent-1", file));
       expect(await screen.findByText("runbook.pdf")).toBeInTheDocument();
+    });
+
+    it("refuses a file over the 25 MB cap without calling the upload", async () => {
+      // Client half of the cap: fast feedback only -- the server's own check
+      // is authoritative.
+      listInstructionFilesMock.mockImplementation(() => []);
+      renderWithClient(<AgentInstructionsPanel agentId="agent-1" mission="" mayManage={true} />);
+      await screen.findByText(/no files attached yet/i);
+
+      const huge = new File(["%PDF-1.4"], "huge.pdf", { type: "application/pdf" });
+      Object.defineProperty(huge, "size", { value: 26 * 1024 * 1024 });
+      fireEvent.change(screen.getByLabelText(/attach a file/i), { target: { files: [huge] } });
+
+      expect(uploadInstructionFileMock).not.toHaveBeenCalled();
     });
 
     it("deleting an attached file asks for confirmation, then removes it", async () => {

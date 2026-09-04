@@ -3,6 +3,7 @@ import { Paperclip, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Panel } from "@/components/app-shell";
 import { useConfirm } from "@/hooks/use-confirm";
+import { MAX_ATTACHMENT_BYTES } from "@/lib/api";
 import {
   useAgentInstructionFiles,
   useAgentInstructionHistory,
@@ -321,6 +322,14 @@ export function AgentInstructionsPanel({
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
+    // Client half of the 25 MB cap -- fast feedback only; the server's own
+    // check is what actually enforces it (see MAX_ATTACHMENT_BYTES).
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      toast.error(t("File is too large", "Datei ist zu groß"), {
+        description: t("Attachments are limited to 25 MB.", "Anhänge sind auf 25 MB begrenzt."),
+      });
+      return;
+    }
     uploadFile.mutate(file, {
       onError: (error: Error) =>
         toast.error(t("Couldn't upload the file", "Datei konnte nicht hochgeladen werden"), {

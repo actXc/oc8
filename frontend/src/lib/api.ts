@@ -305,6 +305,12 @@ export interface FileAttachmentDTO {
   createdAt: string;
 }
 
+/** Mirrors `_MAX_BYTES` in `backend/src/oc8/api/v1/files.py`. The server's
+ * check is the authoritative one -- this exists so a 200 MB video fails in
+ * the same instant it is picked, instead of after uploading all of it just
+ * to be told 413. Never treat it as a security boundary. */
+export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
 export async function uploadChatAttachment(
   sessionId: string,
   file: File,

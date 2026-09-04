@@ -18,7 +18,7 @@ from oc8.api.deps import DbSession, require_departmental
 from oc8.api.v1.chat import _owned_session
 from oc8.authz.permissions import AGENT, VIEW, perm
 from oc8.authz.scope import HumanActor
-from oc8.knowledge.ingest import IngestionError, extract_text
+from oc8.knowledge.ingest import MAX_DOCUMENT_LENGTH, IngestionError, extract_text
 from oc8.schemas.dto import FileAttachmentDTO
 from oc8.storage import s3
 
@@ -82,6 +82,17 @@ async def _store_upload(
             extracted_text = extract_text(content=payload, content_type=file.content_type)
         except IngestionError:
             extracted_text = None  # upload still succeeds -- see Global Constraints
+        if extracted_text is not None and len(extracted_text) > MAX_DOCUMENT_LENGTH:
+            # Truncate, never refuse -- the design doc's Extraction Pipeline
+            # section applies the SAME 200,000-char cap the knowledge-base
+            # ingest path uses, and `extract_text` itself does not enforce it
+            # (its KB caller does, by failing the job -- not an option here,
+            # where an oversized-but-readable file must still upload). Without
+            # this, a 25 MB spreadsheet's whole extracted text is appended
+            # verbatim to the run's task text and sent to the model: nothing
+            # downstream bounds it, since `trim_to_budget` always keeps the
+            # newest message even when it alone blows the context budget.
+            extracted_text = extracted_text[:MAX_DOCUMENT_LENGTH]
 
     bucket_key = f"{tenant_id}/{owner_type}/{uuid.uuid4()}-{file.filename}"
     await s3.put_object(bucket_key, raw, file.content_type)
@@ -178,7 +189,23 @@ async def download_file(
 ) -> Response:
     row = await _owned_attachment(db, actor, attachment_id)
     raw = await s3.get_object(row.bucket_key)
-    return Response(content=raw, media_type=row.content_type)
+    return Response(
+        content=raw,
+        media_type=row.content_type,
+        headers={
+            # `content_type` is the CLIENT-declared MIME type (the allowlist
+            # checks it, nothing re-sniffs the bytes -- a deliberate scoping
+            # decision, see the design doc's Extraction Pipeline section), and
+            # `text/html` is on that allowlist. Caddy puts the API and the SSR
+            # frontend on ONE origin, so serving stored bytes inline would let
+            # an uploaded .html run as a same-origin document. Forced to a
+            # download, and told not to sniff -- the same shape every other
+            # file-serving endpoint here already uses (backup.py, audit.py,
+            # capas.py).
+            "Content-Disposition": "attachment",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.delete("/files/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)

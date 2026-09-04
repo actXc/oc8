@@ -23,6 +23,7 @@ outcome becomes the durable transcript message the Chat UI reads.
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import uuid
 
 from sqlalchemy import delete, select, text, update
@@ -31,6 +32,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from oc8 import models as m
 from oc8.copilot.redaction import is_secret_request, redact_text
 from oc8.runtime.intake import enqueue_run
+from oc8.storage import s3
+
+logger = logging.getLogger(__name__)
 
 #: How many prior turns to fold into the next run's `task` text. A chat is
 #: interactive, not a long autonomous investigation -- this keeps the prompt
@@ -90,7 +94,54 @@ async def rename_session(db: AsyncSession, *, session: m.ChatSession, title: str
 async def delete_session(db: AsyncSession, *, tenant_id: uuid.UUID, session: m.ChatSession) -> None:
     """`ChatMessage` carries no DB-level foreign key to `ChatSession` (this
     codebase's tables generally don't use them) -- its transcript has to be
-    removed explicitly or it survives as orphaned rows."""
+    removed explicitly or it survives as orphaned rows.
+
+    Same for the turns' file attachments: the design doc says a deleted
+    session's attachments are "cleaned up the same way (DB row + object-store
+    blob)", and nothing else ever would -- an attachment's `owner_id` points
+    at a `ChatSession` before its message is sent and at a `ChatMessage`
+    after, so once both are gone the row is unreachable through every
+    endpoint and the blob is billable storage no one can name. Includes
+    attachments still owned by the session itself: uploaded, then never sent
+    (the operator removed the chip, or closed the tab).
+
+    The object-store deletes are best-effort by design -- a blob the store no
+    longer has (or a store that is briefly down) must not block deleting the
+    conversation, which is the thing the operator actually asked for. A leaked
+    blob is recoverable later from the bucket; a chat that refuses to delete
+    is not.
+    """
+    message_ids = list(
+        (
+            await db.execute(
+                select(m.ChatMessage.id).where(
+                    m.ChatMessage.tenant_id == tenant_id,
+                    m.ChatMessage.session_id == session.id,
+                )
+            )
+        ).scalars()
+    )
+    attachments = list(
+        (
+            await db.execute(
+                select(m.FileAttachment).where(
+                    m.FileAttachment.tenant_id == tenant_id,
+                    m.FileAttachment.owner_type == "chat_message",
+                    m.FileAttachment.owner_id.in_([session.id, *message_ids]),
+                )
+            )
+        ).scalars()
+    )
+    for attachment in attachments:
+        try:
+            await s3.delete_object(attachment.bucket_key)
+        except Exception:  # best-effort by design -- see the docstring
+            logger.warning(
+                "could not delete attachment blob %s for chat session %s",
+                attachment.bucket_key,
+                session.id,
+            )
+        await db.delete(attachment)
     await db.execute(
         delete(m.ChatMessage).where(
             m.ChatMessage.tenant_id == tenant_id, m.ChatMessage.session_id == session.id
@@ -171,6 +222,14 @@ async def send_message(
 
     attachments: list[m.FileAttachment] = []
     if attachment_ids:
+        # Scoped to THIS session's own pending uploads (`owner_id ==
+        # session.id`), not just to the tenant: tenant + RLS alone would let
+        # any id in the tenant be re-pointed onto this caller's message,
+        # which is also the one thing that would then make it readable
+        # through `files.py`'s `_owned_attachment` (it resolves a sent
+        # attachment through its message's session). An id that names another
+        # session's upload, or one already attached to a sent message, is
+        # simply not found here -- no versioning, no re-attaching.
         attachments = list(
             (
                 await db.execute(
@@ -178,19 +237,17 @@ async def send_message(
                         m.FileAttachment.tenant_id == tenant_id,
                         m.FileAttachment.id.in_(attachment_ids),
                         m.FileAttachment.owner_type == "chat_message",
+                        m.FileAttachment.owner_id == session.id,
                     )
                 )
             ).scalars()
         )
-        await db.execute(
-            update(m.FileAttachment)
-            .where(
-                m.FileAttachment.tenant_id == tenant_id,
-                m.FileAttachment.id.in_(attachment_ids),
-                m.FileAttachment.owner_type == "chat_message",
+        if attachments:
+            await db.execute(
+                update(m.FileAttachment)
+                .where(m.FileAttachment.id.in_([a.id for a in attachments]))
+                .values(owner_id=user_message.id)
             )
-            .values(owner_id=user_message.id)
-        )
 
     # The tenant's unified Assistant is secret-blind by design (carried over
     # from the retired raw-completion Copilot path, oc8.copilot.redaction):

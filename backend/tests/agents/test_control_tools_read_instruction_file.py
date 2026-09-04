@@ -7,6 +7,7 @@ vision support, only chat attachments do)."""
 
 from __future__ import annotations
 
+import datetime as dt
 import uuid
 from typing import Any
 
@@ -357,3 +358,57 @@ async def test_an_attachment_with_no_extracted_text_reports_that_plainly(
         )
     assert outcome is not None
     assert "could not read" in outcome.output
+
+
+@pytest.mark.asyncio
+async def test_read_instruction_file_survives_two_files_with_the_same_name(
+    app_session: Any,
+) -> None:
+    """Nothing makes `filename` unique per agent, and attachments have no
+    versioning -- so re-uploading a corrected `policy.pdf` without deleting
+    the old one leaves two rows. That used to raise MultipleResultsFound,
+    which neither dispatcher catches: it killed the run in-process and 500'd
+    `/internal/runs/{id}/tool` in the container. The newest copy wins."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        agent, task = await _dept_agent_task(db, tenant)
+        older = m.FileAttachment(
+            tenant_id=tenant,
+            owner_type="agent_instructions",
+            owner_id=agent.id,
+            bucket_key="policy-old",
+            filename="policy.pdf",
+            content_type="application/pdf",
+            size_bytes=10,
+            extracted_text="Refunds within 14 days.",
+            is_image=False,
+            created_at=dt.datetime(2026, 1, 1, tzinfo=dt.UTC),
+        )
+        newer = m.FileAttachment(
+            tenant_id=tenant,
+            owner_type="agent_instructions",
+            owner_id=agent.id,
+            bucket_key="policy-new",
+            filename="policy.pdf",
+            content_type="application/pdf",
+            size_bytes=10,
+            extracted_text="Refunds within 30 days.",
+            is_image=False,
+            created_at=dt.datetime(2026, 6, 1, tzinfo=dt.UTC),
+        )
+        db.add_all([older, newer])
+        await db.flush()
+        outcome = await execute_control_tool(
+            db,
+            tenant_id=tenant,
+            agent=agent,
+            task=task,
+            tc=ToolCall(id="1", name="read_instruction_file", arguments={"filename": "policy.pdf"}),
+            decision=Decision(Effect.ALLOW),
+            assigned_skills=[],
+            active_skills=[],
+            mcp_conn=None,
+            originating_operator=None,
+        )
+    assert outcome is not None
+    assert "Refunds within 30 days." in outcome.output
