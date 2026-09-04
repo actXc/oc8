@@ -186,6 +186,11 @@ export interface ModelDTO {
   // model that sets no per-agent override. null means "framework default"
   // (1536), not "unlimited".
   maxTokens?: number | null;
+  // Free-form reasoning-effort knob forwarded verbatim to providers that
+  // support it (e.g. Anthropic). Not validated against a fixed set of
+  // values -- the provider owns what it accepts and that changes on its
+  // own schedule. null means "not set".
+  effort?: string | null;
   usedByCopilot: boolean;
   supportsVision?: boolean;
   credentialId: string | null;
@@ -222,6 +227,7 @@ export interface ModelWriteBody {
   locality: string;
   displayName?: string;
   maxTokens?: number;
+  effort?: string;
   usedByCopilot?: boolean;
   supportsVision?: boolean;
   credentialId?: string | null;

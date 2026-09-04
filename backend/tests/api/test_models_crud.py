@@ -270,6 +270,80 @@ async def test_patch_sets_and_clears_supports_vision() -> None:
             assert r.json()["supportsVision"] is False
 
 
+async def test_create_model_accepts_effort() -> None:
+    tenant = uuid.UUID(str(ACME_TENANT_ID))
+    app = create_app()
+    async with LifespanManager(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            headers = {"Authorization": f"Bearer {_token(tenant)}"}
+            r = await client.post(
+                "/api/v1/models",
+                json={
+                    "provider": "anthropic",
+                    "model": "claude-sonnet-5",
+                    "locality": "cloud",
+                    "effort": "high",
+                },
+                headers=headers,
+            )
+            assert r.status_code == 201, r.text
+            assert r.json()["effort"] == "high"
+
+
+async def test_patch_sets_and_clears_effort() -> None:
+    tenant = uuid.UUID(str(ACME_TENANT_ID))
+    app = create_app()
+    async with LifespanManager(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            headers = {"Authorization": f"Bearer {_token(tenant)}"}
+            r = await client.post(
+                "/api/v1/models",
+                json={"provider": "anthropic", "model": "claude-sonnet-5", "locality": "cloud"},
+                headers=headers,
+            )
+            assert r.status_code == 201, r.text
+            model_id = r.json()["id"]
+            assert r.json()["effort"] is None
+
+            r = await client.patch(
+                f"/api/v1/models/{model_id}",
+                json={
+                    "provider": "anthropic",
+                    "model": "claude-sonnet-5",
+                    "locality": "cloud",
+                    "effort": "medium",
+                },
+                headers=headers,
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["effort"] == "medium"
+
+            # Omitted on a later PATCH -> preserved, not nulled.
+            r = await client.patch(
+                f"/api/v1/models/{model_id}",
+                json={"provider": "anthropic", "model": "claude-sonnet-5", "locality": "cloud"},
+                headers=headers,
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["effort"] == "medium"
+
+            # Explicit blank -> cleared.
+            r = await client.patch(
+                f"/api/v1/models/{model_id}",
+                json={
+                    "provider": "anthropic",
+                    "model": "claude-sonnet-5",
+                    "locality": "cloud",
+                    "effort": "",
+                },
+                headers=headers,
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["effort"] is None
+
+
 async def test_create_model_canonicalizes_provider_alias() -> None:
     tenant = uuid.UUID(str(ACME_TENANT_ID))
     app = create_app()

@@ -13,7 +13,13 @@ import uuid
 from typing import Any
 
 from oc8 import models as m
-from oc8.modelrouter.sampling import DEFAULT_MAX_TOKENS, DEFAULT_TEMPERATURE, resolve_params
+from oc8.modelrouter.sampling import (
+    DEFAULT_MAX_TOKENS,
+    DEFAULT_TEMPERATURE,
+    bumped_for_length_retry,
+    resolve_params,
+)
+from oc8.modelrouter.types import ModelParams
 
 
 def _agent(definition: dict[str, Any] | None = None) -> m.Agent:
@@ -103,3 +109,44 @@ def test_no_agent_at_all_still_resolves() -> None:
     """The coding loop and other callers may not have an Agent to hand."""
     p = resolve_params(_config({"temperature": 0.5}), agent=None)
     assert p.temperature == 0.5
+
+
+def test_effort_is_unset_by_default() -> None:
+    p = resolve_params(None, agent=_agent())
+    assert p.effort is None
+
+
+def test_the_model_config_can_set_effort() -> None:
+    p = resolve_params(_config({"effort": "high"}), agent=_agent())
+    assert p.effort == "high"
+
+
+def test_effort_is_forwarded_as_is_not_validated_against_a_fixed_set() -> None:
+    """The provider owns what it accepts; oc8 does not guess at today's set."""
+    p = resolve_params(_config({"effort": "medium-plus"}), agent=_agent())
+    assert p.effort == "medium-plus"
+
+
+def test_the_agent_overrides_the_model_configs_effort() -> None:
+    p = resolve_params(
+        _config({"effort": "low"}),
+        agent=_agent({"model_params": {"effort": "high"}}),
+    )
+    assert p.effort == "high"
+
+
+def test_a_blank_effort_falls_back_to_unset() -> None:
+    p = resolve_params(_config({"effort": "   "}), agent=_agent())
+    assert p.effort is None
+
+
+def test_a_non_string_effort_falls_back_to_unset() -> None:
+    p = resolve_params(_config({"effort": 3}), agent=_agent())
+    assert p.effort is None
+
+
+def test_a_length_retry_carries_effort_through() -> None:
+    """A doubled max_tokens budget must not silently drop the effort setting."""
+    bumped = bumped_for_length_retry(ModelParams(temperature=0.5, max_tokens=100, effort="high"))
+    assert bumped.effort == "high"
+    assert bumped.max_tokens == 200

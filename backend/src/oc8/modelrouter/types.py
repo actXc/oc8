@@ -105,6 +105,12 @@ class CompletionChunk:
 class ModelParams:
     temperature: float = 0.2
     max_tokens: int = 1024
+    #: Forwarded to the provider verbatim, whatever it currently accepts
+    #: ("low"/"medium"/"high", a number-as-string, ...) -- unlike temperature
+    #: there is no oc8-side notion of a valid range, since the provider owns
+    #: that set and changes it without oc8's involvement. None omits the
+    #: field entirely rather than sending a guessed default.
+    effort: str | None = None
 
 
 @dataclass

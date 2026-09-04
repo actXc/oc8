@@ -85,18 +85,3 @@ export function useUpdateAgentRuntime(agentId: string) {
     },
   });
 }
-
-// POST /agents/{id}/skills expects { skillVersionId: string } (AssignSkillRequest
-// in backend/src/oc8/schemas/requests.py:38) and returns { status: "assigned" },
-// not an AgentDetail.
-export function useAssignSkill(agentId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: { skillVersionId: string }) =>
-      api.post<{ status: string }>(`/agents/${agentId}/skills`, body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["agents", agentId] });
-      qc.invalidateQueries({ queryKey: ["skills"] });
-    },
-  });
-}

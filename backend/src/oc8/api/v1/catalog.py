@@ -184,6 +184,7 @@ async def create_model(
         locality=body.locality,
         display_name=body.display_name,
         credential_id=uuid.UUID(body.credential_id) if body.credential_id else None,
+        params={"effort": body.effort.strip()} if body.effort and body.effort.strip() else {},
     )
     db.add(cfg)
     await db.flush()  # cfg.id must exist before the auto-activation count query below
@@ -254,6 +255,14 @@ async def update_model(
             params["supports_vision"] = True
         else:
             params.pop("supports_vision", None)
+        cfg.params = params
+    if "effort" in body.model_fields_set:
+        # jsonb: replaced whole, or SQLAlchemy never notices the mutation.
+        params = dict(cfg.params or {})
+        if body.effort and body.effort.strip():
+            params["effort"] = body.effort.strip()
+        else:
+            params.pop("effort", None)
         cfg.params = params
     if "used_by_copilot" in body.model_fields_set:
         await _apply_copilot_flag(db, _p.tenant_id, cfg, body.used_by_copilot)

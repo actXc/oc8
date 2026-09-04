@@ -301,6 +301,8 @@ class ModelDTO(CamelModel):
     #: default" (1536), not "unlimited".
     max_tokens: int | None = None
     supports_vision: bool = False
+    #: Forwarded to the provider verbatim; see ModelConfigWrite.effort.
+    effort: str | None = None
     used_by_copilot: bool = False
     credential_id: str | None = None
     #: Set only when `status` is "error"/"unknown" -- the real reason from
