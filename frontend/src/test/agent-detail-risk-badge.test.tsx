@@ -35,6 +35,7 @@ const AGENT: AgentDetail = {
   temperature: null,
   maxTokens: null,
   effort: null,
+  extra: null,
 };
 
 function model(overrides: Partial<ModelDTO> = {}): ModelDTO {

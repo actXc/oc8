@@ -191,6 +191,10 @@ export interface ModelDTO {
   // values -- the provider owns what it accepts and that changes on its
   // own schedule. null means "not set".
   effort?: string | null;
+  // Free-form top-level request fields forwarded verbatim after every named
+  // field (e.g. OpenRouter's `provider`/`top_p`) -- oc8 has no schema for
+  // these, the provider does. null/undefined means "none set".
+  extra?: Record<string, unknown> | null;
   usedByCopilot: boolean;
   supportsVision?: boolean;
   credentialId: string | null;
@@ -228,6 +232,7 @@ export interface ModelWriteBody {
   displayName?: string;
   maxTokens?: number;
   effort?: string;
+  extra?: Record<string, unknown>;
   usedByCopilot?: boolean;
   supportsVision?: boolean;
   credentialId?: string | null;
@@ -1016,18 +1021,21 @@ export function useSwitchAgentModel() {
       temperature,
       maxTokens,
       effort,
+      extra,
     }: {
       agentId: string;
       modelConfigId: string;
       temperature?: number | null;
       maxTokens?: number | null;
       effort?: string | null;
+      extra?: Record<string, unknown> | null;
     }) =>
       api.patch<AgentDetail>(`/agents/${agentId}/model-config`, {
         modelConfigId,
         ...(temperature !== undefined ? { temperature } : {}),
         ...(maxTokens !== undefined ? { maxTokens } : {}),
         ...(effort !== undefined ? { effort } : {}),
+        ...(extra !== undefined ? { extra } : {}),
       }),
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: keys.agent(variables.agentId) });

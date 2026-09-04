@@ -52,6 +52,7 @@ def bumped_for_length_retry(params: ModelParams) -> ModelParams:
         temperature=params.temperature,
         max_tokens=params.max_tokens * LENGTH_RETRY_MAX_TOKENS_MULTIPLIER,
         effort=params.effort,
+        extra=params.extra,
     )
 
 
@@ -83,6 +84,17 @@ def _effort(raw: Any) -> str | None:
     return trimmed or None
 
 
+def _extra(raw: Any) -> dict[str, Any] | None:
+    """A usable raw-parameter dict, or None if this value says nothing.
+
+    Keys are whatever the operator typed; oc8 has no fixed schema for them
+    (the provider does) and does not validate values beyond "is this a dict".
+    """
+    if not isinstance(raw, dict) or not raw:
+        return None
+    return raw
+
+
 def resolve_params(
     config: m.ModelConfig | None,
     *,
@@ -95,10 +107,13 @@ def resolve_params(
     temperature = DEFAULT_TEMPERATURE
     max_tokens = DEFAULT_MAX_TOKENS
     effort: str | None = None
+    extra: dict[str, Any] = {}
 
     # Widest scope first, so a narrower one simply overwrites it. Each key is
     # considered independently: setting only temperature on an agent must not
-    # discard the model config's max_tokens.
+    # discard the model config's max_tokens. `extra` follows the same rule one
+    # level deeper -- an agent overriding one raw key must not drop the
+    # model's own raw keys it didn't mention.
     for source in (
         (config.params or {}) if config is not None else {},
         ((agent.definition or {}).get("model_params") or {}) if agent is not None else {},
@@ -111,5 +126,12 @@ def resolve_params(
             max_tokens = mt
         if (e := _effort(source.get("effort"))) is not None:
             effort = e
+        if (ex := _extra(source.get("extra"))) is not None:
+            extra.update(ex)
 
-    return ModelParams(temperature=temperature, max_tokens=max_tokens, effort=effort)
+    return ModelParams(
+        temperature=temperature,
+        max_tokens=max_tokens,
+        effort=effort,
+        extra=extra or None,
+    )

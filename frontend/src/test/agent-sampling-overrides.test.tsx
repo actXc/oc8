@@ -45,6 +45,7 @@ const AGENT: AgentDetail = {
   temperature: null,
   maxTokens: null,
   effort: null,
+  extra: null,
 };
 
 function model(overrides: Partial<ModelDTO> = {}): ModelDTO {
@@ -142,5 +143,62 @@ describe("AssignedModelPanel sampling overrides", () => {
     renderPanel(AGENT, false);
     expect(screen.getByText("Temperature").closest("label")?.querySelector("input")).toBeDisabled();
     expect(screen.queryByRole("button", { name: /save sampling settings/i })).toBeNull();
+  });
+});
+
+describe("AssignedModelPanel advanced/raw parameters", () => {
+  it("shows the raw-params editor for an anthropic assigned model", () => {
+    renderPanel();
+    expect(screen.getByText(/Advanced\/Raw parameters/i)).toBeInTheDocument();
+  });
+
+  it("hides the raw-params editor for a provider its adapter never merges extra for", () => {
+    renderPanel({ ...AGENT, modelConfigId: "m-ollama" });
+    expect(screen.queryByText(/Advanced\/Raw parameters/i)).toBeNull();
+  });
+
+  it("pre-fills rows from the agent's existing extra, JSON-encoding non-string values", () => {
+    renderPanel({ ...AGENT, extra: { top_p: 0.9, note: "keep it terse" } });
+    expect(screen.getByDisplayValue("top_p")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("0.9")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("note")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("keep it terse")).toBeInTheDocument();
+  });
+
+  it("saving parses a JSON-valued row and merges it into the switch-model payload", () => {
+    switchModelMutate.mockReset();
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: /add parameter/i }));
+    fireEvent.change(screen.getByPlaceholderText("key"), { target: { value: "top_p" } });
+    fireEvent.change(screen.getByPlaceholderText("value"), { target: { value: "0.9" } });
+    fireEvent.click(screen.getByRole("button", { name: /save sampling settings/i }));
+
+    expect(switchModelMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ extra: { top_p: 0.9 } }),
+      expect.anything(),
+    );
+  });
+
+  it("saving with every row cleared sends null, clearing back to inherit", () => {
+    switchModelMutate.mockReset();
+    renderPanel({ ...AGENT, extra: { top_p: 0.9 } });
+    fireEvent.click(screen.getByRole("button", { name: /remove parameter/i }));
+    fireEvent.click(screen.getByRole("button", { name: /save sampling settings/i }));
+
+    expect(switchModelMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ extra: null }),
+      expect.anything(),
+    );
+  });
+
+  it("never sends an extra override for a model whose provider hides the editor", () => {
+    switchModelMutate.mockReset();
+    renderPanel({ ...AGENT, modelConfigId: "m-ollama" });
+    fireEvent.click(screen.getByRole("button", { name: /save sampling settings/i }));
+
+    expect(switchModelMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ extra: undefined }),
+      expect.anything(),
+    );
   });
 });

@@ -399,7 +399,7 @@ async def switch_model(
     pres["provider"] = mc.provider
     agent.presentation = pres
     # jsonb: replaced whole, or SQLAlchemy never notices the mutation. Each
-    # of the three sampling overrides is independent -- a save that doesn't
+    # of the four sampling overrides is independent -- a save that doesn't
     # mention a field (not in model_fields_set) leaves whatever this agent
     # already had for it untouched, matching catalog.py's update_model's own
     # per-field semantics; a field present but null clears it back to
@@ -421,6 +421,11 @@ async def switch_model(
             model_params["effort"] = body.effort.strip()
         else:
             model_params.pop("effort", None)
+    if "extra" in body.model_fields_set:
+        if body.extra:
+            model_params["extra"] = body.extra
+        else:
+            model_params.pop("extra", None)
     if model_params:
         definition["model_params"] = model_params
     else:

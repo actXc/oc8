@@ -82,10 +82,10 @@ async def test_agent_sampling_overrides_persist_independently_and_clear_on_blank
     app_session: AppSessionFactory,
 ) -> None:
     """agent.definition["model_params"] -- resolve_params's narrowest-first
-    source (modelrouter/sampling.py). Each of the three fields is independent
+    source (modelrouter/sampling.py). Each of the four fields is independent
     (a save touching only one must not disturb the others), and a field
-    present but null/blank clears back to "inherit the model's own value",
-    matching catalog.py's update_model's own per-field semantics."""
+    present but null/blank/empty clears back to "inherit the model's own
+    value", matching catalog.py's update_model's own per-field semantics."""
     tenant = uuid.UUID(str(ACME_TENANT_ID))
     async with app_session(tenant) as db:
         department = m.Department(tenant_id=tenant, name=f"D-{uuid.uuid4().hex}", frame={})
@@ -110,7 +110,7 @@ async def test_agent_sampling_overrides_persist_independently_and_clear_on_blank
         async with AsyncClient(transport=transport, base_url="http://t") as client:
             headers = {"Authorization": f"Bearer {_token(tenant)}"}
 
-            # Set all three.
+            # Set all four.
             r = await client.patch(
                 f"/api/v1/agents/{agent_id}/model-config",
                 json={
@@ -118,6 +118,7 @@ async def test_agent_sampling_overrides_persist_independently_and_clear_on_blank
                     "temperature": 0.9,
                     "maxTokens": 4096,
                     "effort": "high",
+                    "extra": {"top_p": 0.9},
                 },
                 headers=headers,
             )
@@ -126,8 +127,9 @@ async def test_agent_sampling_overrides_persist_independently_and_clear_on_blank
             assert detail.json()["temperature"] == 0.9
             assert detail.json()["maxTokens"] == 4096
             assert detail.json()["effort"] == "high"
+            assert detail.json()["extra"] == {"top_p": 0.9}
 
-            # A save mentioning only temperature must not disturb maxTokens/effort.
+            # A save mentioning only temperature must not disturb the rest.
             r = await client.patch(
                 f"/api/v1/agents/{agent_id}/model-config",
                 json={"modelConfigId": str(model_id), "temperature": 0.5},
@@ -138,8 +140,9 @@ async def test_agent_sampling_overrides_persist_independently_and_clear_on_blank
             assert detail.json()["temperature"] == 0.5
             assert detail.json()["maxTokens"] == 4096
             assert detail.json()["effort"] == "high"
+            assert detail.json()["extra"] == {"top_p": 0.9}
 
-            # Explicit null/blank on all three clears them back to "inherit".
+            # Explicit null/blank/empty on all four clears them back to "inherit".
             r = await client.patch(
                 f"/api/v1/agents/{agent_id}/model-config",
                 json={
@@ -147,6 +150,7 @@ async def test_agent_sampling_overrides_persist_independently_and_clear_on_blank
                     "temperature": None,
                     "maxTokens": None,
                     "effort": "",
+                    "extra": {},
                 },
                 headers=headers,
             )
@@ -155,6 +159,7 @@ async def test_agent_sampling_overrides_persist_independently_and_clear_on_blank
             assert detail.json()["temperature"] is None
             assert detail.json()["maxTokens"] is None
             assert detail.json()["effort"] is None
+            assert detail.json()["extra"] is None
 
 
 async def test_non_admin_cannot_switch_agent_model(app_session: AppSessionFactory) -> None:

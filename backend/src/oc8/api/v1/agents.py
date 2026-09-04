@@ -267,6 +267,7 @@ async def _agent_detail_dto(db: DbSession, agent: m.Agent) -> AgentDetailDTO:
         temperature=model_params.get("temperature"),
         max_tokens=model_params.get("max_tokens"),
         effort=model_params.get("effort"),
+        extra=model_params.get("extra") if isinstance(model_params.get("extra"), dict) else None,
     )
 
 

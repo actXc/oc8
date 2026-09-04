@@ -303,6 +303,8 @@ class ModelDTO(CamelModel):
     supports_vision: bool = False
     #: Forwarded to the provider verbatim; see ModelConfigWrite.effort.
     effort: str | None = None
+    #: Free-form raw parameters forwarded verbatim; see ModelConfigWrite.extra.
+    extra: dict[str, Any] | None = None
     used_by_copilot: bool = False
     credential_id: str | None = None
     #: Set only when `status` is "error"/"unknown" -- the real reason from
@@ -563,6 +565,7 @@ class AgentDetailDTO(AgentDTO):
     temperature: float | None = None
     max_tokens: int | None = None
     effort: str | None = None
+    extra: dict[str, Any] | None = None
 
 
 class AgentInstructionRevisionDTO(CamelModel):

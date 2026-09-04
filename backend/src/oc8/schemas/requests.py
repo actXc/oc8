@@ -68,11 +68,16 @@ class ModelConfigRequest(CamelModel):
     #: Per-agent sampling overrides, written into agent.definition["model_params"]
     #: (modelrouter/sampling.py's resolve_params reads this as its narrowest-first
     #: source). None/absent on a field means "inherit the assigned ModelConfig's
-    #: own value" -- these three are independent, matching ModelConfigWrite's own
+    #: own value" -- these four are independent, matching ModelConfigWrite's own
     #: per-field semantics, not "unset the whole override on any partial save".
     temperature: float | None = None
     max_tokens: int | None = None
     effort: str | None = None
+    #: Free-form raw parameters merged into model_params["extra"] (resolve_params,
+    #: each adapter's payload builder). None/absent leaves the agent's existing
+    #: raw overrides untouched; an empty dict clears them back to inheriting the
+    #: assigned ModelConfig's own extra params.
+    extra: dict[str, Any] | None = None
 
 
 class InstructionsRequest(CamelModel):
@@ -105,6 +110,11 @@ class ModelConfigWrite(CamelModel):
     #: against a fixed set of values -- the provider owns what it accepts,
     #: and that changes on the provider's own schedule. Blank clears it.
     effort: str | None = None
+    #: Free-form top-level request fields forwarded verbatim after every named
+    #: field (modelrouter/sampling.py's resolve_params, each adapter's payload
+    #: builder) -- e.g. OpenRouter's `provider`/`top_p`. None leaves the
+    #: model's existing raw params untouched on update; {} clears them.
+    extra: dict[str, Any] | None = None
     used_by_copilot: bool | None = None
     #: A specific Credential to bind to this ModelConfig (id as string). None
     #: leaves the tenant-wide "first credential of this provider's type"

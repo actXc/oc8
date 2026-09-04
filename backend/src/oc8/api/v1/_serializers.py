@@ -286,6 +286,10 @@ def _int_or_none(value: Any) -> int | None:
     return parsed if parsed > 0 else None
 
 
+def _dict_or_none(value: Any) -> dict[str, Any] | None:
+    return value if isinstance(value, dict) and value else None
+
+
 def model_to_dto(mc: m.ModelConfig, assigned_to: list[str]) -> ModelDTO:
     health: dict[str, Any] = mc.health or {}
     cost: dict[str, Any] = mc.cost_meta or {}
@@ -308,6 +312,7 @@ def model_to_dto(mc: m.ModelConfig, assigned_to: list[str]) -> ModelDTO:
         max_tokens=_int_or_none((mc.params or {}).get("max_tokens")),
         supports_vision=bool((mc.params or {}).get("supports_vision", False)),
         effort=_str_or_none((mc.params or {}).get("effort")),
+        extra=_dict_or_none((mc.params or {}).get("extra")),
         # `mapped_column(default=False)` applies at INSERT, not at construction; a
         # row built and serialized before its first flush still reads None here.
         used_by_copilot=bool(mc.used_by_copilot),

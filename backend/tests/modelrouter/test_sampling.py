@@ -150,3 +150,41 @@ def test_a_length_retry_carries_effort_through() -> None:
     bumped = bumped_for_length_retry(ModelParams(temperature=0.5, max_tokens=100, effort="high"))
     assert bumped.effort == "high"
     assert bumped.max_tokens == 200
+
+
+def test_extra_is_unset_by_default() -> None:
+    p = resolve_params(None, agent=_agent())
+    assert p.extra is None
+
+
+def test_the_model_config_can_set_extra() -> None:
+    p = resolve_params(_config({"extra": {"top_p": 0.9}}), agent=_agent())
+    assert p.extra == {"top_p": 0.9}
+
+
+def test_the_agent_merges_extra_keys_into_the_model_configs_extra() -> None:
+    """Unlike temperature/max_tokens/effort, extra merges key-by-key: an agent
+    overriding one raw key must not drop the model's own raw keys it didn't
+    mention."""
+    p = resolve_params(
+        _config({"extra": {"top_p": 0.9, "provider": {"order": ["a"]}}}),
+        agent=_agent({"model_params": {"extra": {"top_p": 0.5}}}),
+    )
+    assert p.extra == {"top_p": 0.5, "provider": {"order": ["a"]}}
+
+
+def test_a_non_dict_extra_falls_back_to_unset() -> None:
+    p = resolve_params(_config({"extra": "not a dict"}), agent=_agent())
+    assert p.extra is None
+
+
+def test_an_empty_extra_dict_leaves_nothing_set() -> None:
+    p = resolve_params(_config({"extra": {}}), agent=_agent())
+    assert p.extra is None
+
+
+def test_a_length_retry_carries_extra_through() -> None:
+    bumped = bumped_for_length_retry(
+        ModelParams(temperature=0.5, max_tokens=100, extra={"top_p": 0.9})
+    )
+    assert bumped.extra == {"top_p": 0.9}

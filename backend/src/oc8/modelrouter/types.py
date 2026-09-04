@@ -111,6 +111,13 @@ class ModelParams:
     #: that set and changes it without oc8's involvement. None omits the
     #: field entirely rather than sending a guessed default.
     effort: str | None = None
+    #: Free-form top-level request fields an operator wants forwarded verbatim
+    #: (e.g. OpenRouter's `provider`/`top_p`) that oc8 has no named field for.
+    #: Merged into the outbound payload strictly AFTER every named field, so a
+    #: key that collides with one oc8 already sets (model/messages/tools/...)
+    #: is dropped rather than clobbering it -- see each adapter's payload
+    #: builder. None/empty omits the merge entirely.
+    extra: dict[str, Any] | None = None
 
 
 @dataclass

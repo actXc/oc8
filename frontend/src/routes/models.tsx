@@ -20,6 +20,12 @@ import { toast } from "sonner";
 import { Panel } from "@/components/app-shell";
 import { ChatGptSubscriptionPicker } from "@/components/chatgpt-subscription-picker";
 import { CredentialPicker } from "@/components/credential-picker";
+import {
+  extraToPairs,
+  pairsToExtra,
+  RawParamsEditor,
+  type RawParamPair,
+} from "@/components/raw-params-editor";
 import { agents } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
@@ -68,6 +74,24 @@ interface ProviderGroup {
 // a credential-type lookup. Exported for that last one, which lives in
 // `routes/agents.$id.tsx`.
 export const SUBSCRIPTION_PROVIDER = "openai_chatgpt";
+
+// Every adapter merges ModelParams.extra into its outbound payload EXCEPT
+// these two (modelrouter/adapters/ollama.py + chatgpt_subscription.py each
+// build their own payload and never look at params.extra) -- everything else,
+// including anthropic/openai/openai_compatible AND any plugin-contributed
+// provider built on OpenAICompatibleAdapter (e.g. capas/openrouter_provider,
+// capas/opaas_ai_provider -- both registered via `_openai_common.build_payload`
+// under the hood), forwards it. A denylist of the two core built-ins, rather
+// than an allowlist, is what keeps this software-neutral: core has no way to
+// enumerate plugin provider names (core-must-be-software-neutral), so an
+// allowlist would silently hide the editor for every plugin provider even
+// though its adapter supports it -- exactly the OpenRouter case this feature
+// was built for. Exported for the agent detail page's Assigned-LLM panel,
+// same reuse reason as SUBSCRIPTION_PROVIDER above.
+const RAW_PARAMS_UNSUPPORTED_PROVIDERS = new Set(["ollama", SUBSCRIPTION_PROVIDER]);
+export function supportsRawParams(provider: string): boolean {
+  return !RAW_PARAMS_UNSUPPORTED_PROVIDERS.has(provider);
+}
 
 // Persistent, non-dismissable reminder wherever a model or provider tile is
 // backed by a personal ChatGPT subscription: scheduled/automated runs are
@@ -836,6 +860,7 @@ function ModelFormDialog({ editing, onClose }: { editing: ModelDTO | null; onClo
     editing?.maxTokens != null ? String(editing.maxTokens) : "",
   );
   const [effort, setEffort] = useState(editing?.effort ?? "");
+  const [rawParams, setRawParams] = useState<RawParamPair[]>(() => extraToPairs(editing?.extra));
   // Create-mode only: discovery + multi-select, so adding several of a
   // provider's models doesn't mean typing each tag by hand. Manual entry
   // (the plain `modelTag` field above) stays the fallback for a provider
@@ -940,6 +965,7 @@ function ModelFormDialog({ editing, onClose }: { editing: ModelDTO | null; onClo
       supportsVision,
       ...(editing ? { maxTokens: parsedMaxTokens ?? 0 } : {}),
       effort: effort.trim(),
+      extra: pairsToExtra(rawParams) ?? {},
     };
     try {
       if (editing) {
@@ -1162,6 +1188,10 @@ function ModelFormDialog({ editing, onClose }: { editing: ModelDTO | null; onClo
                   )}
                 </p>
               </label>
+
+              {supportsRawParams(effectiveProvider) && (
+                <RawParamsEditor pairs={rawParams} onChange={setRawParams} />
+              )}
             </>
           )}
         </div>

@@ -121,6 +121,11 @@ def to_openai_messages(messages: list[NeutralMessage]) -> list[dict[str, Any]]:
     return out
 
 
+#: Keys this adapter always sets itself. An operator-supplied `extra` key
+#: matching one of these is dropped rather than applied -- see build_payload.
+_RESERVED_PAYLOAD_KEYS = frozenset({"model", "messages", "temperature", "max_tokens", "tools"})
+
+
 def build_payload(req: CompletionRequest) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": req.model,
@@ -140,6 +145,12 @@ def build_payload(req: CompletionRequest) -> dict[str, Any]:
             }
             for t in req.tools
         ]
+    # Applied last so an operator-typed key can never clobber a field this
+    # adapter relies on -- see ModelParams.extra.
+    if req.params.extra:
+        for key, value in req.params.extra.items():
+            if key not in _RESERVED_PAYLOAD_KEYS:
+                payload[key] = value
     return payload
 
 

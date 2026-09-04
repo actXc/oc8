@@ -188,10 +188,13 @@ async def create_model(
     )
     db.add(cfg)
     await db.flush()  # cfg.id must exist before the auto-activation count query below
-    if body.supports_vision:
+    if body.supports_vision or body.extra:
         # jsonb: replaced whole, or SQLAlchemy never notices the mutation.
         params = dict(cfg.params or {})
-        params["supports_vision"] = True
+        if body.supports_vision:
+            params["supports_vision"] = True
+        if body.extra:
+            params["extra"] = body.extra
         cfg.params = params
     existing_count = (
         await db.execute(
@@ -263,6 +266,14 @@ async def update_model(
             params["effort"] = body.effort.strip()
         else:
             params.pop("effort", None)
+        cfg.params = params
+    if "extra" in body.model_fields_set:
+        # jsonb: replaced whole, or SQLAlchemy never notices the mutation.
+        params = dict(cfg.params or {})
+        if body.extra:
+            params["extra"] = body.extra
+        else:
+            params.pop("extra", None)
         cfg.params = params
     if "used_by_copilot" in body.model_fields_set:
         await _apply_copilot_flag(db, _p.tenant_id, cfg, body.used_by_copilot)

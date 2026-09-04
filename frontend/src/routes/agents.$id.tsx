@@ -69,7 +69,13 @@ import {
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { CredentialPicker } from "@/components/credential-picker";
 import { GuardrailPresetPicker, type GuardrailValue } from "@/components/guardrail-preset-picker";
-import { SUBSCRIPTION_PROVIDER, SubscriptionRiskBadge } from "@/routes/models";
+import { SUBSCRIPTION_PROVIDER, SubscriptionRiskBadge, supportsRawParams } from "@/routes/models";
+import {
+  extraToPairs,
+  pairsToExtra,
+  RawParamsEditor,
+  type RawParamPair,
+} from "@/components/raw-params-editor";
 import { CronBuilder } from "@/components/cron-builder";
 import {
   useAgent,
@@ -1416,6 +1422,7 @@ export function AssignedModelPanel({
   const switchModel = useSwitchAgentModel();
   const assigned = models.find((model) => model.id === agent.modelConfigId);
   const showEffort = assigned?.provider === "anthropic";
+  const showRawParams = !!assigned && supportsRawParams(assigned.provider);
 
   const [temperature, setTemperature] = useState(
     agent.temperature != null ? String(agent.temperature) : "",
@@ -1424,6 +1431,7 @@ export function AssignedModelPanel({
     agent.maxTokens != null ? String(agent.maxTokens) : "",
   );
   const [effort, setEffort] = useState(agent.effort ?? "");
+  const [rawParams, setRawParams] = useState<RawParamPair[]>(() => extraToPairs(agent.extra));
   // Route param change remounts this whole page in the common case, but
   // nothing here guarantees it -- a prior bug in this exact codebase (the
   // Chat window carrying a previous agent's session across a switch) showed
@@ -1433,6 +1441,11 @@ export function AssignedModelPanel({
     setTemperature(agent.temperature != null ? String(agent.temperature) : "");
     setMaxTokens(agent.maxTokens != null ? String(agent.maxTokens) : "");
     setEffort(agent.effort ?? "");
+    setRawParams(extraToPairs(agent.extra));
+    // agent.extra is a fresh object reference on every fetch; depending on it
+    // directly would re-run this on every render and clobber in-progress
+    // edits, so this re-syncs on agent identity (agent.id) instead.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agent.id, agent.temperature, agent.maxTokens, agent.effort]);
 
   function saveSamplingOverrides() {
@@ -1464,6 +1477,7 @@ export function AssignedModelPanel({
         // expose -- switching away from anthropic must not silently wipe an
         // effort value the operator can no longer even see to restore.
         effort: showEffort ? effort.trim() || null : undefined,
+        extra: showRawParams ? (pairsToExtra(rawParams) ?? null) : undefined,
       },
       {
         onSuccess: () =>
@@ -1581,6 +1595,11 @@ export function AssignedModelPanel({
               </label>
             )}
           </div>
+          {showRawParams && (
+            <div className="mt-3">
+              <RawParamsEditor pairs={rawParams} onChange={setRawParams} disabled={!mayManage} />
+            </div>
+          )}
           {mayManage && (
             <button
               type="button"

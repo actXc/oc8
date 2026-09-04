@@ -48,6 +48,7 @@ export interface AgentDetail {
   temperature: number | null;
   maxTokens: number | null;
   effort: string | null;
+  extra: Record<string, unknown> | null;
 }
 
 // Reuses the ["agents", id] key already invalidated by the "agent.status"

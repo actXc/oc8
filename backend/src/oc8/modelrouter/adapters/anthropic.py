@@ -91,6 +91,13 @@ def _to_anthropic_messages(messages: list[NeutralMessage]) -> tuple[str, list[di
     return "\n".join(system_parts), out
 
 
+#: Keys this adapter always sets itself. An operator-supplied `extra` key
+#: matching one of these is dropped rather than applied -- see _build_payload.
+_RESERVED_PAYLOAD_KEYS = frozenset(
+    {"model", "max_tokens", "messages", "temperature", "effort", "system", "tools", "stream"}
+)
+
+
 def _build_payload(req: CompletionRequest, *, include_temperature: bool = True) -> dict[str, Any]:
     system, messages = _to_anthropic_messages(req.messages)
     payload: dict[str, Any] = {
@@ -109,6 +116,12 @@ def _build_payload(req: CompletionRequest, *, include_temperature: bool = True) 
             {"name": t.name, "description": t.description, "input_schema": t.parameters}
             for t in req.tools
         ]
+    # Applied last so an operator-typed key can never clobber a field this
+    # adapter relies on -- see ModelParams.extra.
+    if req.params.extra:
+        for key, value in req.params.extra.items():
+            if key not in _RESERVED_PAYLOAD_KEYS:
+                payload[key] = value
     return payload
 
 
