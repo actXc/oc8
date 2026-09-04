@@ -498,6 +498,13 @@ async def configure_plugin(
         if setup.oauth_provision is not None
         else frozenset()
     )
+    # Every NON-secret field a kind="credential" setup field drags along from
+    # its credential_type (teams_bot's app_id/tenant_id, whatsapp_api's
+    # phone_number_id). They live only in `values`, never in the setup form's
+    # own `fields` map, so `_configure_without_connection` -- which persists
+    # by walking `fields` -- had no way to know they existed and dropped them,
+    # leaving channels/registry.py with a config the plugin's build() rejects.
+    credential_plain_keys: set[str] = set()
     for field in setup.fields:
         if field.kind not in ("password", "credential") or not values[field.key]:
             continue
@@ -574,6 +581,9 @@ async def configure_plugin(
                     if other.key == secret_fields[0].key
                     else str(cred_row.field_values.get(other.key, ""))
                 )
+            credential_plain_keys.update(
+                other.key for other in cred_type.fields if other.kind != "password"
+            )
             provisioned_key = secret_fields[0].key
         else:
             resolved_value = values[field.key]
@@ -602,6 +612,7 @@ async def configure_plugin(
             installation=installation,
             fields=fields,
             values=values,
+            credential_plain_keys=frozenset(credential_plain_keys),
         )
 
     connections = (await db.execute(select(m.McpConnection))).scalars().all()
@@ -927,6 +938,7 @@ async def _configure_without_connection(
     installation: m.CapaInstallation,
     fields: dict[str, SetupFieldSpec],
     values: dict[str, str],
+    credential_plain_keys: frozenset[str] = frozenset(),
 ) -> PluginSetupResult:
     """The other half of configure_plugin: a plugin with `setup` but no `mcp`
     block. There is no connection to adopt, so this only has two jobs -- keep
@@ -938,6 +950,14 @@ async def _configure_without_connection(
         for key, field in fields.items()
         if field.kind not in ("password", "credential") and values[key]
     }
+    # Plus the non-secret fields a kind="credential" field brought with it.
+    # Walking `fields` alone misses them entirely -- they are credential_type
+    # fields, not setup-form fields -- which is how teams_approvals' app_id and
+    # whatsapp_approvals' phone_number_id were resolved, used for validate(),
+    # and then silently dropped instead of being written to the installation
+    # config the channel registry rebuilds the channel from. The credential's
+    # own password field is never here: configure_plugin excludes it.
+    plain.update({key: values[key] for key in credential_plain_keys if values.get(key)})
     if plain:
         installation.config = {**(installation.config or {}), **plain}
 

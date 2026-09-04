@@ -350,6 +350,108 @@ async def test_credential_kind_setup_field_backfills_several_bundled_plain_field
         assert value == "s3cr3t-pw"
 
 
+async def test_credential_kind_setup_field_backfills_bundled_plain_fields_without_a_connection(
+    app_session: AppSessionFactory,
+) -> None:
+    """teams_approvals'/whatsapp_approvals' shape: an `approval_channel` with
+    NO `setup.mcp` block, whose only credential-identifying setup field is one
+    `kind="credential"` field. There is no MCP connection whose `env_fields`
+    could carry the bundled plain fields, so `CapaInstallation.config` is the
+    ONLY place channels/registry.py can read them back from later.
+
+    They used to be resolved into `values`, handed to `validate()`, and then
+    dropped: `_configure_without_connection` persisted only fields present in
+    the SETUP FORM, and a credential_type's own ride-along fields never are.
+    The channel was then rebuilt from a config missing its `app_id` and
+    refused to exist at all."""
+    tenant = uuid.uuid4()
+    plugin_name = f"acme.channel-{uuid.uuid4().hex[:8]}"
+    async with app_session(tenant) as db:
+        cred = await create_credential(
+            db,
+            tenant_id=tenant,
+            name="Prod bot",
+            credential_type="service_login",
+            field_values={
+                "url": "https://service.internal",
+                "username": "svc-user",
+                "password": "s3cr3t-pw",
+            },
+        )
+        cred_id = str(cred.id)
+
+    app = create_app()
+    headers = {"Authorization": f"Bearer {_token(tenant)}"}
+    manifest = {
+        "name": plugin_name,
+        "version": "1.0.0",
+        "type": "approval_channel",
+        "trust": "first_party",
+        "config": {"max_classification": "public"},
+        "setup": {
+            "title": "Connect the channel",
+            "fields": [
+                {
+                    "key": "login",
+                    "label": "Login",
+                    "kind": "credential",
+                    "credential_type": "service_login",
+                    "required": True,
+                    "secret_ref": "acme/bot_password",
+                },
+                {
+                    "key": "max_classification",
+                    "label": "Highest allowed confidentiality",
+                    "kind": "select",
+                    "options": ["public", "internal"],
+                    "default": "public",
+                    "required": False,
+                },
+            ],
+        },
+    }
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+            installed = await client.post(
+                "/api/v1/capas", json={"manifest": manifest}, headers=headers
+            )
+            assert installed.status_code == 201, installed.text
+            capa_id = installed.json()["pluginId"]
+            assert (
+                await client.post(
+                    f"/api/v1/capas/{capa_id}/enable",
+                    json={"grantedPermissions": []},
+                    headers=headers,
+                )
+            ).status_code == 200
+
+            configured = await client.post(
+                f"/api/v1/capas/{capa_id}/setup",
+                json={"values": {"login": cred_id, "max_classification": "internal"}},
+                headers=headers,
+            )
+            assert configured.status_code == 200, configured.text
+            assert configured.json()["connectionId"] is None
+
+    async with app_session(tenant) as db:
+        installation = (
+            await db.execute(
+                select(m.CapaInstallation).where(
+                    m.CapaInstallation.capa_id == uuid.UUID(capa_id)
+                )
+            )
+        ).scalar_one()
+        config = installation.config or {}
+        assert config["url"] == "https://service.internal"
+        assert config["username"] == "svc-user"
+        # The form's own plain field still lands, as it always did.
+        assert config["max_classification"] == "internal"
+        # The credential's secret half stays in the secret store, never here.
+        assert "password" not in config
+        assert "s3cr3t-pw" not in str(config)
+        assert await resolve_secret(db, tenant_id=tenant, ref="acme/bot_password") == "s3cr3t-pw"
+
+
 async def test_credential_kind_setup_field_required_blocks_a_blank_submission_cleanly(
     app_session: AppSessionFactory,
 ) -> None:
