@@ -273,6 +273,37 @@ async def test_download_forces_a_download_and_blocks_mime_sniffing(
             assert get_r.headers["x-content-type-options"] == "nosniff"
 
 
+async def test_get_and_delete_agent_instruction_file_for_a_tenant_wide_actor(
+    app_session: AppSessionFactory, minio_url: str
+) -> None:
+    """`_owned_attachment`'s `agent_instructions` branch must compute
+    `tenant_wide` the same way every sibling agent-scoped endpoint does
+    (`GET /agents/{id}`, `GET /agents/{id}/instruction-files`) -- an
+    org_admin who holds AGENT:VIEW tenant-wide but has no department
+    membership must not 404 on a file the list endpoint just showed them.
+    A hardcoded `tenant_wide=False` here previously made GET/DELETE
+    `/files/{id}` 404 for exactly that actor while the list still worked."""
+    tenant = uuid.uuid4()
+    agent_id, _session_id = await _seed_agent_and_session(app_session, tenant)
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            upload_r = await c.post(
+                f"/api/v1/agents/{agent_id}/instruction-files",
+                files={"file": ("readme.txt", io.BytesIO(b"reference material"), "text/plain")},
+                headers=_headers(tenant),
+            )
+            assert upload_r.status_code == 201, upload_r.text
+            attachment_id = upload_r.json()["id"]
+
+            get_r = await c.get(f"/api/v1/files/{attachment_id}", headers=_headers(tenant))
+            assert get_r.status_code == 200, get_r.text
+            assert get_r.content == b"reference material"
+
+            del_r = await c.delete(f"/api/v1/files/{attachment_id}", headers=_headers(tenant))
+            assert del_r.status_code == 204, del_r.text
+
+
 async def test_upload_truncates_extracted_text_to_the_document_cap(
     app_session: AppSessionFactory, minio_url: str
 ) -> None:

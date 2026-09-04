@@ -16,6 +16,7 @@ from oc8 import models as m
 from oc8.agents.repo import visible_agent
 from oc8.api.deps import DbSession, require_departmental
 from oc8.api.v1.chat import _owned_session
+from oc8.authz.authority import authority_for_principal, tenant_wide_read
 from oc8.authz.permissions import AGENT, VIEW, perm
 from oc8.authz.scope import HumanActor
 from oc8.knowledge.ingest import MAX_DOCUMENT_LENGTH, IngestionError, extract_text
@@ -138,7 +139,7 @@ async def upload_chat_attachment(
 
 
 async def _owned_attachment(
-    db: DbSession, actor: HumanActor, attachment_id: uuid.UUID
+    request: Request, db: DbSession, actor: HumanActor, attachment_id: uuid.UUID
 ) -> m.FileAttachment:
     """Same ownership contract every other protected read enforces: either the
     row does not exist, or it exists but this caller may not see it -- both
@@ -161,7 +162,11 @@ async def _owned_attachment(
     if row is None or row.tenant_id != actor.principal.tenant_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "file not found")
     if row.owner_type == "agent_instructions":
-        agent = await visible_agent(db, scope=actor.scope, tenant_wide=False, agent_id=row.owner_id)
+        authority = await authority_for_principal(request, db, actor.principal)
+        tenant_wide = tenant_wide_read(authority, perm(AGENT, VIEW))
+        agent = await visible_agent(
+            db, scope=actor.scope, tenant_wide=tenant_wide, agent_id=row.owner_id
+        )
         if agent is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "file not found")
         return row
@@ -184,10 +189,11 @@ async def _owned_attachment(
 @router.get("/files/{attachment_id}")
 async def download_file(
     attachment_id: uuid.UUID,
+    request: Request,
     db: DbSession,
     actor: Annotated[HumanActor, Depends(require_departmental(perm(AGENT, VIEW)))],
 ) -> Response:
-    row = await _owned_attachment(db, actor, attachment_id)
+    row = await _owned_attachment(request, db, actor, attachment_id)
     raw = await s3.get_object(row.bucket_key)
     return Response(
         content=raw,
@@ -211,10 +217,11 @@ async def download_file(
 @router.delete("/files/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_file(
     attachment_id: uuid.UUID,
+    request: Request,
     db: DbSession,
     actor: Annotated[HumanActor, Depends(require_departmental(perm(AGENT, VIEW)))],
 ) -> None:
-    row = await _owned_attachment(db, actor, attachment_id)
+    row = await _owned_attachment(request, db, actor, attachment_id)
     await s3.delete_object(row.bucket_key)
     await db.delete(row)
     await db.commit()
