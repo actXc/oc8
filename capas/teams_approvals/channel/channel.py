@@ -113,13 +113,13 @@ async def _verify_activity_jwt(token: str, *, app_id: str) -> dict[str, Any] | N
     """The token's claims when it verifies, None when it does not.
 
     Fails closed on anything unexpected -- a malformed token, an unknown key
-    id, a wrong audience or issuer, an expired signature -- because an
-    unauthenticated webhook that reaches the decision path is an open door to
-    approving anything, same discipline as Telegram's/WhatsApp's own
-    verify_inbound. The CLAIMS come back rather than a bare bool because the
-    caller has one more check to make that only they can: Bot Framework's auth
-    contract binds a token to a `serviceUrl`, and only the caller holds the
-    request body to compare it against.
+    id, a wrong audience or issuer, an expired signature, an unreachable JWKS
+    endpoint -- because an unauthenticated webhook that reaches the decision
+    path is an open door to approving anything, same discipline as
+    Telegram's/WhatsApp's own verify_inbound. The CLAIMS come back rather than
+    a bare bool because the caller has one more check to make that only they
+    can: Bot Framework's auth contract binds a token to a `serviceUrl`, and
+    only the caller holds the request body to compare it against.
     """
     try:
         header = jwt.get_unverified_header(token)
@@ -128,15 +128,24 @@ async def _verify_activity_jwt(token: str, *, app_id: str) -> dict[str, Any] | N
     kid = header.get("kid")
     if not kid:
         return None
-    jwks = await _get_jwks()
-    key_data = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
-    if key_data is None:
-        # The key may have rotated since our cache was built -- refresh once
-        # and retry before giving up.
-        jwks = await _get_jwks(force_refresh=True)
+    try:
+        jwks = await _get_jwks()
         key_data = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
         if key_data is None:
-            return None
+            # The key may have rotated since our cache was built -- refresh
+            # once and retry before giving up.
+            jwks = await _get_jwks(force_refresh=True)
+            key_data = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
+    except (httpx.HTTPError, ValueError):
+        # login.botframework.com timed out, answered 5xx, or answered with
+        # something that is not JSON. `ApprovalChannel.verify_inbound`
+        # promises a bool, and the webhook route does not catch anything, so
+        # letting this out turned a transient Microsoft outage into a 500 with
+        # a traceback instead of the documented "not verified".
+        logger.warning("could not read Bot Framework's JWKS; failing closed", exc_info=True)
+        return None
+    if key_data is None:
+        return None
     try:
         public_key = RSAAlgorithm.from_jwk(json.dumps(key_data))
         claims: dict[str, Any] = jwt.decode(

@@ -14,6 +14,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import httpx
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -263,6 +264,56 @@ async def test_a_forced_refresh_is_allowed_again_once_the_interval_has_passed(
     clock.now += channel_module._JWKS_FORCED_REFRESH_MIN_INTERVAL_SECONDS + 1
     assert await _verify_activity_jwt(token, app_id="app-1") is None
     assert fetch_calls == 3, "past the interval, a genuine rotation must still be fetched"
+
+
+@pytest.mark.asyncio
+async def test_an_unreachable_jwks_endpoint_fails_closed_rather_than_raising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`ApprovalChannel.verify_inbound` promises a bool, and the webhook route
+    (api/v1/channels.py) wraps the call in no try/except at all -- so an httpx
+    error escaping from here turned a transient login.botframework.com outage
+    into a 500 with a traceback instead of the documented "not verified"."""
+    import channel.channel as channel_module
+    from channel.channel import TeamsChannel, _verify_activity_jwt
+
+    key = _keypair()
+
+    async def failing_fetch() -> dict[str, Any]:
+        raise httpx.ConnectError("login.botframework.com is unreachable")
+
+    monkeypatch.setattr(channel_module, "_fetch_jwks", failing_fetch)
+    token = _token_for(key, kid="k1", audience="app-1")
+
+    assert await _verify_activity_jwt(token, app_id="app-1") is None
+
+    channel = TeamsChannel(app_id="app-1", app_password="pw")
+    verified = await channel.verify_inbound(
+        headers={"Authorization": f"Bearer {token}"}, body=_body()
+    )
+    assert verified is False
+
+
+@pytest.mark.asyncio
+async def test_a_jwks_endpoint_answering_5xx_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`_fetch_jwks`'s own `raise_for_status()`, from inside the fetch."""
+    import channel.channel as channel_module
+    from channel.channel import _verify_activity_jwt
+
+    key = _keypair()
+
+    async def failing_fetch() -> dict[str, Any]:
+        request = httpx.Request("GET", channel_module._JWKS_URL)
+        raise httpx.HTTPStatusError(
+            "503", request=request, response=httpx.Response(503, request=request)
+        )
+
+    monkeypatch.setattr(channel_module, "_fetch_jwks", failing_fetch)
+    token = _token_for(key, kid="k1", audience="app-1")
+
+    assert await _verify_activity_jwt(token, app_id="app-1") is None
 
 
 @pytest.mark.asyncio
