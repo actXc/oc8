@@ -87,7 +87,6 @@ _CONV_REF = json.dumps(
 )
 
 
-@pytest.mark.asyncio
 async def test_mint_access_token_posts_client_credentials_to_the_default_tenant(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -104,7 +103,6 @@ async def test_mint_access_token_posts_client_credentials_to_the_default_tenant(
     assert form["client_id"] == "app-1"
 
 
-@pytest.mark.asyncio
 async def test_mint_access_token_uses_a_configured_tenant(monkeypatch: pytest.MonkeyPatch) -> None:
     from channel.channel import mint_access_token
 
@@ -124,7 +122,6 @@ def _deliver_handler(captured: list[httpx.Request]) -> _Handler:
     return handler
 
 
-@pytest.mark.asyncio
 async def test_deliver_posts_an_adaptive_card_to_the_conversation_from_its_external_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -149,7 +146,6 @@ async def test_deliver_posts_an_adaptive_card_to_the_conversation_from_its_exter
     assert payload["recipient"] == {"id": "user-1", "name": "Rico"}
 
 
-@pytest.mark.asyncio
 async def test_a_second_deliver_within_the_token_ttl_does_not_mint_again(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -166,7 +162,6 @@ async def test_a_second_deliver_within_the_token_ttl_does_not_mint_again(
     assert len(mint_calls) == 1
 
 
-@pytest.mark.asyncio
 async def test_withdraw_edits_the_original_card_in_place(monkeypatch: pytest.MonkeyPatch) -> None:
     from channel.channel import TeamsChannel
 
@@ -189,7 +184,6 @@ async def test_withdraw_edits_the_original_card_in_place(monkeypatch: pytest.Mon
     assert payload["attachments"][0]["contentType"] == "application/vnd.microsoft.card.adaptive"
 
 
-@pytest.mark.asyncio
 async def test_withdraw_falls_back_to_plain_text_when_the_edit_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -216,7 +210,6 @@ async def test_withdraw_falls_back_to_plain_text_when_the_edit_fails(
     assert "abgelehnt" in payload["text"]
 
 
-@pytest.mark.asyncio
 async def test_withdraw_with_no_handle_does_nothing() -> None:
     from channel.channel import TeamsChannel
 
@@ -224,7 +217,6 @@ async def test_withdraw_with_no_handle_does_nothing() -> None:
     await channel.withdraw(_notice(), external_id=_CONV_REF, handle=None, outcome="approved")
 
 
-@pytest.mark.asyncio
 async def test_withdraw_never_raises_when_every_send_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     from channel.channel import TeamsChannel
 
@@ -239,7 +231,6 @@ async def test_withdraw_never_raises_when_every_send_fails(monkeypatch: pytest.M
     await channel.withdraw(_notice(), external_id=_CONV_REF, handle="activity-1", outcome="approved")
 
 
-@pytest.mark.asyncio
 async def test_say_sends_plain_text(monkeypatch: pytest.MonkeyPatch) -> None:
     from channel.channel import TeamsChannel
 
@@ -256,7 +247,6 @@ async def test_say_sends_plain_text(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "attachments" not in payload
 
 
-@pytest.mark.asyncio
 async def test_say_never_raises_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     from channel.channel import TeamsChannel
 

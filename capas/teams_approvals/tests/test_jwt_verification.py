@@ -87,7 +87,6 @@ def _install_jwks(monkeypatch: pytest.MonkeyPatch, jwks: dict[str, Any]) -> None
     monkeypatch.setattr(channel_module, "_fetch_jwks", fake_fetch)
 
 
-@pytest.mark.asyncio
 async def test_a_validly_signed_token_verifies(monkeypatch: pytest.MonkeyPatch) -> None:
     from channel.channel import _verify_activity_jwt
 
@@ -99,7 +98,6 @@ async def test_a_validly_signed_token_verifies(monkeypatch: pytest.MonkeyPatch) 
     assert await _verify_activity_jwt(token, app_id="app-1") is True
 
 
-@pytest.mark.asyncio
 async def test_an_expired_token_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     from channel.channel import _verify_activity_jwt
 
@@ -111,7 +109,6 @@ async def test_an_expired_token_fails_closed(monkeypatch: pytest.MonkeyPatch) ->
     assert await _verify_activity_jwt(token, app_id="app-1") is False
 
 
-@pytest.mark.asyncio
 async def test_a_token_for_the_wrong_audience_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     from channel.channel import _verify_activity_jwt
 
@@ -123,7 +120,6 @@ async def test_a_token_for_the_wrong_audience_fails_closed(monkeypatch: pytest.M
     assert await _verify_activity_jwt(token, app_id="app-1") is False
 
 
-@pytest.mark.asyncio
 async def test_a_token_signed_by_the_wrong_key_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     """The header claims a `kid` that IS in the JWKS, but the signature was
     made with a different private key entirely -- the shape of a forged or
@@ -139,7 +135,6 @@ async def test_a_token_signed_by_the_wrong_key_fails_closed(monkeypatch: pytest.
     assert await _verify_activity_jwt(token, app_id="app-1") is False
 
 
-@pytest.mark.asyncio
 async def test_an_unknown_key_id_refreshes_once_then_fails_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -164,7 +159,6 @@ async def test_an_unknown_key_id_refreshes_once_then_fails_closed(
     assert fetch_calls == 2, "one fetch to populate the cache, one forced refresh on the miss"
 
 
-@pytest.mark.asyncio
 async def test_a_malformed_token_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     from channel.channel import _verify_activity_jwt
 
@@ -173,7 +167,6 @@ async def test_a_malformed_token_fails_closed(monkeypatch: pytest.MonkeyPatch) -
     assert await _verify_activity_jwt("not-a-jwt-at-all", app_id="app-1") is False
 
 
-@pytest.mark.asyncio
 async def test_verify_inbound_requires_a_bearer_authorization_header() -> None:
     from channel.channel import TeamsChannel
 
@@ -181,7 +174,6 @@ async def test_verify_inbound_requires_a_bearer_authorization_header() -> None:
     assert await channel.verify_inbound(headers={}, body=b"{}") is False
 
 
-@pytest.mark.asyncio
 async def test_verify_inbound_rejects_a_non_bearer_scheme() -> None:
     from channel.channel import TeamsChannel
 
@@ -189,7 +181,6 @@ async def test_verify_inbound_rejects_a_non_bearer_scheme() -> None:
     assert await channel.verify_inbound(headers={"Authorization": "Basic xyz"}, body=b"{}") is False
 
 
-@pytest.mark.asyncio
 async def test_verify_inbound_delegates_the_bearer_token_to_jwt_verification(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
