@@ -110,6 +110,28 @@ def test_the_same_conversation_produces_the_same_external_id_every_time() -> Non
     assert link.external_id == decision.external_id
 
 
+def test_renaming_the_user_or_the_bot_does_not_orphan_the_binding() -> None:
+    """The external_id IS the binding key -- channels/binding.py matches it by
+    exact string equality -- so anything mutable in it is a way for a binding
+    to silently stop matching. A Teams display name is very mutable: people
+    marry, and an admin renaming the bot in Azure would have unbound every
+    user at once."""
+    from channel.channel import parse_activity
+
+    before = parse_activity(_activity(text="abc123XYZ"))
+    after = parse_activity(
+        _activity(
+            text="abc123XYZ",
+            recipient={"id": "bot-1", "name": "oc8 Assistent"},
+            **{"from": {"id": "user-1", "name": "Rico Mustermann"}},
+        )
+    )
+    assert isinstance(before, ChannelLink)
+    assert isinstance(after, ChannelLink)
+    assert before.external_id == after.external_id
+    assert "Rico" not in before.external_id and "oc8 bot" not in before.external_id
+
+
 def test_a_different_conversation_produces_a_different_external_id() -> None:
     from channel.channel import parse_activity
 

@@ -73,17 +73,25 @@ def _notice(**overrides: object) -> ApprovalNotice:
     return ApprovalNotice(**defaults)  # type: ignore[arg-type]
 
 
+#: Exactly what `_conversation_reference` now produces: IDs only, no display
+#: names -- those were dropped because this dict is also the binding key, and
+#: a renamed user would otherwise orphan their own binding.
 _CONV_REF = json.dumps(
     {
         "serviceUrl": "https://smba.trafficmanager.net/teams/",
         "channelId": "msteams",
         "conversationId": "conv-1",
         "botId": "bot-1",
-        "botName": "oc8 bot",
         "userId": "user-1",
-        "userName": "Rico",
     },
     sort_keys=True,
+)
+
+#: A reference persisted BEFORE the names were dropped. Bindings created by
+#: the older code are still in the database, so `_activity_base` has to keep
+#: reading these back rather than tripping over the extra keys.
+_LEGACY_CONV_REF = json.dumps(
+    {**json.loads(_CONV_REF), "botName": "oc8 bot", "userName": "Rico"}, sort_keys=True
 )
 
 
@@ -145,6 +153,26 @@ async def test_deliver_posts_an_adaptive_card_to_the_conversation_from_its_exter
     assert send_calls[0].headers["authorization"] == "Bearer tok-abc"
     payload = json.loads(send_calls[0].content)
     assert payload["attachments"][0]["contentType"] == "application/vnd.microsoft.card.adaptive"
+    assert payload["from"] == {"id": "bot-1", "name": ""}
+    assert payload["recipient"] == {"id": "user-1", "name": ""}
+
+
+@pytest.mark.asyncio
+async def test_deliver_still_reads_a_conversation_reference_stored_with_display_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bindings written before the display names were dropped from the
+    reference are still in the database, and must keep delivering."""
+    from channel.channel import TeamsChannel
+
+    captured: list[httpx.Request] = []
+    _install(monkeypatch, _deliver_handler(captured))
+    channel = TeamsChannel(app_id="app-1", app_password="pw")
+
+    assert await channel.deliver(_notice(), external_id=_LEGACY_CONV_REF) == "activity-1"
+
+    send_calls = [r for r in captured if "smba.trafficmanager.net" in str(r.url)]
+    payload = json.loads(send_calls[0].content)
     assert payload["from"] == {"id": "bot-1", "name": "oc8 bot"}
     assert payload["recipient"] == {"id": "user-1", "name": "Rico"}
 

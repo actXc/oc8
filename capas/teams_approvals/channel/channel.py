@@ -267,7 +267,14 @@ def _conversation_reference(activity: Mapping[str, Any]) -> dict[str, Any]:
     Connector API call later, when there is no inbound Activity to read
     them from again. Flat and ID-only (not the raw `conversation`/`from`/
     `recipient` sub-objects) so the JSON is stable across activities that
-    otherwise vary in which extra keys Teams includes."""
+    otherwise vary in which extra keys Teams includes.
+
+    IDs only, and deliberately no display names: this dict IS the binding key
+    (`_external_id_for` serialises it, and channels/binding.py matches on
+    exact string equality), so a `botName`/`userName` in here meant that
+    someone changing their Teams display name -- or the bot being renamed in
+    Azure -- silently orphaned every binding for them. `_activity_base` reads
+    both back with `.get(...) or ""`, which already handled their absence."""
     conversation = activity.get("conversation") or {}
     bot = activity.get("recipient") or {}
     user = activity.get("from") or {}
@@ -276,9 +283,7 @@ def _conversation_reference(activity: Mapping[str, Any]) -> dict[str, Any]:
         "channelId": activity.get("channelId"),
         "conversationId": conversation.get("id"),
         "botId": bot.get("id"),
-        "botName": bot.get("name"),
         "userId": user.get("id"),
-        "userName": user.get("name"),
     }
 
 
