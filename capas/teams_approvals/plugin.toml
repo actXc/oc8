@@ -1,0 +1,39 @@
+# Approvals on Microsoft Teams (§5.6), through a dedicated Azure Bot
+# Framework registration.
+#
+# The third channel. It needs its OWN bot identity, independent of the
+# microsoft365 capa: Graph's app-only auth (what microsoft365 uses) has no
+# permission to send Teams messages -- sending requires either a signed-in
+# user or a dedicated Bot Framework registration, so this capa mints its own
+# client_credentials token against login.microsoftonline.com rather than
+# reaching into microsoft365's oc8.oauth/AuthContext machinery, which is a
+# different concern and would violate plugin isolation.
+#
+# The app password above is kept in the tenant secret store (§12.3), never
+# in this file.
+
+[plugin]
+name = "teams_approvals"
+version = "1.0.0"
+type = "approval_channel"
+trust = "first_party"
+summary = "Receive approvals on Microsoft Teams and decide right there"
+permissions = ["approvals:notify"]
+
+[plugin.entry_points]
+channels = "channel.channel:register"
+
+[plugin.config]
+# Where the app password is kept. A REFERENCE, not the password.
+secret_ref = "teams/bot_password"
+# Same restrictive default as telegram_approvals/whatsapp_approvals -- see
+# their identical comment.
+max_classification = "public"
+
+# The bot registration above is an ADMIN's one-time setup. A person who
+# should actually receive/decide approvals still has to link THEIR OWN
+# chat -- see telegram_approvals/plugin.toml's identical block and
+# PersonalSettingsSpec's docstring (capas/manifest.py).
+[plugin.personal_settings]
+label = "Link Teams"
+location = "approval_channels"

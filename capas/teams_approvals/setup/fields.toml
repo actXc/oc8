@@ -1,0 +1,24 @@
+title = "Connect Teams"
+description = "The Azure Bot registration's App ID and password. Never leaves the secret store unencrypted."
+submit_label = "Save & test"
+
+[[fields]]
+key = "app_id"
+label = "Bot registration"
+kind = "credential"
+credential_type = "teams_bot"
+required = true
+help = "The Azure Bot resource's App ID, password, and (optional) tenant ID."
+secret_ref = "teams/bot_password"
+
+# Read by channels/registry.py's _resolved_config -> ChannelCapabilities.
+# Stays at "public" by default -- see telegram_approvals/setup/fields.toml's
+# identical field and its comment for why.
+[[fields]]
+key = "max_classification"
+label = "Highest allowed confidentiality"
+kind = "select"
+options = ["public", "internal", "confidential", "restricted"]
+default = "public"
+required = false
+help = "How sensitive may the messages this channel actually displays be (approval details, assistant replies)? With \"public\", only a heads-up that something is waiting arrives -- the content itself stays in oc8."

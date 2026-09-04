@@ -1,0 +1,62 @@
+#
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8\n"
+
+msgid "Link Teams"
+msgstr "Teams verbinden"
+
+msgid "Receive approvals on Microsoft Teams and decide right there"
+msgstr "Freigaben auf Microsoft Teams erhalten und dort entscheiden"
+
+msgid "Connect Teams"
+msgstr "Teams verbinden"
+
+msgid ""
+"The Azure Bot registration's App ID and password. Never leaves the secret "
+"store unencrypted."
+msgstr ""
+"App-ID und Passwort der Azure-Bot-Registrierung. Verlässt den Secret Store "
+"nie unverschlüsselt."
+
+msgid "Save & test"
+msgstr "Speichern & testen"
+
+msgid "Bot registration"
+msgstr "Bot-Registrierung"
+
+msgid "The Azure Bot resource's App ID, password, and (optional) tenant ID."
+msgstr "App-ID, Passwort und (optionale) Tenant-ID der Azure-Bot-Ressource."
+
+msgid "Microsoft App ID"
+msgstr "Microsoft-App-ID"
+
+msgid "From the Azure Bot resource's registration, a GUID."
+msgstr "Aus der Registrierung der Azure-Bot-Ressource, eine GUID."
+
+msgid "App password"
+msgstr "App-Passwort"
+
+msgid "The client secret generated for the Bot resource's app registration."
+msgstr "Das Client-Secret der App-Registrierung der Bot-Ressource."
+
+msgid "Tenant ID (optional)"
+msgstr "Tenant-ID (optional)"
+
+msgid ""
+"Only for a single-tenant App registration. Leave empty for the default "
+"multi-tenant Bot Framework login."
+msgstr ""
+"Nur für eine Single-Tenant-App-Registrierung. Für den Standard-Multi-"
+"Tenant-Login von Bot Framework leer lassen."
+
+msgid "Highest allowed confidentiality"
+msgstr "Höchste erlaubte Vertraulichkeit"
+
+msgid ""
+"How sensitive may the messages this channel actually displays be (approval "
+"details, assistant replies)? With \"public\", only a heads-up that something"
+" is waiting arrives -- the content itself stays in oc8."
+msgstr ""
+"Wie sensibel dürfen Nachrichten sein, die dieser Kanal tatsächlich anzeigt "
+"(Approval-Details, Assistant-Antworten)? Bei \"public\" kommt nur ein "
+"Hinweis an, dass etwas wartet -- der Inhalt selbst bleibt in oc8."
