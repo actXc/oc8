@@ -7,7 +7,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 
 from oc8 import models as m
@@ -111,7 +111,7 @@ async def _assistant_visible(
 async def get_sessions(
     db: DbSession,
     actor: Annotated[HumanActor, Depends(require_departmental(perm(AGENT, VIEW)))],
-    agent_id: uuid.UUID | None = None,
+    agent_id: Annotated[uuid.UUID | None, Query(alias="agentId")] = None,
 ) -> list[ChatSessionDTO]:
     sessions = await list_sessions(
         db,

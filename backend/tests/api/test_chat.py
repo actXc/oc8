@@ -76,6 +76,61 @@ async def test_create_session_then_list_it(app_session: AppSessionFactory) -> No
             assert session_id in ids
 
 
+async def test_listing_sessions_by_agent_excludes_another_agents_sessions(
+    app_session: AppSessionFactory,
+) -> None:
+    """`GET /chat/sessions?agentId=...` binds via `Query(alias="agentId")` --
+    the frontend sends camelCase on the wire (see hooks-chat.ts's
+    useChatSessions), and FastAPI does not fold camelCase onto a snake_case
+    parameter name on its own. Without the alias this filter silently no-ops
+    (`agent_id` stays None), and every member's sessions across every agent
+    come back regardless of which agent was asked for -- exactly the bug a
+    single-agent test like test_create_session_then_list_it above can never
+    catch, since with only one agent in play an unfiltered and a correctly
+    filtered result look identical."""
+    tenant = uuid.uuid4()
+    lennart_id = await _seed_agent(app_session, tenant)
+    async with app_session(tenant) as db:
+        dept = m.Department(tenant_id=tenant, name="Helpdesk", frame={})
+        db.add(dept)
+        await db.flush()
+        tim = m.Agent(tenant_id=tenant, department_id=dept.id, name="Tim")
+        db.add(tim)
+        await db.flush()
+        tim_id = tim.id
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            lennart_session = (
+                await c.post(
+                    "/api/v1/chat/sessions",
+                    json={"agentId": str(lennart_id)},
+                    headers=_headers(tenant),
+                )
+            ).json()["id"]
+            tim_session = (
+                await c.post(
+                    "/api/v1/chat/sessions",
+                    json={"agentId": str(tim_id)},
+                    headers=_headers(tenant),
+                )
+            ).json()["id"]
+
+            tim_list = await c.get(
+                f"/api/v1/chat/sessions?agentId={tim_id}", headers=_headers(tenant)
+            )
+            tim_ids = [s["id"] for s in tim_list.json()]
+            assert tim_session in tim_ids
+            assert lennart_session not in tim_ids
+
+            lennart_list = await c.get(
+                f"/api/v1/chat/sessions?agentId={lennart_id}", headers=_headers(tenant)
+            )
+            lennart_ids = [s["id"] for s in lennart_list.json()]
+            assert lennart_session in lennart_ids
+            assert tim_session not in lennart_ids
+
+
 async def test_send_message_creates_a_chat_source_run(
     app_session: AppSessionFactory, redis_url: str
 ) -> None:

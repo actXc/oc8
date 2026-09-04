@@ -78,7 +78,7 @@ function ChatPage() {
         </Panel>
 
         {selected ? (
-          <ChatWindow agentId={selected.id} agentName={selected.name} />
+          <ChatWindow key={selected.id} agentId={selected.id} agentName={selected.name} />
         ) : (
           <Panel className="flex h-[560px] items-center justify-center p-10 text-center">
             <p className="text-sm text-muted-foreground">

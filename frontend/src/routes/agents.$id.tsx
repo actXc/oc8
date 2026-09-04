@@ -400,7 +400,7 @@ function AgentDetail() {
         <LiveLog agentId={agent.id} runId={runId ?? agent.currentRunId ?? null} />
       )}
 
-      {tab === "chat" && <ChatWindow agentId={agent.id} agentName={agent.name} />}
+      {tab === "chat" && <ChatWindow key={agent.id} agentId={agent.id} agentName={agent.name} />}
 
       {tab === "files" && <WorkspaceFilesPanel agentId={agent.id} />}
 

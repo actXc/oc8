@@ -11,7 +11,7 @@ const deleteSessionMock = vi.fn();
 const uploadAttachmentMock = vi.fn();
 
 vi.mock("@/lib/hooks-chat", () => ({
-  useChatSessions: () => sessionsMock(),
+  useChatSessions: (agentId?: string) => sessionsMock(agentId),
   useCreateChatSession: () => ({ mutate: createSessionMock, isPending: false }),
   useChatMessages: () => messagesMock(),
   useSendChatMessage: () => ({ mutate: sendMessageMock, isPending: false }),
@@ -343,5 +343,59 @@ describe("ChatWindow attachments", () => {
 
     expect(screen.getByText("see attached")).toBeInTheDocument();
     expect(screen.getByText("notes.txt")).toBeInTheDocument();
+  });
+});
+
+describe("ChatWindow agent switching", () => {
+  beforeEach(() => {
+    sessionsMock.mockReset();
+    createSessionMock.mockReset();
+    messagesMock.mockReset();
+    sendMessageMock.mockReset();
+    renameSessionMock.mockReset();
+    deleteSessionMock.mockReset();
+  });
+
+  // Both real call sites (chat.tsx, agents.$id.tsx) key ChatWindow by
+  // agentId specifically so switching agents remounts it -- without that
+  // key, the previous agent's sessionId lives on as local state and the
+  // reader ends up chatting into a DIFFERENT agent's session while the
+  // header shows the newly selected agent's name.
+  it("keying by agentId resets to the new agent's own session, not the previous agent's", () => {
+    sessionsMock.mockImplementation((agentId?: string) =>
+      agentId === "agent-1"
+        ? {
+            data: [
+              {
+                id: "s1",
+                agentId: "agent-1",
+                title: "Agent 1 chat",
+                createdAt: "2026-08-27T00:00:00Z",
+              },
+            ],
+            isLoading: false,
+          }
+        : { data: [], isLoading: false },
+    );
+    messagesMock.mockReturnValue({ data: [], isLoading: false });
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { rerender } = render(
+      <QueryClientProvider client={qc}>
+        <ChatWindow key="agent-1" agentId="agent-1" agentName="Nora" />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByRole("button", { name: "Agent 1 chat" })).toBeInTheDocument();
+
+    rerender(
+      <QueryClientProvider client={qc}>
+        <ChatWindow key="agent-2" agentId="agent-2" agentName="Tim" />
+      </QueryClientProvider>,
+    );
+
+    // Agent 2 has no sessions of its own -- if state hadn't reset, Agent 1's
+    // session picker/messages would still be showing here.
+    expect(screen.queryByRole("button", { name: "Agent 1 chat" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /start chat/i })).toBeInTheDocument();
   });
 });
