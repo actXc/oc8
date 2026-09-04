@@ -10,6 +10,7 @@ in this codebase.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -42,9 +43,20 @@ _JWKS_ISSUER = "https://api.botframework.com"
 #: of the unknown-kid forced refresh below, which fires immediately
 #: regardless of this TTL.
 _JWKS_CACHE_TTL_SECONDS = 3600
+#: A floor between two FORCED refreshes. `jwt.get_unverified_header` verifies
+#: nothing, so any unauthenticated caller can hand us a syntactically valid
+#: header naming a `kid` that does not exist and drive one outbound HTTPS GET
+#: to login.botframework.com per request, straight past the TTL above. Real
+#: key rotation is a once-in-weeks event, so waiting half a minute costs a
+#: legitimate caller nothing and costs an abusive one everything.
+_JWKS_FORCED_REFRESH_MIN_INTERVAL_SECONDS = 30
 
 _jwks_cache: dict[str, Any] = {}
 _jwks_cache_at: float = 0.0
+_jwks_forced_refresh_at: float = 0.0
+#: Held across the fetch so a burst of concurrent misses collapses into one
+#: outbound request instead of stampeding the endpoint.
+_jwks_lock = asyncio.Lock()
 
 
 async def _fetch_jwks() -> dict[str, Any]:
@@ -56,13 +68,25 @@ async def _fetch_jwks() -> dict[str, Any]:
 
 
 async def _get_jwks(*, force_refresh: bool = False) -> dict[str, Any]:
-    global _jwks_cache, _jwks_cache_at
-    now = time.monotonic()
-    if not force_refresh and _jwks_cache and (now - _jwks_cache_at) < _JWKS_CACHE_TTL_SECONDS:
+    global _jwks_cache, _jwks_cache_at, _jwks_forced_refresh_at
+    async with _jwks_lock:
+        now = time.monotonic()
+        if not force_refresh and _jwks_cache and (now - _jwks_cache_at) < _JWKS_CACHE_TTL_SECONDS:
+            return _jwks_cache
+        if (
+            force_refresh
+            and _jwks_forced_refresh_at
+            and (now - _jwks_forced_refresh_at) < _JWKS_FORCED_REFRESH_MIN_INTERVAL_SECONDS
+        ):
+            # Whatever we already have. It may still not hold the requested
+            # kid -- which is fine: the caller's answer to a miss is to fail
+            # closed, and that is the right answer for a made-up kid too.
+            return _jwks_cache
+        _jwks_cache = await _fetch_jwks()
+        _jwks_cache_at = now
+        if force_refresh:
+            _jwks_forced_refresh_at = now
         return _jwks_cache
-    _jwks_cache = await _fetch_jwks()
-    _jwks_cache_at = now
-    return _jwks_cache
 
 
 #: The only hosts the bot's own access token may ever be sent to. `serviceUrl`

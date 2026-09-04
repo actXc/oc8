@@ -42,15 +42,19 @@ def _plugin_path() -> Iterator[None]:
 
 @pytest.fixture(autouse=True)
 def _reset_jwks_cache() -> Iterator[None]:
-    """`_jwks_cache`/`_jwks_cache_at` are module-level mutable state; without
-    resetting them, one test's cached keys would leak into the next."""
+    """`_jwks_cache`/`_jwks_cache_at`/`_jwks_forced_refresh_at` are
+    module-level mutable state; without resetting them, one test's cached keys
+    -- or its spent forced-refresh budget -- would leak into the next."""
     import channel.channel as channel_module
 
-    channel_module._jwks_cache = {}
-    channel_module._jwks_cache_at = 0.0
+    def _reset() -> None:
+        channel_module._jwks_cache = {}
+        channel_module._jwks_cache_at = 0.0
+        channel_module._jwks_forced_refresh_at = 0.0
+
+    _reset()
     yield
-    channel_module._jwks_cache = {}
-    channel_module._jwks_cache_at = 0.0
+    _reset()
 
 
 def _keypair() -> rsa.RSAPrivateKey:
@@ -188,6 +192,77 @@ async def test_an_unknown_key_id_refreshes_once_then_fails_closed(
 
     assert await _verify_activity_jwt(token, app_id="app-1") is None
     assert fetch_calls == 2, "one fetch to populate the cache, one forced refresh on the miss"
+
+
+@pytest.mark.asyncio
+async def test_repeated_unknown_key_ids_cannot_drive_a_fetch_per_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`jwt.get_unverified_header` verifies nothing, so an unauthenticated
+    caller can put any `kid` they like in a header and -- before the rate
+    limit -- make oc8 issue one outbound HTTPS GET to login.botframework.com
+    for every request they send, TTL or no TTL. The second call here must
+    reuse what the first already fetched."""
+    import channel.channel as channel_module
+    from channel.channel import _verify_activity_jwt
+
+    key = _keypair()
+    jwks = {"keys": [_jwk_for(key, kid="k1")]}
+    fetch_calls = 0
+
+    async def counting_fetch() -> dict[str, Any]:
+        nonlocal fetch_calls
+        fetch_calls += 1
+        return jwks
+
+    monkeypatch.setattr(channel_module, "_fetch_jwks", counting_fetch)
+    token = _token_for(key, kid="never-published", audience="app-1")
+
+    assert await _verify_activity_jwt(token, app_id="app-1") is None
+    assert await _verify_activity_jwt(token, app_id="app-1") is None
+
+    assert fetch_calls == 2, "the second request's forced refresh must be inside the rate limit"
+
+
+@pytest.mark.asyncio
+async def test_a_forced_refresh_is_allowed_again_once_the_interval_has_passed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The floor must not turn into a permanent block: a key really rotating
+    half an hour after someone probed us has to still be picked up."""
+    import channel.channel as channel_module
+    from channel.channel import _verify_activity_jwt
+
+    key = _keypair()
+    jwks = {"keys": [_jwk_for(key, kid="k1")]}
+    fetch_calls = 0
+
+    async def counting_fetch() -> dict[str, Any]:
+        nonlocal fetch_calls
+        fetch_calls += 1
+        return jwks
+
+    class _Clock:
+        """Stands in for the `time` MODULE inside channel.channel only --
+        patching the real `time.monotonic` would move the clock for asyncio
+        and pytest too."""
+
+        now = 1000.0
+
+        def monotonic(self) -> float:
+            return self.now
+
+    clock = _Clock()
+    monkeypatch.setattr(channel_module, "_fetch_jwks", counting_fetch)
+    monkeypatch.setattr(channel_module, "time", clock)
+    token = _token_for(key, kid="never-published", audience="app-1")
+
+    assert await _verify_activity_jwt(token, app_id="app-1") is None
+    assert fetch_calls == 2
+
+    clock.now += channel_module._JWKS_FORCED_REFRESH_MIN_INTERVAL_SECONDS + 1
+    assert await _verify_activity_jwt(token, app_id="app-1") is None
+    assert fetch_calls == 3, "past the interval, a genuine rotation must still be fetched"
 
 
 @pytest.mark.asyncio
