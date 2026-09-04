@@ -431,7 +431,11 @@ async def test_delegate_task_carries_the_chat_origin_onto_the_sub_run(app_sessio
             tenant_id=tenant,
             agent_id=lead.id,
             source="chat",
-            context={"chat_session_id": "aaaa-bbbb", "telegram_external_id": "tg-7"},
+            context={
+                "chat_session_id": "aaaa-bbbb",
+                "chat_channel": "teams",
+                "chat_channel_external_id": "tg-7",
+            },
         )
         db.add(executing_run)
         await db.flush()
@@ -457,7 +461,8 @@ async def test_delegate_task_carries_the_chat_origin_onto_the_sub_run(app_sessio
         sub = await db.get(m.AgentRun, outcome.pending_run)
         assert sub is not None
         assert sub.context["chat_session_id"] == "aaaa-bbbb"
-        assert sub.context["telegram_external_id"] == "tg-7"
+        assert sub.context["chat_channel"] == "teams"
+        assert sub.context["chat_channel_external_id"] == "tg-7"
 
 
 @pytest.mark.asyncio
@@ -501,7 +506,8 @@ async def test_delegate_task_without_a_chat_origin_carries_nothing(app_session: 
         sub = await db.get(m.AgentRun, outcome.pending_run)
         assert sub is not None
         assert "chat_session_id" not in sub.context
-        assert "telegram_external_id" not in sub.context
+        assert "chat_channel" not in sub.context
+        assert "chat_channel_external_id" not in sub.context
 
 
 @pytest.mark.asyncio

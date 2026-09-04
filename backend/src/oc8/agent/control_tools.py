@@ -597,17 +597,19 @@ async def _delegate(
     # context, one hop at a time). Without this a chat-originated delegation's
     # eventual answer was created with source="delegation" and never reached
     # record_assistant_reply's `if run.source == "chat"` gate at all -- the
-    # lead's real conclusion sat in the run row forever, unseen on web or
-    # Telegram, while the human was told only "I've delegated this."
+    # lead's real conclusion sat in the run row forever, unseen on web or on
+    # whichever channel the human was using.
     if run_id is not None:
         executing_run = await db.get(m.AgentRun, run_id)
         if executing_run is not None and executing_run.context:
             chat_session_id = executing_run.context.get("chat_session_id")
             if chat_session_id:
                 context["chat_session_id"] = chat_session_id
-                telegram_external_id = executing_run.context.get("telegram_external_id")
-                if telegram_external_id:
-                    context["telegram_external_id"] = telegram_external_id
+                chat_channel = executing_run.context.get("chat_channel")
+                chat_channel_external_id = executing_run.context.get("chat_channel_external_id")
+                if chat_channel and chat_channel_external_id:
+                    context["chat_channel"] = chat_channel
+                    context["chat_channel_external_id"] = chat_channel_external_id
     # Deferred import: oc8.runtime.executor reaches oc8.runtime.adapter, which
     # imports this module's own importer (oc8.agent.engine) at module level, so
     # importing it at the top would be a cycle. Resolved once, at first call.
