@@ -181,7 +181,9 @@ async def test_withdraw_edits_the_original_card_in_place(monkeypatch: pytest.Mon
     _install(monkeypatch, lambda r: (captured.append(r), handler(r))[1])
     channel = TeamsChannel(app_id="app-1", app_password="pw")
 
-    await channel.withdraw(_notice(), external_id=_CONV_REF, handle="activity-1", outcome="approved")
+    await channel.withdraw(
+        _notice(), external_id=_CONV_REF, handle="activity-1", outcome="approved"
+    )
 
     put_calls = [r for r in captured if r.method == "PUT"]
     assert len(put_calls) == 1
@@ -206,7 +208,9 @@ async def test_withdraw_falls_back_to_plain_text_when_the_edit_fails(
     _install(monkeypatch, lambda r: (captured.append(r), handler(r))[1])
     channel = TeamsChannel(app_id="app-1", app_password="pw")
 
-    await channel.withdraw(_notice(), external_id=_CONV_REF, handle="activity-1", outcome="rejected")
+    await channel.withdraw(
+        _notice(), external_id=_CONV_REF, handle="activity-1", outcome="rejected"
+    )
 
     post_calls = [
         r for r in captured if r.method == "POST" and "smba.trafficmanager.net" in str(r.url)
@@ -236,7 +240,9 @@ async def test_withdraw_never_raises_when_every_send_fails(monkeypatch: pytest.M
     _install(monkeypatch, handler)
     channel = TeamsChannel(app_id="app-1", app_password="pw")
 
-    await channel.withdraw(_notice(), external_id=_CONV_REF, handle="activity-1", outcome="approved")
+    await channel.withdraw(
+        _notice(), external_id=_CONV_REF, handle="activity-1", outcome="approved"
+    )
 
 
 @pytest.mark.asyncio
@@ -275,7 +281,12 @@ def test_build_reads_bot_token_app_id_and_tenant_id_from_the_resolved_config() -
     from channel.channel import TeamsChannel, build
 
     channel = build(
-        {"bot_token": "pw", "app_id": "app-1", "tenant_id": "contoso", "max_classification": "internal"}
+        {
+            "bot_token": "pw",
+            "app_id": "app-1",
+            "tenant_id": "contoso",
+            "max_classification": "internal",
+        }
     )
     assert isinstance(channel, TeamsChannel)
     assert channel.capabilities().max_classification == "internal"

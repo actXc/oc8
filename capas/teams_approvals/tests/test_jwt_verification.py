@@ -124,7 +124,9 @@ async def test_a_token_for_the_wrong_audience_fails_closed(monkeypatch: pytest.M
 
 
 @pytest.mark.asyncio
-async def test_a_token_signed_by_the_wrong_key_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_token_signed_by_the_wrong_key_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The header claims a `kid` that IS in the JWKS, but the signature was
     made with a different private key entirely -- the shape of a forged or
     tampered token, not just an unknown key id."""
@@ -206,5 +208,7 @@ async def test_verify_inbound_delegates_the_bearer_token_to_jwt_verification(
     monkeypatch.setattr(channel_module, "_verify_activity_jwt", fake_verify)
     channel = TeamsChannel(app_id="app-1", app_password="pw")
 
-    assert await channel.verify_inbound(headers={"Authorization": "Bearer tok123"}, body=b"{}") is True
+    assert (
+        await channel.verify_inbound(headers={"Authorization": "Bearer tok123"}, body=b"{}") is True
+    )
     assert seen == {"token": "tok123", "app_id": "app-1"}

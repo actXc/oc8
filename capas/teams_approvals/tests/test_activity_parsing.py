@@ -7,7 +7,6 @@ a decision is read off `value`, and everything else falls back to `text`."""
 from __future__ import annotations
 
 import sys
-import uuid
 from collections.abc import Iterator
 from pathlib import Path
 

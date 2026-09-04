@@ -845,9 +845,7 @@ async def execute_control_tool(
             capa_name, _, skill_subpath = skill.definition.reference_root.partition("/")
             plugin = find_plugin(capa_name)
             if plugin is None or not plugin.valid:
-                return ControlOutcome(
-                    output=f"ERROR: '{skill_name}'s capa is not installed here"
-                )
+                return ControlOutcome(output=f"ERROR: '{skill_name}'s capa is not installed here")
             base = (Path(plugin.path) / skill_subpath).resolve()
             target = (base / normalized).resolve()
             try:

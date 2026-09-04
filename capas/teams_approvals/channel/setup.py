@@ -25,7 +25,9 @@ async def validate(values: dict[str, str]) -> None:
         )
     except httpx.HTTPStatusError as exc:
         body = exc.response.json() if exc.response.content else {}
-        reason = body.get("error_description") or body.get("error") or f"HTTP {exc.response.status_code}"
+        reason = (
+            body.get("error_description") or body.get("error") or f"HTTP {exc.response.status_code}"
+        )
         raise ValueError(f"Microsoft rejected this app registration: {reason}") from exc
     except httpx.HTTPError as exc:
         raise ValueError(f"could not reach Microsoft: {exc}") from exc

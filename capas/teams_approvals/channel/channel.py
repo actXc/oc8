@@ -10,13 +10,24 @@ in this codebase.
 
 from __future__ import annotations
 
+import json
 import logging
 import time
+import uuid as _uuid
+from collections.abc import Mapping
 from typing import Any
 
 import httpx
 import jwt
 from jwt.algorithms import RSAAlgorithm
+
+from oc8.channels.notice import (
+    ApprovalNotice,
+    ChannelCapabilities,
+    ChannelDecision,
+    ChannelFreeText,
+    ChannelLink,
+)
 
 # Module logger, never __name__: `channel/` is a shared folder name across
 # plugins.
@@ -77,31 +88,28 @@ async def _verify_activity_jwt(token: str, *, app_id: str) -> bool:
         if key_data is None:
             return False
     try:
-        import json
-
         public_key = RSAAlgorithm.from_jwk(json.dumps(key_data))
-        jwt.decode(token, key=public_key, algorithms=["RS256"], audience=app_id, issuer=_JWKS_ISSUER)  # type: ignore[arg-type]
+        jwt.decode(
+            token,
+            key=public_key,  # type: ignore[arg-type]
+            algorithms=["RS256"],
+            audience=app_id,
+            issuer=_JWKS_ISSUER,
+        )
     except jwt.PyJWTError:
         return False
     return True
 
 
-import json
-import uuid as _uuid
-from collections.abc import Mapping
-
-from oc8.channels.notice import (
-    ApprovalNotice,
-    ChannelCapabilities,
-    ChannelDecision,
-    ChannelFreeText,
-    ChannelLink,
-)
-
-
 def render_body(notice: ApprovalNotice) -> list[dict[str, Any]]:
     blocks: list[dict[str, Any]] = [
-        {"type": "TextBlock", "text": notice.title, "weight": "Bolder", "size": "Medium", "wrap": True}
+        {
+            "type": "TextBlock",
+            "text": notice.title,
+            "weight": "Bolder",
+            "size": "Medium",
+            "wrap": True,
+        }
     ]
     if notice.content_withheld:
         blocks.append(
@@ -116,7 +124,9 @@ def render_body(notice: ApprovalNotice) -> list[dict[str, Any]]:
         )
         return blocks
     if notice.amount_text:
-        blocks.append({"type": "TextBlock", "text": notice.amount_text, "weight": "Bolder", "wrap": True})
+        blocks.append(
+            {"type": "TextBlock", "text": notice.amount_text, "weight": "Bolder", "wrap": True}
+        )
     if notice.detail:
         blocks.append({"type": "TextBlock", "text": notice.detail, "wrap": True})
     if notice.expires_at is not None:
@@ -180,7 +190,9 @@ def render_card(notice: ApprovalNotice) -> dict[str, Any]:
 def render_outcome_card(notice: ApprovalNotice, *, outcome: str) -> dict[str, Any]:
     said = {"approved": "freigegeben", "rejected": "abgelehnt"}.get(outcome, outcome)
     body = render_body(notice)
-    body.append({"type": "TextBlock", "text": f"Entschieden: {said}", "wrap": True, "isSubtle": True})
+    body.append(
+        {"type": "TextBlock", "text": f"Entschieden: {said}", "wrap": True, "isSubtle": True}
+    )
     return {
         "type": "AdaptiveCard",
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
@@ -319,7 +331,9 @@ class TeamsChannel:
         self._token_expires_at = now + max(expires_in - _TOKEN_REFRESH_MARGIN_SECONDS, 0)
         return self._token
 
-    async def _post(self, service_url: str, conversation_id: str, activity: dict[str, Any]) -> dict[str, Any]:
+    async def _post(
+        self, service_url: str, conversation_id: str, activity: dict[str, Any]
+    ) -> dict[str, Any]:
         token = await self._access_token()
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.post(
@@ -347,7 +361,10 @@ class TeamsChannel:
         conv_ref = json.loads(external_id)
         activity = _activity_base(conv_ref)
         activity["attachments"] = [
-            {"contentType": "application/vnd.microsoft.card.adaptive", "content": render_card(notice)}
+            {
+                "contentType": "application/vnd.microsoft.card.adaptive",
+                "content": render_card(notice),
+            }
         ]
         result = await self._post(conv_ref["serviceUrl"], conv_ref["conversationId"], activity)
         activity_id = result.get("id")
@@ -371,10 +388,14 @@ class TeamsChannel:
                 }
             ]
             try:
-                await self._put(conv_ref["serviceUrl"], conv_ref["conversationId"], handle, activity)
+                await self._put(
+                    conv_ref["serviceUrl"], conv_ref["conversationId"], handle, activity
+                )
                 return
             except Exception:
-                logger.warning("could not edit a Teams card in place, falling back to text", exc_info=True)
+                logger.warning(
+                    "could not edit a Teams card in place, falling back to text", exc_info=True
+                )
         said = {"approved": "freigegeben", "rejected": "abgelehnt"}.get(outcome, outcome)
         activity = _activity_base(conv_ref)
         activity["text"] = f"{notice.title}\n\nEntschieden: {said}."

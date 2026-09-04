@@ -62,7 +62,9 @@ async def test_a_missing_app_password_is_rejected_before_any_call() -> None:
 async def test_a_working_registration_does_not_raise(monkeypatch: pytest.MonkeyPatch) -> None:
     from channel.setup import validate
 
-    _install(monkeypatch, lambda r: httpx.Response(200, json={"access_token": "t", "expires_in": 3600}))
+    _install(
+        monkeypatch, lambda r: httpx.Response(200, json={"access_token": "t", "expires_in": 3600})
+    )
     await validate({"app_id": "app-1", "app_password": "pw"})
 
 
@@ -74,7 +76,9 @@ async def test_a_rejected_registration_raises_with_microsofts_reason(
 
     _install(
         monkeypatch,
-        lambda r: httpx.Response(401, json={"error": "invalid_client", "error_description": "bad secret"}),
+        lambda r: httpx.Response(
+            401, json={"error": "invalid_client", "error_description": "bad secret"}
+        ),
     )
     with pytest.raises(ValueError, match="bad secret"):
         await validate({"app_id": "app-1", "app_password": "wrong"})

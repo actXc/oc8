@@ -819,7 +819,9 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
                         mcp_conn=mcp_conn,
                         chat_session_id=(run.context or {}).get("chat_session_id"),
                         chat_channel=(run.context or {}).get("chat_channel"),
-                        chat_channel_external_id=(run.context or {}).get("chat_channel_external_id"),
+                        chat_channel_external_id=(run.context or {}).get(
+                            "chat_channel_external_id"
+                        ),
                     )
                     if wake_id is not None:
                         pending_runs.append(wake_id)
@@ -900,7 +902,12 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
                         if parked_sender is not None:
                             parked_channel, parked_external_id = parked_sender
                             channel_replies.append(
-                                (run.tenant_id, parked_channel, parked_external_id, _CHAT_NEEDS_INPUT)
+                                (
+                                    run.tenant_id,
+                                    parked_channel,
+                                    parked_external_id,
+                                    _CHAT_NEEDS_INPUT,
+                                )
                             )
                     except RepeatedClarification as exc:
                         # The agent asked the identical question twice on this
@@ -1004,7 +1011,9 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
                             mcp_conn=mcp_conn,
                             chat_session_id=(run.context or {}).get("chat_session_id"),
                             chat_channel=(run.context or {}).get("chat_channel"),
-                            chat_channel_external_id=(run.context or {}).get("chat_channel_external_id"),
+                            chat_channel_external_id=(run.context or {}).get(
+                                "chat_channel_external_id"
+                            ),
                         )
                         if wake_id is not None:
                             pending_runs.append(wake_id)
@@ -1034,7 +1043,12 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
                         if held_sender is not None:
                             held_channel, held_external_id = held_sender
                             channel_replies.append(
-                                (run.tenant_id, held_channel, held_external_id, _CHAT_WAITING_FOR_APPROVAL)
+                                (
+                                    run.tenant_id,
+                                    held_channel,
+                                    held_external_id,
+                                    _CHAT_WAITING_FOR_APPROVAL,
+                                )
                             )
                         # Close the parking race (see requeue_if_already_decided):
                         # an operator may have decided the held call while this run
