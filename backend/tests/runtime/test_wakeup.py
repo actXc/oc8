@@ -43,7 +43,8 @@ async def _delegated_setup(
     tenant: uuid.UUID,
     *,
     chat_session_id: str | None = None,
-    telegram_external_id: str | None = None,
+    chat_channel: str | None = None,
+    chat_channel_external_id: str | None = None,
 ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
     """A team lead with a task, and a worker with a sub-task parented to it.
     Returns (lead agent id, sub-task id, sub-run id)."""
@@ -84,8 +85,10 @@ async def _delegated_setup(
         }
         if chat_session_id is not None:
             sub_run_context["chat_session_id"] = chat_session_id
-        if telegram_external_id is not None:
-            sub_run_context["telegram_external_id"] = telegram_external_id
+        if chat_channel is not None:
+            sub_run_context["chat_channel"] = chat_channel
+        if chat_channel_external_id is not None:
+            sub_run_context["chat_channel_external_id"] = chat_channel_external_id
 
         sub_run = await RunRepository(s).create(
             tenant_id=tenant,
@@ -226,7 +229,8 @@ async def test_a_chat_originated_sub_task_wakes_the_lead_with_source_chat(
         app_session,
         tenant,
         chat_session_id="11111111-1111-1111-1111-111111111111",
-        telegram_external_id="tg-42",
+        chat_channel="teams",
+        chat_channel_external_id="tg-42",
     )
     queue = _RecordingQueue()
     monkeypatch.setattr("oc8.runtime.intake.get_run_queue", lambda: queue)
@@ -250,7 +254,8 @@ async def test_a_chat_originated_sub_task_wakes_the_lead_with_source_chat(
         assert wake.agent_id == lead_id
         assert wake.source == "chat"
         assert wake.context["chat_session_id"] == "11111111-1111-1111-1111-111111111111"
-        assert wake.context["telegram_external_id"] == "tg-42"
+        assert wake.context["chat_channel"] == "teams"
+        assert wake.context["chat_channel_external_id"] == "tg-42"
         assert expected_outcome in wake.context["task"]
 
 
