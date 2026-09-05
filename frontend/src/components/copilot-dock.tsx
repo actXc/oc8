@@ -1,4 +1,4 @@
-import { ChevronDown, Send, Sparkles, X } from "lucide-react";
+import { ChevronDown, Plus, Send, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ChatMarkdown } from "@/components/chat-markdown";
@@ -52,7 +52,8 @@ function proposalFailedText(de: boolean): string {
 // existed and had zero call sites, so every proposal the Assistant made --
 // over the web or over Telegram -- simply sat in the database.
 function PendingProposals({ de }: { de: boolean }) {
-  const { data: proposals } = useCopilotProposals({ poll: true });
+  const can = useCan();
+  const { data: proposals } = useCopilotProposals({ poll: true, enabled: can("copilot:view") });
   const apply = useApplyCopilotProposal();
   const reject = useRejectCopilotProposal();
   // Answered here-and-now, on top of what the server last said: the list is
@@ -123,26 +124,30 @@ function PendingProposals({ de }: { de: boolean }) {
                 </li>
               ))}
             </ul>
-            <div className="mt-2 flex gap-2">
-              <button
-                type="button"
-                disabled={apply.isPending || reject.isPending}
-                onClick={() => answer(proposal.id, (options) => apply.mutate(proposal.id, options))}
-                className="rounded-md bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground disabled:opacity-50"
-              >
-                {de ? "Anwenden" : "Apply"}
-              </button>
-              <button
-                type="button"
-                disabled={apply.isPending || reject.isPending}
-                onClick={() =>
-                  answer(proposal.id, (options) => reject.mutate(proposal.id, options))
-                }
-                className="rounded-md border border-border px-2.5 py-1 text-[11px] disabled:opacity-50"
-              >
-                {de ? "Ablehnen" : "Reject"}
-              </button>
-            </div>
+            {can("copilot:manage") && (
+              <div className="mt-2 flex gap-2">
+                <button
+                  type="button"
+                  disabled={apply.isPending || reject.isPending}
+                  onClick={() =>
+                    answer(proposal.id, (options) => apply.mutate(proposal.id, options))
+                  }
+                  className="rounded-md bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground disabled:opacity-50"
+                >
+                  {de ? "Anwenden" : "Apply"}
+                </button>
+                <button
+                  type="button"
+                  disabled={apply.isPending || reject.isPending}
+                  onClick={() =>
+                    answer(proposal.id, (options) => reject.mutate(proposal.id, options))
+                  }
+                  className="rounded-md border border-border px-2.5 py-1 text-[11px] disabled:opacity-50"
+                >
+                  {de ? "Ablehnen" : "Reject"}
+                </button>
+              </div>
+            )}
           </li>
         ))}
       </ul>
@@ -194,15 +199,25 @@ function CopilotDockPanel() {
   const [sessionId, setSessionId] = useState<string | null>(null);
 
   // Default to the most recent existing session once both the Assistant's id
-  // and its sessions have loaded. Never runs again once the reader has one
-  // selected -- same shape as ChatWindow's own bootstrap effect. Gated on
+  // and its sessions have loaded -- same shape as ChatWindow's own bootstrap
+  // effect, except this one only ever fires ONCE (the ref), not merely
+  // "while sessionId is null": the "new chat" button below deliberately sets
+  // `sessionId` back to null to re-enter the lazy-creation flow, and a plain
+  // `sessionId !== null` guard would immediately re-select the same existing
+  // session on the very next render, silently undoing that click whenever
+  // other sessions exist -- exactly the case the button exists for. Gated on
   // `assistantAgentId` too: until it resolves, `sessions` (queried with an
   // undefined agentId) would answer for every agent's chat, not just the
   // Assistant's, and must never be picked from.
+  const bootstrappedSession = useRef(false);
   useEffect(() => {
     if (!assistantAgentId) return;
+    if (bootstrappedSession.current) return;
     if (sessionId !== null) return;
-    if (sessions && sessions.length > 0) setSessionId(sessions[0].id);
+    if (sessions && sessions.length > 0) {
+      bootstrappedSession.current = true;
+      setSessionId(sessions[0].id);
+    }
   }, [assistantAgentId, sessions, sessionId]);
 
   const { data: messages } = useChatMessages(sessionId);
@@ -308,6 +323,21 @@ function CopilotDockPanel() {
                 sessionId={sessionId}
                 onSelect={setSessionId}
               />
+            )}
+            {assistantAgentId && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSessionId(null);
+                  setInput("");
+                  setSendError(false);
+                }}
+                aria-label={de ? "Neuer Chat" : "New chat"}
+                title={de ? "Neuer Chat" : "New chat"}
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:bg-muted/40 hover:text-foreground"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
             )}
             <button
               type="button"

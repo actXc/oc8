@@ -38,7 +38,7 @@ vi.mock("@/lib/hooks", async (importOriginal) => {
   return {
     ...actual,
     useAssistant: () => assistantMock(),
-    useCopilotProposals: () => proposalsMock(),
+    useCopilotProposals: (options?: unknown) => proposalsMock(options),
     useApplyCopilotProposal: () => ({ mutate: applyProposalMock, isPending: false }),
     useRejectCopilotProposal: () => ({ mutate: rejectProposalMock, isPending: false }),
   };
@@ -391,6 +391,24 @@ describe("CopilotDock", () => {
     expect(screen.queryByRole("region", { name: /pending proposals/i })).not.toBeInTheDocument();
   });
 
+  it("does not fetch or poll pending proposals for a caller who only holds copilot:use", () => {
+    canMock.mockImplementation((p: string) => p === "copilot:use");
+    renderDock();
+    openDock();
+    expect(proposalsMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
+  });
+
+  it("shows pending proposals but hides Apply/Reject for a caller without copilot:manage", () => {
+    canMock.mockImplementation((p: string) => p === "copilot:use" || p === "copilot:view");
+    proposalsMock.mockReturnValue({ data: [draft] });
+    renderDock();
+    openDock();
+    expect(screen.getByRole("region", { name: /pending proposals/i })).toBeInTheDocument();
+    expect(screen.getByText("agent.mission.set")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^apply$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^reject$/i })).not.toBeInTheDocument();
+  });
+
   it("closing and reopening the dock keeps the same session (no reset on remount-free toggle)", () => {
     sessionsMock.mockReturnValue({
       data: [{ id: "s1", agentId: "assistant-1", title: "", createdAt: "t", lastMessageAt: null }],
@@ -438,9 +456,52 @@ describe("CopilotDock", () => {
     });
     renderDock();
     openDock();
-    expect(screen.getByText("Erste Frage")).toBeInTheDocument();
-    fireEvent.pointerDown(screen.getByText("Erste Frage"), { button: 0 });
+    // The picker's trigger renders the current session's title in a
+    // `span.truncate` -- scope to that so this doesn't also match the menu
+    // item once the dropdown is open (its own row also carries the title).
+    expect(screen.getByText("Erste Frage", { selector: "span.truncate" })).toBeInTheDocument();
+    fireEvent.pointerDown(screen.getByText("Erste Frage", { selector: "span.truncate" }), {
+      button: 0,
+    });
     fireEvent.click(screen.getByText("Zweite Frage"));
-    expect(messagesMock).toHaveBeenCalled();
+    // The picker's trigger now shows the newly-selected session's title.
+    expect(screen.getByText("Zweite Frage", { selector: "span.truncate" })).toBeInTheDocument();
+    expect(screen.queryByText("Erste Frage", { selector: "span.truncate" })).not.toBeInTheDocument();
+  });
+
+  it("a new chat button resets to the lazy-creation state even when other sessions exist", () => {
+    // One existing session, auto-selected on mount -- the exact case where,
+    // without this button, there was previously no way back to a blank,
+    // not-yet-created session at all.
+    sessionsMock.mockReturnValue({
+      data: [{ id: "s1", agentId: "assistant-1", title: "Erste Frage", createdAt: "t", lastMessageAt: null }],
+    });
+    createSessionMock.mockImplementation(
+      (agentId: string, opts?: { onSuccess?: (s: unknown) => void }) => {
+        opts?.onSuccess?.({
+          id: "new-session",
+          agentId,
+          title: "",
+          createdAt: "t",
+          lastMessageAt: null,
+        });
+      },
+    );
+    renderDock();
+    openDock();
+
+    fireEvent.click(screen.getByRole("button", { name: /new chat/i }));
+
+    // Same shape as "with no existing session, sending a first message
+    // creates one and then sends the message" -- proving the button put the
+    // dock back into that same lazy-creation state, rather than the reset
+    // being silently clobbered by the bootstrap effect that auto-selects
+    // the existing session.
+    const textarea = screen.getByPlaceholderText(/configure or ask oc8/i);
+    fireEvent.change(textarea, { target: { value: "Fresh question" } });
+    fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+
+    expect(createSessionMock).toHaveBeenCalledWith("assistant-1", expect.anything());
+    expect(sendMessageMock).toHaveBeenCalledWith("Fresh question", expect.anything());
   });
 });

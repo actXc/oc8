@@ -2280,8 +2280,11 @@ export function useRestoreBackup() {
 
 // --- oc8 Copilot (backend/src/oc8/api/v1/copilot.py) ---
 // `copilot:manage` is tenant-wide and org_admin-only (a prepared proposal can
-// name any agent in any department), so every hook here is gated by the
-// caller already holding that permission — see CopilotDock's useCan() check.
+// name any agent in any department); `copilot:view` gates reading the list.
+// CopilotDock itself only requires `copilot:use`, so callers of these hooks
+// must gate them individually — see PendingProposals in copilot-dock.tsx for
+// both the `enabled: can("copilot:view")` query gate and the
+// `can("copilot:manage")` gate on the Apply/Reject buttons.
 
 export interface CopilotOperationRef {
   label: string;
