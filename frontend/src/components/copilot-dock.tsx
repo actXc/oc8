@@ -220,6 +220,19 @@ function CopilotDockPanel() {
     }
   }, [assistantAgentId, sessions, sessionId]);
 
+  // Any selection that lands `sessionId` on a real session -- whether the
+  // bootstrap effect above, a lazily-created first session (send() below),
+  // or a manual pick from ChatSessionPicker -- must arm the ref too:
+  // otherwise a tenant's very first session (created via the lazy path,
+  // which never runs the bootstrap effect since it sets `sessionId`
+  // directly) leaves the ref unarmed, and the *first* "new chat" click
+  // afterwards gets silently undone by the bootstrap effect re-selecting
+  // `sessions[0]` the moment `sessions` catches up via its own refetch.
+  function selectSession(id: string | null) {
+    bootstrappedSession.current = true;
+    setSessionId(id);
+  }
+
   const { data: messages } = useChatMessages(sessionId);
   const sendMessage = useSendChatMessage(sessionId ?? "");
 
@@ -283,7 +296,7 @@ function CopilotDockPanel() {
     if (!sessionId) {
       createSession.mutate(assistantAgentId, {
         onSuccess: (session) => {
-          setSessionId(session.id);
+          selectSession(session.id);
           setPendingSend(text);
         },
         onError: () => fail(text),
@@ -321,7 +334,7 @@ function CopilotDockPanel() {
                 agentId={assistantAgentId}
                 sessions={sessions}
                 sessionId={sessionId}
-                onSelect={setSessionId}
+                onSelect={selectSession}
               />
             )}
             {assistantAgentId && (

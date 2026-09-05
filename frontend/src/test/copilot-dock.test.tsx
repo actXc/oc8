@@ -504,4 +504,46 @@ describe("CopilotDock", () => {
     expect(createSessionMock).toHaveBeenCalledWith("assistant-1", expect.anything());
     expect(sendMessageMock).toHaveBeenCalledWith("Fresh question", expect.anything());
   });
+
+  it("a new chat button still works right after a tenant's very first session is created lazily", () => {
+    // No sessions at all until the first message creates one -- the bootstrap
+    // effect never runs (sessions.length is 0 the whole time), so it's
+    // send()'s own onSuccess, not the effect, that has to arm the ref.
+    // sessionsMock is stateful here to mimic the query-invalidation refetch
+    // that lands the new session in `sessions` shortly after creation.
+    let sessions: Array<{
+      id: string;
+      agentId: string;
+      title: string;
+      createdAt: string;
+      lastMessageAt: string | null;
+    }> = [];
+    sessionsMock.mockImplementation(() => ({ data: sessions }));
+    createSessionMock.mockImplementation(
+      (agentId: string, opts?: { onSuccess?: (s: unknown) => void }) => {
+        const created = { id: "new-session", agentId, title: "", createdAt: "t", lastMessageAt: null };
+        sessions = [created];
+        opts?.onSuccess?.(created);
+      },
+    );
+    renderDock();
+    openDock();
+
+    fireEvent.change(screen.getByPlaceholderText(/configure or ask oc8/i), {
+      target: { value: "First message" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+    expect(createSessionMock).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /new chat/i }));
+    fireEvent.change(screen.getByPlaceholderText(/configure or ask oc8/i), {
+      target: { value: "Second message" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+
+    // Without arming the ref in send()'s onSuccess, the bootstrap effect
+    // would silently re-select the just-created session on this click,
+    // making this a plain send instead of a new lazy creation.
+    expect(createSessionMock).toHaveBeenCalledTimes(2);
+  });
 });
