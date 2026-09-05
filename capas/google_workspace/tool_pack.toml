@@ -16,7 +16,7 @@ read = [
     "docs_get_text", "sheets_read_range", "sheets_list_worksheets",
     "slides_get_text",
 ]
-send = [
+modify = [
     "gmail_send", "gmail_reply", "gmail_create_draft", "gmail_modify_labels",
     "calendar_create_event", "calendar_update_event", "calendar_cancel_event",
     "calendar_respond_to_invite", "calendar_create_meet_link",

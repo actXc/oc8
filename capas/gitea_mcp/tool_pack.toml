@@ -21,7 +21,7 @@ read = [
     "list_branches", "list_pull_requests", "get_pull_request", "list_releases",
     "read_file", "get_server_info", "get_server_version",
 ]
-send = [
+modify = [
     "create_issue", "update_issue", "add_comment", "add_comment_on_pr",
     "create_pr", "merge_pr", "commit_changes", "create_branch", "create_release",
 ]

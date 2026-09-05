@@ -25,7 +25,7 @@ read = [
     "hubspot-list-workflows", "hubspot-get-workflow",
     "hubspot-generate-feedback-link", "hubspot-get-link",
 ]
-send = [
+modify = [
     "hubspot-batch-create-objects", "hubspot-batch-update-objects",
     "hubspot-create-property", "hubspot-update-property",
     "hubspot-batch-create-associations", "hubspot-create-engagement",

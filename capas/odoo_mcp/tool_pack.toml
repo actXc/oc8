@@ -52,7 +52,7 @@ ODOO_API_KEY = "password"
 # `write = false`.
 [connections.scopes]
 read = ["search_records", "get_record", "list_models", "list_resource_templates", "aggregate_records"]
-send = ["create_record", "update_record", "delete_record", "post_message"]
+modify = ["create_record", "update_record", "delete_record", "post_message"]
 
 # How the bridge is launched. oc8 forwards only the env below and resolves the
 # password from the secret store into ODOO_PASSWORD. `uv tool run` is used

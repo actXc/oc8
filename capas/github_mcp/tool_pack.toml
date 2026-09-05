@@ -27,7 +27,7 @@ read = [
     "list_repository_collaborators", "list_tags", "search_code", "search_commits",
     "search_repositories", "search_users",
 ]
-send = [
+modify = [
     "add_issue_comment", "issue_write", "sub_issue_write",
     "add_comment_to_pending_review", "add_reply_to_pull_request_comment",
     "create_pull_request", "merge_pull_request", "pull_request_review_write",

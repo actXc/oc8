@@ -7,9 +7,9 @@ name = "microsoft365"
 transport = "stdio"
 server_url = ""
 
-# read/send classification (design doc §4.3). Nothing here is `write` -- same
-# reasoning odoo_mcp's own manifest states: granting it would confer nothing
-# while reading, on a permissions screen, as though it did.
+# read/send classification (design doc §4.3). The `write` category has been
+# merged into `modify` (design §4.3), so no tools are classified under a third
+# separate category.
 [connections.scopes]
 read = [
     "mail_search", "mail_get", "mail_list_folders",
@@ -19,7 +19,7 @@ read = [
     "teams_list_channels", "teams_list_chats",
     "contacts_search", "contacts_get", "powerpoint_get_text",
 ]
-send = [
+modify = [
     "mail_send", "mail_reply", "mail_create_draft", "mail_move", "mail_delete", "mail_mark_read",
     "calendar_create_event", "calendar_update_event", "calendar_cancel_event", "calendar_respond_to_invite",
     "files_upload", "files_update_content", "files_delete",
