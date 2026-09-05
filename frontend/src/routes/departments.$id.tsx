@@ -915,8 +915,7 @@ export function DepartmentToolsPanel({ departmentId }: { departmentId: string })
     const raw = (existing?.tools?.[connection.name] ?? {}) as Record<string, unknown>;
     return {
       read: raw.read !== undefined ? Boolean(raw.read) : true,
-      write: Boolean(raw.write),
-      send: Boolean(raw.send),
+      modify: Boolean(raw.modify),
       approvalActions: Array.isArray(raw.approval_actions)
         ? (raw.approval_actions as string[])
         : [],
@@ -932,14 +931,13 @@ export function DepartmentToolsPanel({ departmentId }: { departmentId: string })
       [connection.name]: {
         enabled: true,
         read: value.read,
-        write: value.write,
-        send: value.send,
+        modify: value.modify,
         approval_eur: value.approvalEur,
         approval_actions: value.approvalActions,
         // Not decoration -- see `GuardrailPreset`/`GuardrailValue` in
         // `@/components/guardrail-preset-picker`. Dropping this would
         // silently turn a preset like "Autonomous with a limit" into
-        // read+write+send above a euro threshold with EVERY tool reachable,
+        // read+modify above a euro threshold with EVERY tool reachable,
         // including `delete_record`, which carries no amount and so can
         // never meet that threshold -- the unattended-deletion
         // configuration, under a name promising a limit.

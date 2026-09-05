@@ -46,13 +46,13 @@ const AGENT: AgentDetail = {
   mission: "",
   departmentName: "Vertrieb",
   effectiveTools: {
-    Odoo: { enabled: true, read: true, write: false, send: false, approvalEur: null },
+    Odoo: { enabled: true, read: true, modify: false, approvalEur: null },
   },
   departmentFrameTools: {
-    Odoo: { enabled: true, read: true, write: false, send: false, approvalEur: null },
+    Odoo: { enabled: true, read: true, modify: false, approvalEur: null },
   },
   narrowingTools: {
-    Odoo: { enabled: true, read: true, write: false, send: false, approvalEur: null },
+    Odoo: { enabled: true, read: true, modify: false, approvalEur: null },
   },
   runtimeRef: null,
   currentRunId: null,
@@ -108,7 +108,7 @@ describe("NarrowingEditor (permissions only)", () => {
     renderEditor({
       ...AGENT,
       effectiveTools: {
-        Odoo: { enabled: false, read: false, write: false, send: false, approvalEur: null },
+        Odoo: { enabled: false, read: false, modify: false, approvalEur: null },
       },
     });
     expect(screen.getByText(/turn one on under configuration/i)).toBeInTheDocument();
@@ -121,8 +121,7 @@ describe("NarrowingEditor (permissions only)", () => {
         Odoo: {
           enabled: true,
           read: true,
-          write: false,
-          send: false,
+          modify: false,
           approvalEur: null,
           connectionId: "login-1",
         },
@@ -138,8 +137,7 @@ describe("NarrowingEditor (permissions only)", () => {
             Odoo: {
               enabled: true,
               read: true,
-              write: false,
-              send: false,
+              modify: false,
               approval_eur: null,
               approval_actions: [],
               only: [],
@@ -154,20 +152,20 @@ describe("NarrowingEditor (permissions only)", () => {
 
   it("saving does not bake in a role-rights dip in effectiveTools -- narrowing/frame stay the source of truth", () => {
     // Regression test: effectiveTools = role_rights ∩ frame ∩ narrowing, so a
-    // bad/missing role reference can zero out read/write/send there even
+    // bad/missing role reference can zero out read/modify there even
     // though the agent's own stored narrowing (and the department frame) are
     // both still clean. Saving must never resave that degraded value -- doing
     // so previously baked a transient role problem into narrowing forever.
     renderEditor({
       ...AGENT,
       effectiveTools: {
-        Odoo: { enabled: true, read: false, write: false, send: false, approvalEur: null },
+        Odoo: { enabled: true, read: false, modify: false, approvalEur: null },
       },
       departmentFrameTools: {
-        Odoo: { enabled: true, read: true, write: true, send: true, approvalEur: null },
+        Odoo: { enabled: true, read: true, modify: true, approvalEur: null },
       },
       narrowingTools: {
-        Odoo: { enabled: true, read: true, write: true, send: true, approvalEur: null },
+        Odoo: { enabled: true, read: true, modify: true, approvalEur: null },
       },
     });
 
@@ -180,8 +178,7 @@ describe("NarrowingEditor (permissions only)", () => {
             Odoo: {
               enabled: true,
               read: true,
-              write: true,
-              send: true,
+              modify: true,
               approval_eur: null,
               approval_actions: [],
               only: [],

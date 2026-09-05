@@ -34,8 +34,7 @@ import type { Skill } from "@/lib/skills";
 export interface ToolPolicy {
   enabled: boolean;
   read: boolean;
-  write: boolean;
-  send: boolean;
+  modify: boolean;
   approvalEur: number | null;
   approvalActions: string[];
   only: string[] | null;
@@ -801,6 +800,17 @@ export const useClarifications = () =>
 
 export const useMcpConnections = () =>
   useQuery({ queryKey: keys.mcp, queryFn: () => api.get<McpConnection[]>("/mcp/connections") });
+
+export interface ConnectionToolNamesDTO {
+  names: string[];
+}
+
+export const useConnectionToolNames = (name: string) =>
+  useQuery({
+    queryKey: ["connections", name, "tool-names"],
+    queryFn: () => api.get<ConnectionToolNamesDTO>(`/mcp/connections/${name}/tool-names`),
+    enabled: !!name,
+  });
 
 /** The installed/enabled agent-runtime plugins, for the hire-time picker
  * (`AgentModelStep`) and the agent detail page. The built-in default entry

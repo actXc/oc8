@@ -27,8 +27,7 @@ export interface GuardrailPreset {
   summaryTranslations: Record<string, string>;
   recommended: boolean;
   read: boolean;
-  write: boolean;
-  send: boolean;
+  modify: boolean;
   approvalActions: string[];
   approvalEur: number | null;
   /** The only tool names this preset puts within reach; empty means all of
@@ -46,8 +45,7 @@ export interface GuardrailPreset {
  * whatever restriction that preset had. */
 export interface GuardrailValue {
   read: boolean;
-  write: boolean;
-  send: boolean;
+  modify: boolean;
   approvalActions: string[];
   approvalEur: number | null;
   only: string[];
@@ -87,8 +85,7 @@ export interface GuardrailLibraryEntry {
   summaryTranslations: Record<string, string>;
   useCase: string;
   read: boolean;
-  write: boolean;
-  send: boolean;
+  modify: boolean;
   approvalEur: number | null;
   approvalActions: string[];
   only: string[];
@@ -103,8 +100,7 @@ function sameSet(a: string[], b: string[]): boolean {
 function matches(preset: GuardrailPreset, value: GuardrailValue, hasValueSpec: boolean): boolean {
   return (
     preset.read === value.read &&
-    preset.write === value.write &&
-    preset.send === value.send &&
+    preset.modify === value.modify &&
     sameSet(preset.approvalActions, value.approvalActions) &&
     sameSet(preset.only, value.only) &&
     (!hasValueSpec || preset.approvalEur === value.approvalEur)
@@ -114,8 +110,7 @@ function matches(preset: GuardrailPreset, value: GuardrailValue, hasValueSpec: b
 function policyOf(preset: GuardrailPreset): GuardrailValue {
   return {
     read: preset.read,
-    write: preset.write,
-    send: preset.send,
+    modify: preset.modify,
     approvalActions: preset.approvalActions,
     approvalEur: preset.approvalEur,
     only: preset.only,
@@ -189,8 +184,7 @@ function supportedAdjustable(entry: GuardrailLibraryEntry): GuardrailAdjustable[
 function libraryPolicyOf(entry: GuardrailLibraryEntry): GuardrailValue {
   return {
     read: entry.read,
-    write: entry.write,
-    send: entry.send,
+    modify: entry.modify,
     approvalActions: entry.approvalActions,
     approvalEur: entry.approvalEur,
     only: entry.only,
@@ -213,8 +207,7 @@ function libraryMatches(
   const eurIsAdjustable = entry.adjustable.some((a) => a.field === "approval_eur");
   return (
     entry.read === value.read &&
-    entry.write === value.write &&
-    entry.send === value.send &&
+    entry.modify === value.modify &&
     sameSet(entry.approvalActions, value.approvalActions) &&
     sameSet(entry.only, value.only) &&
     (!hasValueSpec || eurIsAdjustable || entry.approvalEur === value.approvalEur)
@@ -239,13 +232,13 @@ function GrantChip({ on, label }: { on: boolean; label: string }) {
   );
 }
 
-/** Free-text add/remove for `approvalActions` entries beyond the `write`/
- * `send` checkboxes rendered alongside it. Those checkboxes cover the two
- * literal rights `authorize_tool_call` understands directly; this input
- * lets an operator additionally gate one specific tool call by name (e.g.
- * `delete_record`) that a blanket `write` gate wouldn't otherwise single
- * out for approval. Renders only the non-`write`/`send` entries as removable
- * chips -- the checkboxes above already own those two. */
+/** Free-text add/remove for `approvalActions` entries beyond the `modify`
+ * checkbox rendered alongside it. That checkbox covers the one literal
+ * right `authorize_tool_call` understands directly; this input lets an
+ * operator additionally gate one specific tool call by name (e.g.
+ * `delete_record`) that a blanket `modify` gate wouldn't otherwise single
+ * out for approval. Renders only the non-`modify` entries as removable
+ * chips -- the checkbox above already owns that one. */
 function FreeTextApprovalActions({
   value,
   onChange,
@@ -256,7 +249,7 @@ function FreeTextApprovalActions({
   t: (en: string, de: string) => string;
 }) {
   const [draft, setDraft] = useState("");
-  const custom = value.approvalActions.filter((a) => a !== "write" && a !== "send");
+  const custom = value.approvalActions.filter((a) => a !== "modify");
 
   function addDraft() {
     const name = draft.trim();
@@ -391,8 +384,7 @@ export function GuardrailPresetPicker({
                       </p>
                       <div className="mt-2 flex flex-wrap items-center gap-1.5">
                         <GrantChip on={entry.read} label={t("Read", "Lesen")} />
-                        <GrantChip on={entry.write} label={t("Write", "Schreiben")} />
-                        <GrantChip on={entry.send} label={t("Send", "Senden")} />
+                        <GrantChip on={entry.modify} label={t("Modify", "Verändern")} />
                         {entry.approvalActions.length > 0 && (
                           <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
                             {t("Approval for:", "Freigabe für:")}{" "}
@@ -402,14 +394,13 @@ export function GuardrailPresetPicker({
                                 // branch below), a library `Guardrail.approval_actions` is
                                 // NOT restricted to rights -- it can name a real tool (e.g.
                                 // "post_message"), which is the whole point of an entry like
-                                // `helpdesk_reply_needs_approval` (gate one send-capable tool,
-                                // leave the rest of `send` ungated). Only "write"/"send"
-                                // literals get the bilingual right label; anything else is a
+                                // `helpdesk_reply_needs_approval` (gate one modify-capable tool,
+                                // leave the rest of `modify` ungated). Only the "modify"
+                                // literal gets the bilingual right label; anything else is a
                                 // raw tool name, rendered unmodified -- same convention as
                                 // `entry.only.join(", ")` below.
-                                if (a === "write") return t("writes", "Schreiben");
-                                if (a === "send") return t("sends", "Senden");
-                                return a;
+                                if (a === "modify") return t("modifies", "verändert");
+                                return a; // a real tool name, rendered unmodified
                               })
                               .join(", ")}
                           </span>
@@ -478,45 +469,37 @@ export function GuardrailPresetPicker({
         {isCustom && (
           <div className="space-y-3 rounded-md border border-border p-3">
             <div className="flex flex-wrap gap-2">
-              {(["write", "send"] as const).map((right) => (
-                <button
-                  key={right}
-                  type="button"
-                  onClick={() => onChange({ ...value, [right]: !value[right] })}
-                  className={cn(
-                    "rounded-full border px-3 py-1.5 text-sm transition",
-                    value[right]
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border text-muted-foreground",
-                  )}
-                >
-                  {right === "write" ? t("Write", "Schreiben") : t("Send", "Senden")}
-                </button>
-              ))}
+              <button
+                type="button"
+                onClick={() => onChange({ ...value, modify: !value.modify })}
+                className={cn(
+                  "rounded-full border px-3 py-1.5 text-sm transition",
+                  value.modify
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border text-muted-foreground",
+                )}
+              >
+                {t("Modify", "Verändern")}
+              </button>
             </div>
             <label className="block text-xs uppercase tracking-wider text-muted-foreground">
               {t("Approval needed for:", "Freigabe nötig für:")}
               <div className="mt-1 flex gap-3">
-                {(["write", "send"] as const).map((right) => (
-                  <label
-                    key={right}
-                    className="flex items-center gap-1.5 text-sm normal-case text-foreground"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={value.approvalActions.includes(right)}
-                      onChange={(e) =>
-                        onChange({
-                          ...value,
-                          approvalActions: e.target.checked
-                            ? [...value.approvalActions, right]
-                            : value.approvalActions.filter((a) => a !== right),
-                        })
-                      }
-                    />
-                    {right === "write" ? t("writes", "Schreiben") : t("sends", "Senden")}
-                  </label>
-                ))}
+                <label className="flex items-center gap-1.5 text-sm normal-case text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={value.approvalActions.includes("modify")}
+                    onChange={(e) =>
+                      onChange({
+                        ...value,
+                        approvalActions: e.target.checked
+                          ? [...value.approvalActions, "modify"]
+                          : value.approvalActions.filter((a) => a !== "modify"),
+                      })
+                    }
+                  />
+                  {t("modifies", "verändert")}
+                </label>
               </div>
             </label>
             <FreeTextApprovalActions value={value} onChange={onChange} t={t} />
@@ -586,15 +569,15 @@ export function GuardrailPresetPicker({
                 </p>
                 <div className="mt-2 flex flex-wrap items-center gap-1.5">
                   <GrantChip on={preset.read} label={t("Read", "Lesen")} />
-                  <GrantChip on={preset.write} label={t("Write", "Schreiben")} />
-                  <GrantChip on={preset.send} label={t("Send", "Senden")} />
+                  <GrantChip on={preset.modify} label={t("Modify", "Verändern")} />
                   {preset.approvalActions.length > 0 && (
                     <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
                       {t("Approval for:", "Freigabe für:")}{" "}
                       {preset.approvalActions
-                        .map((a) =>
-                          a === "write" ? t("writes", "Schreiben") : t("sends", "Senden"),
-                        )
+                        .map((a) => {
+                          if (a === "modify") return t("modifies", "verändert");
+                          return a; // a real tool name, rendered unmodified
+                        })
                         .join(", ")}
                     </span>
                   )}
@@ -628,45 +611,37 @@ export function GuardrailPresetPicker({
       {showFree && (
         <div className="space-y-3 rounded-md border border-border p-3">
           <div className="flex flex-wrap gap-2">
-            {(["write", "send"] as const).map((right) => (
-              <button
-                key={right}
-                type="button"
-                onClick={() => onChange({ ...value, [right]: !value[right] })}
-                className={cn(
-                  "rounded-full border px-3 py-1.5 text-sm transition",
-                  value[right]
-                    ? "border-primary bg-primary/10 text-primary"
-                    : "border-border text-muted-foreground",
-                )}
-              >
-                {right === "write" ? t("Write", "Schreiben") : t("Send", "Senden")}
-              </button>
-            ))}
+            <button
+              type="button"
+              onClick={() => onChange({ ...value, modify: !value.modify })}
+              className={cn(
+                "rounded-full border px-3 py-1.5 text-sm transition",
+                value.modify
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border text-muted-foreground",
+              )}
+            >
+              {t("Modify", "Verändern")}
+            </button>
           </div>
           <label className="block text-xs uppercase tracking-wider text-muted-foreground">
             {t("Approval needed for:", "Freigabe nötig für:")}
             <div className="mt-1 flex gap-3">
-              {(["write", "send"] as const).map((right) => (
-                <label
-                  key={right}
-                  className="flex items-center gap-1.5 text-sm normal-case text-foreground"
-                >
-                  <input
-                    type="checkbox"
-                    checked={value.approvalActions.includes(right)}
-                    onChange={(e) =>
-                      onChange({
-                        ...value,
-                        approvalActions: e.target.checked
-                          ? [...value.approvalActions, right]
-                          : value.approvalActions.filter((a) => a !== right),
-                      })
-                    }
-                  />
-                  {right === "write" ? t("writes", "Schreiben") : t("sends", "Senden")}
-                </label>
-              ))}
+              <label className="flex items-center gap-1.5 text-sm normal-case text-foreground">
+                <input
+                  type="checkbox"
+                  checked={value.approvalActions.includes("modify")}
+                  onChange={(e) =>
+                    onChange({
+                      ...value,
+                      approvalActions: e.target.checked
+                        ? [...value.approvalActions, "modify"]
+                        : value.approvalActions.filter((a) => a !== "modify"),
+                    })
+                  }
+                />
+                {t("modifies", "verändert")}
+              </label>
             </div>
           </label>
           <FreeTextApprovalActions value={value} onChange={onChange} t={t} />

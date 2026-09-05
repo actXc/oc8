@@ -17,8 +17,7 @@ const PRESETS: GuardrailPreset[] = [
     summaryTranslations: { de: "s" },
     recommended: false,
     read: true,
-    write: false,
-    send: false,
+    modify: false,
     approvalActions: [],
     approvalEur: null,
     only: [],
@@ -31,9 +30,8 @@ const PRESETS: GuardrailPreset[] = [
     summaryTranslations: { de: "s" },
     recommended: true,
     read: true,
-    write: true,
-    send: true,
-    approvalActions: ["send"],
+    modify: true,
+    approvalActions: ["modify"],
     approvalEur: null,
     only: [],
   },
@@ -42,7 +40,7 @@ const PRESETS: GuardrailPreset[] = [
 // The property this whole feature hinges on: `autonomous_with_limit` is safe
 // ONLY because it withholds `delete_record` -- a deletion carries no amount
 // and so can never meet its EUR threshold. If a picker ever emitted the
-// read/write/send/approval bits but dropped `only`, this preset would apply
+// read/modify/approval bits but dropped `only`, this preset would apply
 // as "everything reachable above EUR 1000", including unattended deletion.
 const AUTONOMOUS_WITH_LIMIT: GuardrailPreset = {
   key: "autonomous_with_limit",
@@ -52,8 +50,7 @@ const AUTONOMOUS_WITH_LIMIT: GuardrailPreset = {
   summaryTranslations: { de: "s" },
   recommended: false,
   read: true,
-  write: true,
-  send: true,
+  modify: true,
   approvalActions: [],
   approvalEur: 1000,
   only: ["search_records", "update_record"],
@@ -61,8 +58,7 @@ const AUTONOMOUS_WITH_LIMIT: GuardrailPreset = {
 
 const FREE: GuardrailValue = {
   read: true,
-  write: false,
-  send: false,
+  modify: false,
   approvalActions: [],
   approvalEur: null,
   only: [],
@@ -90,7 +86,7 @@ describe("GuardrailPresetPicker", () => {
       <GuardrailPresetPicker presets={[]} hasValueSpec={false} value={FREE} onChange={vi.fn()} />,
     );
     expect(screen.queryByText(/Read only/i)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Write" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Modify" })).toBeInTheDocument();
   });
 
   it("selecting a preset applies its policy via onChange", () => {
@@ -106,9 +102,8 @@ describe("GuardrailPresetPicker", () => {
     fireEvent.click(screen.getByText(/Assist with approval/i));
     expect(onChange).toHaveBeenCalledWith({
       read: true,
-      write: true,
-      send: true,
-      approvalActions: ["send"],
+      modify: true,
+      approvalActions: ["modify"],
       approvalEur: null,
       only: [],
     });
@@ -138,9 +133,8 @@ describe("GuardrailPresetPicker", () => {
     const onChange = vi.fn();
     const applied: GuardrailValue = {
       read: true,
-      write: true,
-      send: true,
-      approvalActions: ["send"],
+      modify: true,
+      approvalActions: ["modify"],
       approvalEur: null,
       only: [],
     };
@@ -156,7 +150,7 @@ describe("GuardrailPresetPicker", () => {
       "aria-pressed",
       "true",
     );
-    const edited = { ...applied, write: false };
+    const edited = { ...applied, modify: false };
     rerender(
       <GuardrailPresetPicker
         presets={PRESETS}
@@ -174,8 +168,7 @@ describe("GuardrailPresetPicker", () => {
   it("dropping a preset's `only` restriction (widening it) also reads back as custom", () => {
     const widened: GuardrailValue = {
       read: AUTONOMOUS_WITH_LIMIT.read,
-      write: AUTONOMOUS_WITH_LIMIT.write,
-      send: AUTONOMOUS_WITH_LIMIT.send,
+      modify: AUTONOMOUS_WITH_LIMIT.modify,
       approvalActions: AUTONOMOUS_WITH_LIMIT.approvalActions,
       approvalEur: AUTONOMOUS_WITH_LIMIT.approvalEur,
       only: [],
@@ -198,9 +191,8 @@ describe("GuardrailPresetPicker", () => {
     const onChange = vi.fn();
     const applied: GuardrailValue = {
       read: true,
-      write: true,
-      send: true,
-      approvalActions: ["send"],
+      modify: true,
+      approvalActions: ["modify"],
       approvalEur: null,
       only: [],
     };
@@ -216,7 +208,7 @@ describe("GuardrailPresetPicker", () => {
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     fireEvent.click(screen.getByText(/Configure myself/i));
     // Now revealed, pre-filled from the preset that was selected: the
-    // "send" checkbox (its one approval action) is already checked.
+    // "modify" checkbox (its one approval action) is already checked.
     const checkboxes = screen.getAllByRole("checkbox");
     expect(checkboxes.length).toBeGreaterThan(0);
     expect(onChange).not.toHaveBeenCalled();
@@ -252,15 +244,15 @@ describe("GuardrailPresetPicker", () => {
     });
   });
 
-  it("renders a free-text approval action as a removable chip, leaving write/send untouched", () => {
+  it("renders a free-text approval action as a removable chip, leaving modify untouched", () => {
     const onChange = vi.fn();
-    const value: GuardrailValue = { ...FREE, approvalActions: ["send", "delete_record"] };
+    const value: GuardrailValue = { ...FREE, approvalActions: ["modify", "delete_record"] };
     render(
       <GuardrailPresetPicker presets={[]} hasValueSpec={false} value={value} onChange={onChange} />,
     );
     expect(screen.getByText("delete_record")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /remove delete_record/i }));
-    expect(onChange).toHaveBeenCalledWith({ ...value, approvalActions: ["send"] });
+    expect(onChange).toHaveBeenCalledWith({ ...value, approvalActions: ["modify"] });
   });
 });
 
@@ -278,8 +270,7 @@ const LIBRARY: GuardrailLibraryEntry[] = [
     summaryTranslations: { de: "s" },
     useCase: "sales",
     read: true,
-    write: false,
-    send: true,
+    modify: true,
     approvalEur: 3000,
     approvalActions: [],
     only: [],
@@ -302,8 +293,7 @@ const LIBRARY: GuardrailLibraryEntry[] = [
     summaryTranslations: { de: "s" },
     useCase: "helpdesk",
     read: true,
-    write: false,
-    send: true,
+    modify: true,
     approvalEur: null,
     approvalActions: ["post_message"],
     only: [],
@@ -370,8 +360,7 @@ describe("GuardrailPresetPicker -- guardrail library (grouped by use_case)", () 
     fireEvent.click(screen.getByText(/Approve quotes above an amount/i));
     expect(onChange).toHaveBeenCalledWith({
       read: true,
-      write: false,
-      send: true,
+      modify: true,
       approvalActions: [],
       approvalEur: 3000,
       only: [],
@@ -417,8 +406,7 @@ describe("GuardrailPresetPicker -- guardrail library (grouped by use_case)", () 
     const onChange = vi.fn();
     const applied: GuardrailValue = {
       read: true,
-      write: false,
-      send: true,
+      modify: true,
       approvalActions: [],
       approvalEur: 3000,
       only: [],
@@ -506,8 +494,7 @@ describe("GuardrailPresetPicker -- guardrail library (grouped by use_case)", () 
     try {
       const applied: GuardrailValue = {
         read: true,
-        write: false,
-        send: true,
+        modify: true,
         approvalActions: [],
         approvalEur: 3000,
         only: [],
@@ -550,8 +537,7 @@ const GENERIC_FIVE: GuardrailPreset[] = [
     summaryTranslations: { de: "s" },
     recommended: false,
     read: true,
-    write: false,
-    send: false,
+    modify: false,
     approvalActions: [],
     approvalEur: null,
     only: [],
@@ -564,9 +550,8 @@ const GENERIC_FIVE: GuardrailPreset[] = [
     summaryTranslations: { de: "s" },
     recommended: true,
     read: true,
-    write: true,
-    send: true,
-    approvalActions: ["send"],
+    modify: true,
+    approvalActions: ["modify"],
     approvalEur: null,
     only: [],
   },
@@ -578,8 +563,7 @@ const GENERIC_FIVE: GuardrailPreset[] = [
     summaryTranslations: { de: "s" },
     recommended: false,
     read: true,
-    write: true,
-    send: true,
+    modify: true,
     approvalActions: [],
     approvalEur: 1000,
     only: ["search_records", "update_record"],
@@ -592,8 +576,7 @@ const GENERIC_FIVE: GuardrailPreset[] = [
     summaryTranslations: { de: "s" },
     recommended: false,
     read: true,
-    write: true,
-    send: true,
+    modify: true,
     approvalActions: [],
     approvalEur: null,
     only: ["search_records", "get_record", "create_record", "update_record"],
@@ -606,8 +589,7 @@ const GENERIC_FIVE: GuardrailPreset[] = [
     summaryTranslations: { de: "s" },
     recommended: false,
     read: true,
-    write: true,
-    send: true,
+    modify: true,
     approvalActions: [],
     approvalEur: null,
     only: ["search_records", "get_record", "create_record", "update_record", "post_message"],

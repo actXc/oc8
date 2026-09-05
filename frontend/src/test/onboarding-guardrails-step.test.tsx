@@ -42,8 +42,7 @@ describe("GuardrailsStep", () => {
         "existing-connection-id": {
           enabled: true,
           read: true,
-          write: true,
-          send: false,
+          modify: true,
           approval_eur: null,
         },
       },
@@ -83,9 +82,8 @@ describe("GuardrailsStep", () => {
             summaryTranslations: { de: "s" },
             recommended: true,
             read: true,
-            write: true,
-            send: true,
-            approvalActions: ["send"],
+            modify: true,
+            approvalActions: ["modify"],
             approvalEur: null,
             only: [],
           },
@@ -104,7 +102,7 @@ describe("GuardrailsStep", () => {
   it("saves the selected preset's policy -- including `only`, its tool allowlist -- spread over the existing tools", async () => {
     // The property this whole feature hinges on: `autonomous_with_limit` is
     // safe ONLY because it withholds `delete_record`. If this step ever
-    // wrote read/write/send/approval into the department frame but dropped
+    // wrote read/modify/approval into the department frame but dropped
     // `only`, that preset would silently permit unattended deletion under a
     // name promising a limit.
     getTools.mockResolvedValue({
@@ -112,8 +110,7 @@ describe("GuardrailsStep", () => {
         "existing-connection-id": {
           enabled: true,
           read: true,
-          write: true,
-          send: false,
+          modify: true,
           approval_eur: null,
         },
       },
@@ -131,8 +128,7 @@ describe("GuardrailsStep", () => {
             summaryTranslations: { de: "s" },
             recommended: false,
             read: true,
-            write: true,
-            send: true,
+            modify: true,
             approvalActions: [],
             approvalEur: 1000,
             only: ["search_records", "update_record"],
@@ -159,8 +155,7 @@ describe("GuardrailsStep", () => {
     expect(body.tools["Odoo CRM"]).toMatchObject({
       enabled: true,
       read: true,
-      write: true,
-      send: true,
+      modify: true,
       approval_eur: 1000,
       approval_actions: [],
       only: ["search_records", "update_record"],
@@ -169,7 +164,7 @@ describe("GuardrailsStep", () => {
     expect(body.tools).not.toHaveProperty("new-connection-id");
   });
 
-  it("still offers the free write/send/approval controls for a connection whose plugin ships no presets", async () => {
+  it("still offers the free modify/approval controls for a connection whose plugin ships no presets", async () => {
     getTools.mockResolvedValue({ tools: {} });
     getConnections.mockResolvedValue([
       { id: "new-connection-id", name: "Odoo CRM", guardrailPresets: [], hasValueSpec: false },
@@ -181,13 +176,12 @@ describe("GuardrailsStep", () => {
       <GuardrailsStep departmentId="dept-1" connectionId="new-connection-id" onDone={onDone} />,
     );
 
-    expect(await screen.findByRole("button", { name: "Write" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Modify" })).toBeInTheDocument();
     // No preset chooser and no euro field, since this plugin declares no
     // `value_spec` and ships no presets.
     expect(screen.queryByLabelText(/€/i)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Write" }));
+    fireEvent.click(screen.getByRole("button", { name: "Modify" }));
     fireEvent.click(screen.getByRole("button", { name: /continue|save/i }));
 
     await waitFor(() => expect(putTools).toHaveBeenCalled());
@@ -196,8 +190,7 @@ describe("GuardrailsStep", () => {
     expect(body.tools["Odoo CRM"]).toMatchObject({
       enabled: true,
       read: true,
-      write: true,
-      send: false,
+      modify: true,
       only: [],
     });
     expect(body.tools).not.toHaveProperty("new-connection-id");

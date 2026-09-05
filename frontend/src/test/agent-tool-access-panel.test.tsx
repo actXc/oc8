@@ -54,13 +54,13 @@ const ONE_TOOL_AGENT: AgentDetail = {
   mission: "",
   departmentName: "Vertrieb",
   effectiveTools: {
-    Odoo: { enabled: true, read: true, write: false, send: false, approvalEur: null },
+    Odoo: { enabled: true, read: true, modify: false, approvalEur: null },
   },
   departmentFrameTools: {
-    Odoo: { enabled: true, read: true, write: false, send: false, approvalEur: null },
+    Odoo: { enabled: true, read: true, modify: false, approvalEur: null },
   },
   narrowingTools: {
-    Odoo: { enabled: true, read: true, write: false, send: false, approvalEur: null },
+    Odoo: { enabled: true, read: true, modify: false, approvalEur: null },
   },
   runtimeRef: null,
   currentRunId: null,
@@ -130,8 +130,8 @@ describe("AgentToolAccessPanel", () => {
     renderPanel({
       ...ONE_TOOL_AGENT,
       departmentFrameTools: {
-        Odoo: { enabled: true, read: true, write: false, send: false, approvalEur: null },
-        Hubspot: { enabled: true, read: true, write: false, send: false, approvalEur: null },
+        Odoo: { enabled: true, read: true, modify: false, approvalEur: null },
+        Hubspot: { enabled: true, read: true, modify: false, approvalEur: null },
       },
     });
     expect(screen.getByText(/1 of 2 MCP interfaces active/i)).toBeInTheDocument();
@@ -143,7 +143,7 @@ describe("AgentToolAccessPanel", () => {
       ...ONE_TOOL_AGENT,
       effectiveTools: {},
       departmentFrameTools: {
-        Hubspot: { enabled: true, read: false, write: false, send: false, approvalEur: null },
+        Hubspot: { enabled: true, read: false, modify: false, approvalEur: null },
       },
     });
     expect(screen.getByText("Hubspot")).toBeInTheDocument();
@@ -172,8 +172,7 @@ describe("AgentToolAccessPanel", () => {
             Odoo: {
               enabled: false,
               read: true,
-              write: false,
-              send: false,
+              modify: false,
               approval_eur: null,
               approval_actions: [],
               only: [],
@@ -222,8 +221,7 @@ describe("AgentToolAccessPanel", () => {
               Odoo: {
                 enabled: true,
                 read: true,
-                write: false,
-                send: false,
+                modify: false,
                 approval_eur: null,
                 approval_actions: [],
                 only: [],
@@ -239,7 +237,7 @@ describe("AgentToolAccessPanel", () => {
 
   it("toggling off does not bake in a role-rights dip in effectiveTools -- narrowing/frame stay the source of truth", () => {
     // Regression test: effectiveTools = role_rights ∩ frame ∩ narrowing, so a
-    // bad/missing role reference can zero out read/write/send there even
+    // bad/missing role reference can zero out read/modify there even
     // though the agent's own stored narrowing (and the department frame) are
     // both still clean. Toggling enabled off must never resave that degraded
     // value for the fields this panel doesn't itself edit -- doing so
@@ -248,13 +246,13 @@ describe("AgentToolAccessPanel", () => {
     renderPanel({
       ...ONE_TOOL_AGENT,
       effectiveTools: {
-        Odoo: { enabled: true, read: false, write: false, send: false, approvalEur: null },
+        Odoo: { enabled: true, read: false, modify: false, approvalEur: null },
       },
       departmentFrameTools: {
-        Odoo: { enabled: true, read: true, write: true, send: true, approvalEur: null },
+        Odoo: { enabled: true, read: true, modify: true, approvalEur: null },
       },
       narrowingTools: {
-        Odoo: { enabled: true, read: true, write: true, send: true, approvalEur: null },
+        Odoo: { enabled: true, read: true, modify: true, approvalEur: null },
       },
     });
 
@@ -271,8 +269,7 @@ describe("AgentToolAccessPanel", () => {
             Odoo: {
               enabled: false,
               read: true,
-              write: true,
-              send: true,
+              modify: true,
               approval_eur: null,
               approval_actions: [],
               only: [],
@@ -318,8 +315,7 @@ describe("AgentToolAccessPanel", () => {
               Odoo: {
                 enabled: true,
                 read: true,
-                write: false,
-                send: false,
+                modify: false,
                 approval_eur: null,
                 approval_actions: [],
                 only: [],
@@ -328,8 +324,7 @@ describe("AgentToolAccessPanel", () => {
               Salesforce: {
                 enabled: true,
                 read: true,
-                write: false,
-                send: false,
+                modify: false,
                 approval_eur: null,
                 approval_actions: [],
                 only: [],
@@ -358,7 +353,7 @@ describe("AgentToolAccessPanel", () => {
         ...ONE_TOOL_AGENT,
         departmentFrameTools: {
           ...ONE_TOOL_AGENT.departmentFrameTools,
-          Salesforce: { enabled: false, read: false, write: false, send: false, approvalEur: null },
+          Salesforce: { enabled: false, read: false, modify: false, approvalEur: null },
         },
       });
 
@@ -384,7 +379,7 @@ describe("AgentToolAccessPanel", () => {
         ...ONE_TOOL_AGENT,
         effectiveTools: {
           ...ONE_TOOL_AGENT.effectiveTools,
-          Salesforce: { enabled: true, read: true, write: false, send: false, approvalEur: null },
+          Salesforce: { enabled: true, read: true, modify: false, approvalEur: null },
         },
       });
 
@@ -403,8 +398,7 @@ describe("AgentToolAccessPanel", () => {
                 Odoo: {
                   enabled: true,
                   read: true,
-                  write: false,
-                  send: false,
+                  modify: false,
                   approval_eur: null,
                   approval_actions: [],
                   only: [],
@@ -424,7 +418,7 @@ describe("AgentToolAccessPanel", () => {
         ...ONE_TOOL_AGENT,
         effectiveTools: {
           ...ONE_TOOL_AGENT.effectiveTools,
-          Salesforce: { enabled: true, read: true, write: false, send: false, approvalEur: null },
+          Salesforce: { enabled: true, read: true, modify: false, approvalEur: null },
         },
       });
 
@@ -441,7 +435,7 @@ describe("AgentToolAccessPanel", () => {
         ...ONE_TOOL_AGENT,
         effectiveTools: {
           ...ONE_TOOL_AGENT.effectiveTools,
-          Salesforce: { enabled: true, read: true, write: false, send: false, approvalEur: null },
+          Salesforce: { enabled: true, read: true, modify: false, approvalEur: null },
         },
         // departmentFrameTools deliberately still only has "Odoo" -- Salesforce
         // reaches effectiveTools purely via the agent's own narrowing.

@@ -38,8 +38,7 @@ export function GuardrailsStep({
   const setTools = useSetDepartmentTools(departmentId);
   const [value, setValue] = useState<GuardrailValue>({
     read: true,
-    write: false,
-    send: false,
+    modify: false,
     approvalActions: [],
     approvalEur: null,
     only: [],
@@ -116,8 +115,7 @@ export function GuardrailsStep({
       [connection.name]: {
         enabled: true,
         read: value.read,
-        write: value.write,
-        send: value.send,
+        modify: value.modify,
         approval_eur: value.approvalEur,
         approval_actions: value.approvalActions,
         // Not decoration -- see `GuardrailValue`/`GuardrailPreset` in

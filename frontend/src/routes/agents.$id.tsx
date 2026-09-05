@@ -1018,12 +1018,12 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void 
 // pulled into its own panel in the Configuration tab so it's discoverable
 // where a user actually looks for "which tools can this agent use" (mirrors
 // the Department page's Integrations tab: same tile grid, same "MCP
-// interfaces active" copy). Fine-grained permissions (read/write/send/
+// interfaces active" copy). Fine-grained permissions (read/modify/
 // approval-€/presets) stay on the Guardrails tab -- see NarrowingEditor
 // below, which now only edits those for tools already enabled here.
 // Every toggle/credential change persists immediately via
 // PUT /agents/{id}/narrowing (full REPLACE), rebuilding the payload from
-// agent.effectiveTools so a field this panel doesn't own (read/write/send/
+// agent.effectiveTools so a field this panel doesn't own (read/modify/
 // approval_eur/approval_actions/only) survives untouched.
 export function AgentToolAccessPanel({
   agent,
@@ -1043,7 +1043,7 @@ export function AgentToolAccessPanel({
   // The agent's own stored narrowing, used (never `effective`) as the
   // resave source for fields this panel doesn't itself edit -- `effective`
   // is role_rights ∩ frame ∩ narrowing, so a role dip (bad/missing role
-  // reference) zeroes read/write/send there without touching the agent's
+  // reference) zeroes read/modify there without touching the agent's
   // actual narrowing row. Reading `effective` as that source bakes the dip
   // into narrowing permanently on the next save, since every save rewrites
   // the full tools payload including fields it isn't changing.
@@ -1083,8 +1083,7 @@ export function AgentToolAccessPanel({
         enabled: boolean;
         connectionId: string | null;
         read: boolean;
-        write: boolean;
-        send: boolean;
+        modify: boolean;
       }>
     >,
   ) {
@@ -1096,8 +1095,7 @@ export function AgentToolAccessPanel({
       tools[k] = {
         enabled: p?.enabled ?? !!src?.enabled,
         read: p?.read ?? !!src?.read,
-        write: p?.write ?? !!src?.write,
-        send: p?.send ?? !!src?.send,
+        modify: p?.modify ?? !!src?.modify,
         approval_eur: src?.approvalEur ?? null,
         approval_actions: src?.approvalActions ?? [],
         only: src?.only ?? [],
@@ -1144,8 +1142,7 @@ export function AgentToolAccessPanel({
       tools[k] = {
         enabled: !!src?.enabled,
         read: !!src?.read,
-        write: !!src?.write,
-        send: !!src?.send,
+        modify: !!src?.modify,
         approval_eur: src?.approvalEur ?? null,
         approval_actions: src?.approvalActions ?? [],
         only: src?.only ?? [],
@@ -1190,7 +1187,7 @@ export function AgentToolAccessPanel({
   const activeCount = allKeys.filter((k) => effective[k]?.enabled).length;
 
   function addTool(name: string) {
-    persist({ [name]: { enabled: true, read: true, write: false, send: false } });
+    persist({ [name]: { enabled: true, read: true, modify: false } });
     setPickerOpen(false);
   }
 
@@ -1327,8 +1324,8 @@ export function AgentToolAccessPanel({
       )}
       <p className="mt-3 text-[11px] text-muted-foreground">
         {t(
-          "Fine-grained permissions (read/write/send, approval threshold) live on the Guardrails tab. “Agent only” tools are exclusive to this agent — sibling agents in the same department never get them.",
-          "Feinabstufung der Berechtigungen (Lesen/Schreiben/Senden, Freigabe-Schwelle) findest du im Guardrails-Tab. „Nur dieser Agent“-Tools sind exklusiv für diesen Agenten — andere Agenten derselben Abteilung bekommen sie nie.",
+          "Fine-grained permissions (read/modify, approval threshold) live on the Guardrails tab. “Agent only” tools are exclusive to this agent — sibling agents in the same department never get them.",
+          "Feinabstufung der Berechtigungen (Lesen/Verändern, Freigabe-Schwelle) findest du im Guardrails-Tab. „Nur dieser Agent“-Tools sind exklusiv für diesen Agenten — andere Agenten derselben Abteilung bekommen sie nie.",
         )}
       </p>
 
@@ -1618,7 +1615,7 @@ export function AssignedModelPanel({
 
 // Permission editor for tools already enabled on the Configuration tab's
 // AgentToolAccessPanel above. That panel owns enable/disable and the login
-// pin; this one only tightens read/write/send/approval-€/presets for tools
+// pin; this one only tightens read/modify/approval-€/presets for tools
 // that panel has switched on -- an agent may narrow permissions below the
 // department frame, never widen them. Persists via PUT /agents/{id}/narrowing
 // (useUpdateNarrowing) as { narrowing: { tools: { <key>: {...} } } },
@@ -1643,7 +1640,7 @@ export function NarrowingEditor({
   const narrowing = agent.narrowingTools;
   const frameKeys = Object.keys(frame).filter((k) => frame[k]?.enabled);
   const enabledKeys = frameKeys.filter((k) => effective[k]?.enabled);
-  // Per-tool-key policy edits (read/write/send/approvalEur/approvalActions/
+  // Per-tool-key policy edits (read/modify/approvalEur/approvalActions/
   // only) -- not fed back from `effective` on every render, same reason
   // DepartmentToolsPanel's `edited` state isn't either: a click on a preset
   // or a free-text chip must not get clobbered by a refetch mid-edit.
@@ -1666,8 +1663,7 @@ export function NarrowingEditor({
     const src = narrowing[k] ?? frame[k];
     return {
       read: !!src?.read,
-      write: !!src?.write,
-      send: !!src?.send,
+      modify: !!src?.modify,
       approvalActions: src?.approvalActions ?? [],
       approvalEur: src?.approvalEur ?? null,
       only: src?.only ?? [],
@@ -1681,8 +1677,7 @@ export function NarrowingEditor({
       tools[k] = {
         enabled: !!(narrowing[k] ?? frame[k])?.enabled,
         read: val.read,
-        write: val.write,
-        send: val.send,
+        modify: val.modify,
         // Backend narrowing dict reads snake_case keys throughout -- an
         // untyped dict on the backend, so nothing auto-converts these.
         approval_eur: val.approvalEur ?? null,

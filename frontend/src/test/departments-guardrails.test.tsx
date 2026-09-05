@@ -36,7 +36,7 @@ describe("departments.$id tool guardrails", () => {
   it("renders the shared GuardrailPresetPicker for an attached connection", async () => {
     getTools.mockResolvedValue({
       tools: {
-        "Odoo CRM": { enabled: true, read: true, write: false, send: false, approval_eur: null },
+        "Odoo CRM": { enabled: true, read: true, modify: false, approval_eur: null },
       },
     });
     getConnections.mockResolvedValue([
@@ -52,9 +52,8 @@ describe("departments.$id tool guardrails", () => {
             summaryTranslations: { de: "s" },
             recommended: true,
             read: true,
-            write: true,
-            send: true,
-            approvalActions: ["send"],
+            modify: true,
+            approvalActions: ["modify"],
             approvalEur: null,
             only: [],
           },
@@ -71,7 +70,7 @@ describe("departments.$id tool guardrails", () => {
   it("saves the selected preset's policy -- including `only`, its tool allowlist -- spread over the department's existing tools", async () => {
     // The property this whole feature hinges on: `autonomous_with_limit` is
     // safe ONLY because it withholds `delete_record`. If this screen ever
-    // wrote read/write/send/approval into the department frame but dropped
+    // wrote read/modify/approval into the department frame but dropped
     // `only`, that preset would silently permit unattended deletion under a
     // name promising a limit.
     getTools.mockResolvedValue({
@@ -79,11 +78,10 @@ describe("departments.$id tool guardrails", () => {
         "existing-connection-id": {
           enabled: true,
           read: true,
-          write: true,
-          send: false,
+          modify: true,
           approval_eur: null,
         },
-        "Odoo CRM": { enabled: true, read: true, write: false, send: false, approval_eur: null },
+        "Odoo CRM": { enabled: true, read: true, modify: false, approval_eur: null },
       },
     });
     getConnections.mockResolvedValue([
@@ -99,8 +97,7 @@ describe("departments.$id tool guardrails", () => {
             summaryTranslations: { de: "s" },
             recommended: false,
             read: true,
-            write: true,
-            send: true,
+            modify: true,
             approvalActions: [],
             approvalEur: 1000,
             only: ["search_records", "update_record"],
@@ -124,8 +121,7 @@ describe("departments.$id tool guardrails", () => {
     expect(body.tools["Odoo CRM"]).toMatchObject({
       enabled: true,
       read: true,
-      write: true,
-      send: true,
+      modify: true,
       approval_eur: 1000,
       approval_actions: [],
       only: ["search_records", "update_record"],
@@ -134,10 +130,10 @@ describe("departments.$id tool guardrails", () => {
     expect(body.tools).not.toHaveProperty("conn-1");
   });
 
-  it("still offers the free write/send controls for an attached connection whose plugin ships no presets", async () => {
+  it("still offers the free modify control for an attached connection whose plugin ships no presets", async () => {
     getTools.mockResolvedValue({
       tools: {
-        "Odoo CRM": { enabled: true, read: true, write: false, send: false, approval_eur: null },
+        "Odoo CRM": { enabled: true, read: true, modify: false, approval_eur: null },
       },
     });
     getConnections.mockResolvedValue([
@@ -147,13 +143,12 @@ describe("departments.$id tool guardrails", () => {
 
     renderWithClient(<DepartmentToolsPanel departmentId="dept-1" />);
 
-    expect(await screen.findByRole("button", { name: "Write" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Modify" })).toBeInTheDocument();
     // No preset chooser and no euro field, since this plugin declares no
     // `value_spec` and ships no presets.
     expect(screen.queryByLabelText(/€/i)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Write" }));
+    fireEvent.click(screen.getByRole("button", { name: "Modify" }));
     fireEvent.click(screen.getByRole("button", { name: /save guardrails/i }));
 
     await waitFor(() => expect(putTools).toHaveBeenCalled());
@@ -162,8 +157,7 @@ describe("departments.$id tool guardrails", () => {
     expect(body.tools["Odoo CRM"]).toMatchObject({
       enabled: true,
       read: true,
-      write: true,
-      send: false,
+      modify: true,
       only: [],
     });
     expect(body.tools).not.toHaveProperty("conn-1");
@@ -190,7 +184,7 @@ describe("departments.$id tool guardrails", () => {
     // the wrong one fails loudly instead of accidentally passing.
     getTools.mockResolvedValue({
       tools: {
-        "Odoo CRM": { enabled: true, read: true, write: true, send: false, approval_eur: null },
+        "Odoo CRM": { enabled: true, read: true, modify: true, approval_eur: null },
       },
     });
     getConnections.mockResolvedValue([
@@ -207,16 +201,16 @@ describe("departments.$id tool guardrails", () => {
     // Attached: the connection must show up at all, not "No tools enabled yet".
     expect(await screen.findByText("Odoo CRM")).toBeInTheDocument();
     expect(screen.queryByText(/no tools enabled yet/i)).not.toBeInTheDocument();
-    // Persisted policy resolved via name: `write: true` was saved, so the
-    // "Write" toggle must render as already active, not defaulted to off.
-    const writeButton = screen.getByRole("button", { name: "Write" });
-    expect(writeButton.className).toContain("bg-primary");
+    // Persisted policy resolved via name: `modify: true` was saved, so the
+    // "Modify" toggle must render as already active, not defaulted to off.
+    const modifyButton = screen.getByRole("button", { name: "Modify" });
+    expect(modifyButton.className).toContain("bg-primary");
   });
 
   it("saves the guardrail selection keyed by the connection's name, not its database id", async () => {
     getTools.mockResolvedValue({
       tools: {
-        "Odoo CRM": { enabled: true, read: true, write: false, send: false, approval_eur: null },
+        "Odoo CRM": { enabled: true, read: true, modify: false, approval_eur: null },
       },
     });
     getConnections.mockResolvedValue([
@@ -226,14 +220,14 @@ describe("departments.$id tool guardrails", () => {
 
     renderWithClient(<DepartmentToolsPanel departmentId="dept-1" />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Write" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Modify" }));
     fireEvent.click(screen.getByRole("button", { name: /save guardrails/i }));
 
     await waitFor(() => expect(putTools).toHaveBeenCalled());
     const [, body] = putTools.mock.calls[0];
     expect(body.tools).toHaveProperty("Odoo CRM");
     expect(body.tools).not.toHaveProperty("conn-1-uuid");
-    expect(body.tools["Odoo CRM"]).toMatchObject({ enabled: true, write: true });
+    expect(body.tools["Odoo CRM"]).toMatchObject({ enabled: true, modify: true });
   });
 });
 
