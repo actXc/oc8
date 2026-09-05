@@ -27,7 +27,7 @@ FRAME: dict[str, Any] = {
     "tools": {
         "odoo": {"enabled": True, "read": True, "modify": True,
                  "approval_eur": 2500},
-        "email": {"enabled": True, "read": True, "modify": True,
+        "email": {"enabled": True, "read": True, "modify": False,
                   "approval_eur": None},
     }
 }
@@ -65,10 +65,10 @@ def test_tool_without_a_frame_entry_is_denied() -> None:
 
 
 def test_unclassified_tool_needs_write_and_is_denied_when_absent() -> None:
-    # `email` grants read+send but not write; an unclassified tool needs write.
+    # `email` grants read but not modify; an unclassified tool needs modify.
     d = _authz(_call("whatever"), key="email")
     assert d.effect is Effect.DENY
-    assert "write" in d.reason
+    assert "modify" in d.reason
 
 
 def test_read_classified_tool_is_allowed_with_read_rights() -> None:

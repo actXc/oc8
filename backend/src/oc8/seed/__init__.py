@@ -41,8 +41,7 @@ def _tool(enabled: int, read: int, write: int, send: int, approval: int | None) 
     return {
         "enabled": bool(enabled),
         "read": bool(read),
-        "write": bool(write),
-        "send": bool(send),
+        "modify": bool(write or send),
         "approval_eur": approval,
     }
 
@@ -1140,7 +1139,7 @@ async def _seed_acme(session: AsyncSession) -> None:
             name="demo-fs",
             transport="stdio",
             server_url="",
-            scopes={"read": ["list_files", "read_file"], "send": []},
+            scopes={"read": ["list_files", "read_file"], "modify": []},
             config={"command": sys.executable, "args": [str(demo_server)]},
             connected=True,
         )
