@@ -439,7 +439,7 @@ describe("CopilotDock", () => {
     renderDock();
     openDock();
     expect(screen.getByText("Erste Frage")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Erste Frage"));
+    fireEvent.pointerDown(screen.getByText("Erste Frage"), { button: 0 });
     fireEvent.click(screen.getByText("Zweite Frage"));
     expect(messagesMock).toHaveBeenCalled();
   });
