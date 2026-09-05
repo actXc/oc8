@@ -1810,9 +1810,61 @@ async def test_decide_approval_approves_on_behalf_of_the_human_behind_the_chat(
         outcome = await _decide(
             db, tenant, assistant, task, {"approval_id": str(approval.id), "decision": "approve"}
         )
-        assert "approve" in outcome.output.lower()
+        assert outcome.output == f"Approval {approval.id} approved."
         await db.refresh(approval)
         assert approval.status == "approved"
+
+        # The reject path renders its own past participle rather than a
+        # hand-built "reject" + "d" -- "rejectd" would pass a looser check.
+        approval2 = await _pending_approval(db, tenant, department_id=task.department_id)
+        outcome2 = await _decide(
+            db, tenant, assistant, task, {"approval_id": str(approval2.id), "decision": "reject"}
+        )
+        assert outcome2.output == f"Approval {approval2.id} rejected."
+        await db.refresh(approval2)
+        assert approval2.status == "rejected"
+
+
+@pytest.mark.asyncio
+async def test_decide_approval_refuses_when_posted_by_someone_other_than_the_session_owner(
+    app_session: Any,
+) -> None:
+    """`_owned_session`'s `copilot:manage` oversight carve-out (chat.py) lets
+    an org_admin post into a COLLEAGUE's Assistant session. That admin is not
+    the human behind the session -- and a decision made from inside that run
+    must not be attributed to, or scoped as, the session's own member just
+    because `_member_behind_task` still resolves to them."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        # The session owner, who COULD decide this if it were really them.
+        member = await _human_behind(db, tenant, task, all_departments=True)
+        approval = await _pending_approval(db, tenant, department_id=task.department_id)
+        assert member.subject != "sub-someone-else"
+
+        run = m.AgentRun(
+            tenant_id=tenant,
+            agent_id=assistant.id,
+            task_id=task.id,
+            source="chat",
+            state="running",
+            context={"originating_operator": "sub-someone-else"},
+        )
+        db.add(run)
+        await db.flush()
+
+        outcome = await _decide(
+            db,
+            tenant,
+            assistant,
+            task,
+            {"approval_id": str(approval.id), "decision": "approve"},
+            run_id=run.id,
+        )
+        assert outcome.output.startswith("ERROR")
+        assert "could not resolve who you are acting for" in outcome.output.lower()
+        await db.refresh(approval)
+        assert approval.status == "pending"
 
 
 @pytest.mark.asyncio

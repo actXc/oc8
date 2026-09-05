@@ -237,6 +237,15 @@ def _authorize(
         # should be for a tool that can only ever produce a draft a human has
         # to approve before anything changes.
         return Decision(Effect.ALLOW)
+    if tc.name == "decide_approval":
+        # Like propose_change and ask_user: it belongs to no connection, so
+        # the department frame has nothing to decide it against. Real
+        # authorisation for a decision happens where it must, inside
+        # `decide_approval` (approvals/service.py) via `_may_apply_the_effect`
+        # and `_resolve_agent_actor`'s scope -- this ALLOW only keeps a
+        # successful call from being audited as a denial for a tool that was
+        # never going to be enforced by this frame in the first place.
+        return Decision(Effect.ALLOW)
     if tc.name == "delegate_task":
         if not agent.is_team_lead:
             return Decision(Effect.DENY, "only a team lead can delegate tasks")

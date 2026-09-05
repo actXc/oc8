@@ -125,12 +125,19 @@ def test_a_delegatable_permission_changes_no_configuration() -> None:
     delegatable set, and whatever it is, it is not one of the six things the
     design says a tenant role may ever be.
     """
-    verbs = {RUN_START, RUN_CONTROL, APPROVAL_DECIDE, CLARIFICATION_ANSWER, AUDIT_VERIFY, COPILOT_USE}
+    verbs = {
+        RUN_START,
+        RUN_CONTROL,
+        APPROVAL_DECIDE,
+        CLARIFICATION_ANSWER,
+        AUDIT_VERIFY,
+        COPILOT_USE,
+    }
     strange = sorted(
         p for p in DELEGATABLE_PERMISSIONS if not p.endswith(f":{VIEW}") and p not in verbs
     )
     assert not strange, (
-        f"these are offerable but are neither a read nor one of the five verbs: {strange}"
+        f"these are offerable but are neither a read nor one of the six verbs: {strange}"
     )
 
 

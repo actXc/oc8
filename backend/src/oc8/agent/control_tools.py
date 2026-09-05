@@ -431,7 +431,8 @@ def offered_tools(
     # same "does your tenant have someone for this?" question repeated on
     # every subsequent turn instead of ever calling delegate_task. Withheld
     # here (also matches this file's own "Read-only + delegate_task +
-    # propose_change ONLY" scope, in assistant.py's module docstring), the
+    # propose_change + decide_approval" scope, in assistant.py's module
+    # docstring), the
     # Assistant must answer with what it knows, delegate, or say plainly that
     # it cannot help -- never leave a human of ANY door waiting on a question
     # that door cannot answer.
@@ -552,12 +553,23 @@ async def _resolve_agent_actor(
     """The `AgentActor` a write-capable Copilot tool acts through -- the human
     behind this chat-driven task, resolved to the SAME `DepartmentScope` any
     other door would resolve for them. Returns None (fail closed) when there
-    is no chat session behind the task, or no resolvable member -- "nobody to
-    act for" is not "act unrestricted".
+    is no chat session behind the task, no resolvable member, or when this
+    run was posted into the session by someone OTHER than the session's own
+    member -- the `copilot:manage` oversight carve-out in `_owned_session`
+    (chat.py) lets an org_admin read and reply in a colleague's Assistant
+    session, but a write this tool performs must be attributed to, and
+    scoped as, the actual human on the other end of the conversation, never
+    the operator who merely viewed or replied in it.
     """
     member = await _member_behind_task(db, tenant_id=tenant_id, task=task)
     if member is None:
         return None
+    if run_id is not None:
+        run = await db.get(m.AgentRun, run_id)
+        if run is not None and run.tenant_id == tenant_id and run.source == "chat":
+            operator = (run.context or {}).get("originating_operator")
+            if isinstance(operator, str) and operator and operator != member.subject:
+                return None
     scope = await scope_for_member(
         db, member, token_role=await _acting_token_role(db, tenant_id=tenant_id, run_id=run_id)
     )
@@ -1216,7 +1228,8 @@ async def execute_control_tool(
             return ControlOutcome(output=f"ERROR: {exc}")
 
         return ControlOutcome(
-            output=f"Approval {approval_row.id} {verdict}d.", pending_run=result.resumed_run_id
+            output=f"Approval {approval_row.id} {result.approval.status}.",
+            pending_run=result.resumed_run_id,
         )
 
     if tc.name == RENDER_COMPONENT.name:

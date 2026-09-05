@@ -139,7 +139,7 @@ async def create_chat_session(
         # `visible_agents`/`visible_agent` hide the Assistant from every screen
         # that browses agents, so this -- the one door that is deliberately
         # ABOUT the Assistant -- has to say so. `_assistant_visible` has already
-        # established both halves: this caller holds copilot:manage, and this id
+        # established both halves: this caller holds copilot:use, and this id
         # is the tenant's Assistant and nothing else.
         include_tenant_assistant=is_assistant,
     )

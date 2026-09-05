@@ -289,7 +289,7 @@ def require_departmental(
     of `require_permission`: only the routes that can be reached from a seat go
     looking for one, and the other 110 never load a seat they have no use for.
 
-    `or_tenant_wide` exists for exactly one caller today: `chat.py`'s five
+    `or_tenant_wide` exists for exactly one caller today: `chat.py`'s six
     session routes, which resolve a `HumanActor` (for its `member`/`scope`,
     used for session OWNERSHIP) via `require_departmental(perm(AGENT, VIEW))`
     even for a caller who holds no `agent:view` seat anywhere, as long as they

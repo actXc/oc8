@@ -134,3 +134,19 @@ def test_propose_change_is_allowed_on_a_connection_less_run() -> None:
         agent=agent,
     )
     assert d.effect is Effect.ALLOW
+
+
+def test_decide_approval_is_allowed_on_a_connection_less_run() -> None:
+    """Same shape as propose_change, immediately above: decide_approval also
+    belongs to no connection, so without its own special case here every
+    successful call would fall through to the frame check's DENY and be
+    audited as a denial, even though execute_control_tool never reads this
+    decision for decide_approval and dispatches it regardless."""
+    agent = _agent()
+    agent.is_tenant_assistant = True
+    d = _authz(
+        _call("decide_approval", approval_id=str(uuid.uuid4()), decision="approve"),
+        key=None,
+        agent=agent,
+    )
+    assert d.effect is Effect.ALLOW

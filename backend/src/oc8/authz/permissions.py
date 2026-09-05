@@ -79,8 +79,10 @@ COPILOT: Final = "copilot"
 #: The word collides with the token ROLE `member` -- the empty role an employee is
 #: minted with -- and the collision is harmless because the two are different
 #: namespaces: a resource name here, a role name in `BUILTIN_ROLE_PERMISSIONS`,
-#: and `permissions_for("member")` is the empty set either way, which is the whole
-#: point of that role.
+#: and `permissions_for("member")` (the role) now returns the tenant-wide
+#: `copilot:use` default every human role gets, not the empty set -- the
+#: collision stays harmless because a resource name and a role name are
+#: different namespaces regardless of what either resolves to.
 MEMBER: Final = "member"
 #: A named subset of this catalogue that a tenant's IT admin authored, and the
 #: assignment of it to a person. `role:view` is what makes the tenant's own role
@@ -617,9 +619,11 @@ def permissions_for(role: str) -> frozenset[str]:
     the safe direction. A role name that is a typo therefore 403s loudly instead
     of quietly admitting someone.
 
-    `member` returns the empty set through the dict rather than through the
-    default, and the two are indistinguishable here on purpose: a role that is
-    KNOWN to grant nothing must gate exactly like one nobody mapped.
+    An unmapped role name and a role mapped to the empty set are
+    indistinguishable here on purpose: a role KNOWN to grant nothing must gate
+    exactly like one nobody mapped. (`member` itself no longer grants nothing
+    -- see `BUILTIN_ROLE_PERMISSIONS[MEMBER_ROLE]` -- but the principle still
+    holds for any role that does.)
     """
     return BUILTIN_ROLE_PERMISSIONS.get(role, frozenset())
 
