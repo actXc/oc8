@@ -21,6 +21,7 @@ from oc8.capas.guardrails import GuardrailLibrary
 from oc8.capas.i18n import translations_for
 from oc8.capas.manifest import ManifestError, ToolPackConnection, parse_manifest
 from oc8.schemas.dto import (
+    ConnectionToolNamesDTO,
     GuardrailAdjustableDTO,
     GuardrailDTO,
     GuardrailPresetDTO,
@@ -195,6 +196,26 @@ async def list_connections(db: DbSession) -> list[McpConnectionDTO]:
         .all()
     )
     return [_to_dto(c) for c in rows]
+
+
+@router.get(
+    "/mcp/connections/{name}/tool-names",
+    response_model=ConnectionToolNamesDTO,
+    dependencies=[Depends(require_permission(perm(INTEGRATION, VIEW)))],
+)
+async def get_connection_tool_names(name: str, db: DbSession) -> ConnectionToolNamesDTO:
+    conn = (
+        await db.execute(select(m.McpConnection).where(m.McpConnection.name == name))
+    ).scalar_one_or_none()
+    if conn is None:
+        return ConnectionToolNamesDTO(names=[])
+    resolved = _manifest_connection(conn)
+    if resolved is None:
+        return ConnectionToolNamesDTO(names=[])
+    manifest_conn, _guardrail_library, _i18n = resolved
+    scopes = manifest_conn.scopes if isinstance(manifest_conn.scopes, dict) else {}
+    names = sorted({*scopes.get("read", []), *scopes.get("modify", [])})
+    return ConnectionToolNamesDTO(names=names)
 
 
 @router.post(

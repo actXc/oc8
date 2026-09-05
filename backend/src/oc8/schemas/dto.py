@@ -743,6 +743,10 @@ class McpConnectionDTO(CamelModel):
     credential_type: str | None = None
 
 
+class ConnectionToolNamesDTO(CamelModel):
+    names: list[str] = []
+
+
 class RenderedComponentDTO(CamelModel):
     """One render_component call's durable record -- the raw dict stored in
     `agent_run.context["rendered_components"]` / `chat_message.

@@ -296,3 +296,35 @@ async def test_the_tool_allowlist_survives_the_dto_boundary(
     # The contrast: every send already reaches a person there, so nothing is
     # withheld. If this ever gains an allowlist the two presets have converged.
     assert presets["assist_with_approval"]["only"] == []
+
+
+async def test_get_connection_tool_names_returns_the_connections_own_tools(
+    app_session: AppSessionFactory,
+) -> None:
+    assert _PLUGINS_DIR.is_dir(), _PLUGINS_DIR
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        await _odoo_mcp_connection(db, tenant)
+        await db.commit()
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            resp = await c.get("/api/v1/mcp/connections/odoo/tool-names", headers=_h(tenant))
+            assert resp.status_code == 200, resp.text
+            names = resp.json()["names"]
+            assert "search_records" in names
+            assert "create_record" in names
+
+
+async def test_get_connection_tool_names_for_an_unknown_connection_is_empty(
+    app_session: AppSessionFactory,
+) -> None:
+    tenant = uuid.uuid4()
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            resp = await c.get(
+                "/api/v1/mcp/connections/does-not-exist/tool-names", headers=_h(tenant)
+            )
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["names"] == []
