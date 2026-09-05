@@ -296,7 +296,7 @@ async def test_tools_list_hides_what_the_frame_forbids(
     from a non-lead."""
     monkeypatch.setattr("oc8.agent.mcp_pool.McpSession", _FakeMcp)
     tenant = uuid.uuid4()
-    read_only = {"tools": {"odoo": {"enabled": True, "read": True, "modify": False, "modify": False}}}
+    read_only = {"tools": {"odoo": {"enabled": True, "read": True, "modify": False}}}
     async with app_session(tenant) as db:
         agent_id, run_id, _t = await _seed(db, tenant, frame=read_only)
 
@@ -486,7 +486,7 @@ async def test_a_denied_call_is_a_readable_tool_error_not_a_transport_error(
     _FakeMcp.calls = []
     monkeypatch.setattr("oc8.agent.mcp_pool.McpSession", _FakeMcp)
     tenant = uuid.uuid4()
-    read_only = {"tools": {"odoo": {"enabled": True, "read": True, "modify": False, "modify": False}}}
+    read_only = {"tools": {"odoo": {"enabled": True, "read": True, "modify": False}}}
     async with app_session(tenant) as db:
         agent_id, run_id, _t = await _seed(db, tenant, frame=read_only)
 
@@ -530,7 +530,7 @@ async def test_a_second_message_to_the_same_record_never_reaches_the_server(
     _FakeMcp.calls = []
     monkeypatch.setattr("oc8.agent.mcp_pool.McpSession", _FakeMcp)
     tenant = uuid.uuid4()
-    may_send = {"tools": {"odoo": {"enabled": True, "read": True, "modify": True, "modify": True}}}
+    may_send = {"tools": {"odoo": {"enabled": True, "read": True, "modify": True}}}
     async with app_session(tenant) as db:
         agent_id, run_id, _t = await _seed(
             db,
@@ -576,7 +576,7 @@ async def test_a_message_to_a_different_record_is_still_allowed(
     _FakeMcp.calls = []
     monkeypatch.setattr("oc8.agent.mcp_pool.McpSession", _FakeMcp)
     tenant = uuid.uuid4()
-    may_send = {"tools": {"odoo": {"enabled": True, "read": True, "modify": True, "modify": True}}}
+    may_send = {"tools": {"odoo": {"enabled": True, "read": True, "modify": True}}}
     async with app_session(tenant) as db:
         agent_id, run_id, _t = await _seed(
             db,
@@ -616,7 +616,7 @@ async def test_a_connection_that_declares_no_outward_tool_is_unguarded(
     _FakeMcp.calls = []
     monkeypatch.setattr("oc8.agent.mcp_pool.McpSession", _FakeMcp)
     tenant = uuid.uuid4()
-    may_send = {"tools": {"odoo": {"enabled": True, "read": True, "modify": True, "modify": True}}}
+    may_send = {"tools": {"odoo": {"enabled": True, "read": True, "modify": True}}}
     async with app_session(tenant) as db:
         agent_id, run_id, _t = await _seed(db, tenant, frame=may_send)
 
@@ -1338,7 +1338,7 @@ async def test_a_withheld_tool_is_refused_even_when_called_anyway(
 # ------------------------------------------- two agents, one queue, one record
 
 FOCUS = {"entity_field": "model", "id_fields": ["record_id"], "search_tools": ["search_records"]}
-MAY_WRITE = {"tools": {"odoo": {"enabled": True, "read": True, "modify": True, "modify": True}}}
+MAY_WRITE = {"tools": {"odoo": {"enabled": True, "read": True, "modify": True}}}
 
 
 async def _colleague(

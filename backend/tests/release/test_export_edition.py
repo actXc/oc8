@@ -71,7 +71,7 @@ class TestExportConfigInitialization:
     def test_overwrite_flag(self) -> None:
         """Test overwrite flag."""
         config = export_edition.ExportConfig(
-            edition="community", overmodify=True
+            edition="community", overwrite=True
         )
         assert config.overwrite is True
 
@@ -404,7 +404,7 @@ class TestExportOperation:
             edition="community",
             output_dir=output_dir,
             dry_run=False,
-            overmodify=False,
+            overwrite=False,
         )
         result = export_edition.run_export(config)
 
@@ -423,7 +423,7 @@ class TestExportOperation:
             edition="community",
             output_dir=output_dir,
             dry_run=False,
-            overmodify=True,
+            overwrite=True,
         )
         result = export_edition.run_export(config)
 

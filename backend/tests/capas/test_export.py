@@ -281,7 +281,6 @@ async def test_build_department_export_drops_null_policy_fields(
                         "only": None,
                         "read": True,
                         "modify": True,
-                        "modify": True,
                         "enabled": True,
                         "approval_eur": None,
                         "approval_actions": [],

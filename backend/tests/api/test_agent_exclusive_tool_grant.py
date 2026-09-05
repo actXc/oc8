@@ -33,7 +33,7 @@ async def _seed_department_with_two_agents(
             name="Helpdesk",
             frame={
                 "tools": {
-                    "odoo": {"enabled": True, "read": True, "modify": False, "modify": False}
+                    "odoo": {"enabled": True, "read": True, "modify": False}
                 }
             },
         )

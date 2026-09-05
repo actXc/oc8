@@ -339,7 +339,7 @@ async def test_a_real_operator_override_survives_every_department_toggle_even_wh
     # frame fully-shaped rather than the bare `{"enabled": True}}` the
     # department-PUT-only tests above use (those never hit that DTO, since
     # `set_department_tools` never calls it).
-    _frame_tool_policy = {"enabled": True, "read": True, "modify": False, "modify": False}
+    _frame_tool_policy = {"enabled": True, "read": True, "modify": False}
     async with app_session(tenant) as db:
         dept = m.Department(
             tenant_id=tenant, name="Sales", frame={"tools": {"Odoo": dict(_frame_tool_policy)}}

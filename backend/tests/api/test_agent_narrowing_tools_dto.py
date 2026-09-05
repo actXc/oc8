@@ -43,7 +43,7 @@ async def _seed_agent_with_narrowing(
             name="General",
             frame={
                 "tools": {
-                    "odoo": {"enabled": True, "read": True, "modify": True, "modify": True}
+                    "odoo": {"enabled": True, "read": True, "modify": True}
                 }
             },
         )
