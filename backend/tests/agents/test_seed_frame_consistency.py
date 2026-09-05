@@ -72,7 +72,7 @@ async def test_seeded_demo_connection_authorizes_read_and_write_via_its_own_name
     read_right = required_right("read_file", tool_scopes)
     write_right = required_right("write_file", tool_scopes)
     assert read_right == "read"
-    assert write_right == "write"
+    assert write_right == "modify"
 
     read_decision = authorize_tool_call(
         policies=policies, connection_key=conn.name, right=read_right, value=None

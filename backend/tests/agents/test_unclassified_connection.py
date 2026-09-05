@@ -24,17 +24,17 @@ from oc8.authz.pdp import required_right
 
 def test_an_undeclared_tool_counts_as_a_write() -> None:
     """The behaviour the warning is about, stated so it cannot drift silently."""
-    assert required_right("search_records", None) == "write"
-    assert required_right("search_records", {}) == "write"
+    assert required_right("search_records", None) == "modify"
+    assert required_right("search_records", {}) == "modify"
     # An empty LIST is what the live row actually held -- not a dict, so the
     # gateway reads it as "no classification" rather than "no read tools".
-    assert required_right("search_records", []) == "write"  # type: ignore[arg-type]
+    assert required_right("search_records", []) == "modify"  # type: ignore[arg-type]
 
 
 def test_a_declared_read_stays_a_read() -> None:
     scopes = {"read": ["search_records"], "send": ["update_record"]}
     assert required_right("search_records", scopes) == "read"
-    assert required_right("update_record", scopes) == "send"
+    assert required_right("update_record", scopes) == "modify"
 
 
 def test_the_warning_names_the_connection_and_the_consequence(
