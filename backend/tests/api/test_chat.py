@@ -17,7 +17,7 @@ from oc8.agent.assistant import get_or_create_assistant
 from oc8.api.v1.chat import _assistant_visible
 from oc8.auth import get_identity_provider
 from oc8.authz.authority import Authority
-from oc8.authz.permissions import COPILOT, MANAGE, perm
+from oc8.authz.permissions import COPILOT, COPILOT_USE, MANAGE, perm
 from oc8.authz.scope import subject_uuid_for
 from oc8.main import create_app
 from tests.conftest import AppSessionFactory
@@ -363,13 +363,15 @@ async def test_create_chat_session_actually_calls_the_assistant_visible_bypass(
             assert create_r.status_code == 201, create_r.text
 
 
-async def test_seat_only_member_without_copilot_manage_still_cannot_reach_the_assistant(
+async def test_a_bare_member_now_reaches_the_assistant_via_copilot_use(
     app_session: AppSessionFactory,
 ) -> None:
-    """Quality control on the new carve-out: a caller who holds agent:view
-    only through a seat in an UNRELATED department -- and does not hold
-    copilot:manage -- must still 404 against the tenant Assistant, exactly as
-    it would against any other department's agent."""
+    """The whole point of this slice: a caller who holds agent:view only
+    through a seat in an UNRELATED department -- and no copilot:manage -- now
+    reaches the tenant Assistant anyway, because `member` holds copilot:use
+    tenant-wide by default. This replaces the old
+    test_seat_only_member_without_copilot_manage_still_cannot_reach_the_assistant,
+    which asserted the opposite (404) before copilot:use existed."""
     tenant = uuid.uuid4()
     subject = "seat-only-viewer"
     async with app_session(tenant) as db:
@@ -402,7 +404,34 @@ async def test_seat_only_member_without_copilot_manage_still_cannot_reach_the_as
                 json={"agentId": str(assistant_agent_id)},
                 headers={"Authorization": f"Bearer {token}"},
             )
-            assert r.status_code == 404, r.text
+            assert r.status_code == 201, r.text
+
+
+async def test_an_unmapped_role_still_cannot_reach_the_assistant(
+    app_session: AppSessionFactory,
+) -> None:
+    """The negative control for the test above: copilot:use is what admits a
+    bare member, not merely holding SOME token -- a role name `permissions_for`
+    does not recognise resolves to the empty set (fail-closed) and still 403s,
+    proving the enforcement boundary is real rather than "any token works"."""
+    tenant = uuid.uuid4()
+    subject = "unmapped-role-holder"
+    async with app_session(tenant) as db:
+        assistant = await get_or_create_assistant(db, tenant_id=tenant)
+        assistant_agent_id = assistant.id
+
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            token = get_identity_provider().mint(
+                tenant_id=tenant, subject=subject, role="not_a_real_role"
+            )
+            r = await c.post(
+                "/api/v1/chat/sessions",
+                json={"agentId": str(assistant_agent_id)},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert r.status_code == 403, r.text
 
 
 async def test_copilot_manage_holder_can_read_and_reply_in_a_colleagues_assistant_session(
@@ -491,13 +520,13 @@ async def test_a_foreign_seat_only_member_without_copilot_manage_still_cannot_re
             assert r.status_code == 404, r.text
 
 
-async def test_assistant_visible_requires_copilot_manage_and_the_assistants_own_agent_id(
+async def test_assistant_visible_defaults_to_copilot_use(
     app_session: AppSessionFactory,
 ) -> None:
-    """Direct test of `_assistant_visible`: copilot:manage alone is necessary
-    but not sufficient -- it must also name the tenant's actual Assistant
-    agent, never any other agent, even one the same caller could otherwise
-    see."""
+    """Direct test of `_assistant_visible`'s DEFAULT parameter: copilot:use
+    alone is necessary but not sufficient -- it must also name the tenant's
+    actual Assistant agent, never any other agent, even one the same caller
+    could otherwise see."""
     tenant = uuid.uuid4()
     async with app_session(tenant) as db:
         assistant = await get_or_create_assistant(db, tenant_id=tenant)
@@ -517,9 +546,7 @@ async def test_assistant_visible_requires_copilot_manage_and_the_assistants_own_
         )
 
         with_grant = Authority(
-            tenant_wide=frozenset({perm(COPILOT, MANAGE)}),
-            unrestricted=False,
-            decides_everywhere=False,
+            tenant_wide=frozenset({COPILOT_USE}), unrestricted=False, decides_everywhere=False
         )
         assert (
             await _assistant_visible(
@@ -532,6 +559,46 @@ async def test_assistant_visible_requires_copilot_manage_and_the_assistants_own_
                 db, tenant_id=tenant, authority=with_grant, agent_id=other_agent.id
             )
             is False
+        )
+
+
+async def test_assistant_visible_with_an_explicit_copilot_manage_requirement(
+    app_session: AppSessionFactory,
+) -> None:
+    """The stricter, explicit-permission call `_owned_session`'s foreign-session
+    branch makes: copilot:use ALONE must not satisfy it, only copilot:manage."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant = await get_or_create_assistant(db, tenant_id=tenant)
+
+        use_only = Authority(
+            tenant_wide=frozenset({COPILOT_USE}), unrestricted=False, decides_everywhere=False
+        )
+        assert (
+            await _assistant_visible(
+                db,
+                tenant_id=tenant,
+                authority=use_only,
+                agent_id=assistant.id,
+                permission=perm(COPILOT, MANAGE),
+            )
+            is False
+        )
+
+        manage_grant = Authority(
+            tenant_wide=frozenset({perm(COPILOT, MANAGE)}),
+            unrestricted=False,
+            decides_everywhere=False,
+        )
+        assert (
+            await _assistant_visible(
+                db,
+                tenant_id=tenant,
+                authority=manage_grant,
+                agent_id=assistant.id,
+                permission=perm(COPILOT, MANAGE),
+            )
+            is True
         )
 
 
