@@ -794,7 +794,9 @@ export function DepartmentGuardrailsPanel({ departmentId }: { departmentId: stri
     return {
       read: raw.read !== undefined ? Boolean(raw.read) : true,
       modify: Boolean(raw.modify),
-      approvalActions: Array.isArray(raw.approval_actions) ? (raw.approval_actions as string[]) : [],
+      approvalActions: Array.isArray(raw.approval_actions)
+        ? (raw.approval_actions as string[])
+        : [],
       approvalEur: typeof raw.approval_eur === "number" ? (raw.approval_eur as number) : null,
       only: Array.isArray(raw.only) ? (raw.only as string[]) : [],
     };
@@ -813,13 +815,18 @@ export function DepartmentGuardrailsPanel({ departmentId }: { departmentId: stri
       },
     };
     setTools.mutate(merged, {
-      onSuccess: () => toast.success(t("Guardrails saved", "Guardrails gespeichert"), { description: key }),
-      onError: () => toast.error(t("Could not save guardrails", "Guardrails konnten nicht gespeichert werden")),
+      onSuccess: () =>
+        toast.success(t("Guardrails saved", "Guardrails gespeichert"), { description: key }),
+      onError: () =>
+        toast.error(t("Could not save guardrails", "Guardrails konnten nicht gespeichert werden")),
     });
   }
 
   function addTool(name: string, policy: GuardrailValue | null) {
-    persistOne(name, policy ?? { read: true, modify: false, approvalActions: [], approvalEur: null, only: [] });
+    persistOne(
+      name,
+      policy ?? { read: true, modify: false, approvalActions: [], approvalEur: null, only: [] },
+    );
   }
 
   const rows: ToolGuardrailRow[] = toolKeys
@@ -835,7 +842,10 @@ export function DepartmentGuardrailsPanel({ departmentId }: { departmentId: stri
 
   return (
     <Panel className="p-5">
-      <ConfigSectionHeader hint={t("tool access and guardrails", "Tool-Zugriff und Guardrails")} title={t("Guardrails", "Guardrails")} />
+      <ConfigSectionHeader
+        hint={t("tool access and guardrails", "Tool-Zugriff und Guardrails")}
+        title={t("Guardrails", "Guardrails")}
+      />
       {rows.length === 0 ? (
         <p className="mt-3 rounded-md border border-dashed border-border/70 bg-background/30 p-4 text-center text-xs text-muted-foreground">
           {t("No tools enabled yet.", "Noch keine Tools aktiviert.")}

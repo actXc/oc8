@@ -121,6 +121,48 @@ async def test_a_dangling_role_id_no_longer_touches_effective_tools(
             assert body["departmentFrameTools"]["odoo"]["modify"] is True
 
 
+async def test_narrowing_overridden_keys_is_exposed_and_distinct_from_narrowing_tools_presence(
+    app_session: AppSessionFactory,
+) -> None:
+    """Regression, found via live verification: the agent detail page's
+    status badge used to key off mere presence in `narrowingTools` (every
+    save rewrites every currently-relevant key, touched or not), so every
+    agent with ANY saved narrowing showed "Narrowed" on every tool. The DTO
+    must expose the real, explicit signal (`Agent.narrowing_overridden_keys`,
+    the ONLY field `set_narrowing` ever writes to) so the frontend can tell
+    "has a narrowing entry" apart from "deliberately diverged"."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        dept = m.Department(
+            tenant_id=tenant,
+            name="General",
+            frame={"tools": {"odoo": {"enabled": True, "read": True, "modify": True}}},
+        )
+        db.add(dept)
+        await db.flush()
+        agent = m.Agent(
+            tenant_id=tenant,
+            department_id=dept.id,
+            name="Lennart",
+            # A narrowing entry for "odoo" exists (as every save writes one
+            # for every currently-relevant key), but the agent never
+            # deliberately overrode it -- narrowing_overridden_keys stays empty.
+            narrowing={"tools": {"odoo": {"enabled": True, "read": True, "modify": True}}},
+            narrowing_overridden_keys=[],
+        )
+        db.add(agent)
+        await db.flush()
+        agent_id = agent.id
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.get(f"/api/v1/agents/{agent_id}", headers=_headers(tenant))
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert "odoo" in body["narrowingTools"]
+            assert body["narrowingOverriddenKeys"] == []
+
+
 async def test_narrowing_tools_is_empty_for_an_agent_with_no_narrowing_set(
     app_session: AppSessionFactory,
 ) -> None:

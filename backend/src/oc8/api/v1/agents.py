@@ -269,6 +269,7 @@ async def _agent_detail_dto(db: DbSession, agent: m.Agent) -> AgentDetailDTO:
         effective_tools={k: ToolPolicyDTO(**p.to_json()) for k, p in effective.items()},
         department_frame_tools=frame_tools,
         narrowing_tools=narrowing_tools,
+        narrowing_overridden_keys=list(agent.narrowing_overridden_keys or []),
         runtime_ref=agent.runtime_ref,
         current_run_id=str(current_run) if current_run else None,
         temperature=model_params.get("temperature"),

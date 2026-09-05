@@ -396,6 +396,69 @@ async def test_setting_approval_eur_for_a_connection_with_no_value_spec_is_rejec
         assert body["violations"] == [{"connection": "github", "field": "approval_eur"}]
 
 
+async def test_an_empty_only_list_for_a_connection_with_no_value_spec_is_accepted(
+    app_session: AppSessionFactory,
+) -> None:
+    """The frontend's GuardrailValue always sends `only: []` for a tool that
+    never had an allowlist -- never `null` -- so this must NOT trip the same
+    gate a genuinely non-empty `only` does. Regression for a live-verification
+    finding: every real save from the new ToolGuardrailTable UI was 422ing on
+    any connection with no value_spec, because `only` was checked with
+    `is not None` instead of a real non-empty check."""
+    tenant, dept_id = await _seed_department(app_session)
+    async with app_session(tenant) as db:
+        conn = m.McpConnection(
+            tenant_id=tenant,
+            name="github",
+            server_url="",
+            transport="stdio",
+            config={"_plugin_name": "github_mcp", "_connection_key": "primary"},
+        )
+        db.add(conn)
+        await db.flush()
+
+    payload = {"tools": {"github": {"enabled": True, "read": True, "only": []}}}
+    async with _http() as http:
+        h = _headers(tenant, "org_admin")
+        resp = await http.put(f"/api/v1/departments/{dept_id}/tools", json=payload, headers=h)
+        assert resp.status_code == 200, resp.text
+
+
+async def test_setting_a_nonempty_only_for_a_connection_with_no_value_spec_is_accepted(
+    app_session: AppSessionFactory,
+) -> None:
+    """Regression: `only` is a plain tool-name allowlist, not a value_spec
+    feature -- github_mcp/jira_mcp/microsoft365/google_workspace all ship real
+    `only`-based guardrail presets (e.g. github's "Support: Issue triage, no
+    code access") and none of them declare a value_spec. Gating `only` behind
+    `connection_supports_value_spec` broke every one of those presets; only
+    `approval_eur` genuinely needs a value_spec, since that's where the
+    monetary threshold gets compared against. Found live: applying github's
+    own "Support" preset from the department Guardrails tab 422'd."""
+    tenant, dept_id = await _seed_department(app_session)
+    async with app_session(tenant) as db:
+        conn = m.McpConnection(
+            tenant_id=tenant,
+            name="github",
+            server_url="",
+            transport="stdio",
+            config={"_plugin_name": "github_mcp", "_connection_key": "primary"},
+        )
+        db.add(conn)
+        await db.flush()
+
+    payload = {
+        "tools": {
+            "github": {"enabled": True, "read": True, "only": ["add_issue_comment", "issue_write"]}
+        }
+    }
+    async with _http() as http:
+        h = _headers(tenant, "org_admin")
+        resp = await http.put(f"/api/v1/departments/{dept_id}/tools", json=payload, headers=h)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["tools"]["github"]["only"] == ["add_issue_comment", "issue_write"]
+
+
 async def test_setting_only_for_a_connection_with_a_value_spec_is_accepted(
     app_session: AppSessionFactory,
 ) -> None:

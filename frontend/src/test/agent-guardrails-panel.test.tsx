@@ -86,6 +86,42 @@ describe("AgentGuardrailsPanel", () => {
     expect(screen.getByText(/wie department|same as department/i)).toBeInTheDocument();
   });
 
+  it("shows inherited (not narrowed) for a tool present in narrowingTools but not in narrowingOverriddenKeys", () => {
+    // Regression: every save rewrites every currently-relevant key whether
+    // or not it's the one being edited, so `narrowingTools` can carry an
+    // entry for a tool the agent never deliberately touched. The status
+    // badge must key off `narrowingOverriddenKeys` (the one place this is
+    // tracked explicitly), not mere presence in `narrowingTools` -- a live-
+    // verification finding where every agent with ANY saved narrowing
+    // showed "Narrowed" on every tool, not just the ones actually narrowed.
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <AgentGuardrailsPanel
+          agent={
+            {
+              ...AGENT,
+              narrowingTools: {
+                github: {
+                  enabled: true,
+                  read: true,
+                  modify: false,
+                  approvalEur: null,
+                  approvalActions: [],
+                  only: null,
+                },
+              },
+              narrowingOverriddenKeys: [],
+            } as AgentDetail
+          }
+          mayManage
+        />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByText(/wie department|same as department/i)).toBeInTheDocument();
+    expect(screen.queryByText(/eingeschränkt|narrowed/i)).not.toBeInTheDocument();
+  });
+
   it("threads a newly picked login's connection id into the same save call", async () => {
     createLoginMutateAsync.mockResolvedValue({ id: "login-abc" });
     mockConnectionsRef.current = [

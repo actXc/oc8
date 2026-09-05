@@ -436,9 +436,24 @@ async def set_department_tools(
 
     value_spec_violations: list[dict[str, str]] = []
     for key, policy in body.tools.items():
-        wants_only = policy.only is not None
+        # `only` is a plain tool-name allowlist -- meaningful for ANY
+        # connection that has tools to restrict, with no dependency on a
+        # `value_spec` (github_mcp/jira_mcp/microsoft365/google_workspace all
+        # ship real `only`-based guardrail presets and declare no value_spec
+        # at all; the frontend's own drawer already gates `only`'s visibility
+        # on the connection having tool names, not on `hasValueSpec` --
+        # `tool-guardrail-editor-drawer.tsx`). Only `approval_eur` (a
+        # monetary threshold) genuinely needs to know a value_spec exists,
+        # since that's where the threshold gets compared against.
+        #
+        # `only` is a list, not a nullable scalar like `approval_eur` -- the
+        # frontend's GuardrailValue always sends `only: []` for a tool that
+        # never had an allowlist, never `null`, so an `is not None` check
+        # (matching approval_eur's real absent/present distinction) treats
+        # every save as "wants an allowlist". Only a genuinely non-empty list
+        # means the operator actually wants one.
         wants_eur = policy.approval_eur is not None
-        if not (wants_only or wants_eur):
+        if not wants_eur:
             continue
         mcp_conn = (
             await db.execute(
@@ -453,10 +468,7 @@ async def set_department_tools(
             str(_cfg.get("_plugin_name", "")), str(_cfg.get("_connection_key", ""))
         )
         if not connection_supports_value_spec(manifest_conn):
-            if wants_only:
-                value_spec_violations.append({"connection": key, "field": "only"})
-            if wants_eur:
-                value_spec_violations.append({"connection": key, "field": "approval_eur"})
+            value_spec_violations.append({"connection": key, "field": "approval_eur"})
     if value_spec_violations:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,

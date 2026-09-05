@@ -4,7 +4,10 @@ import { ToolGuardrailEditorDrawer } from "@/components/tool-guardrail-editor-dr
 
 vi.mock("@/lib/hooks", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/hooks")>();
-  return { ...actual, useConnectionToolNames: () => ({ data: { names: ["merge_pr", "delete_branch"] } }) };
+  return {
+    ...actual,
+    useConnectionToolNames: () => ({ data: { names: ["merge_pr", "delete_branch"] } }),
+  };
 });
 
 describe("ToolGuardrailEditorDrawer", () => {
@@ -13,7 +16,13 @@ describe("ToolGuardrailEditorDrawer", () => {
       <ToolGuardrailEditorDrawer
         toolKey="github"
         connection={undefined}
-        ceiling={{ read: true, modify: true, approvalActions: ["merge_pr"], approvalEur: null, only: [] }}
+        ceiling={{
+          read: true,
+          modify: true,
+          approvalActions: ["merge_pr"],
+          approvalEur: null,
+          only: [],
+        }}
         value={{ read: true, modify: false, approvalActions: [], approvalEur: null, only: [] }}
         onChange={vi.fn()}
         onClose={vi.fn()}

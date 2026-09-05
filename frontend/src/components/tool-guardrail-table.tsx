@@ -16,7 +16,13 @@ export interface ToolGuardrailRow {
   loginPicker?: React.ReactNode;
 }
 
-function StatusBadge({ status, t }: { status: ToolGuardrailRow["status"]; t: (en: string, de: string) => string }) {
+function StatusBadge({
+  status,
+  t,
+}: {
+  status: ToolGuardrailRow["status"];
+  t: (en: string, de: string) => string;
+}) {
   if (status === "inherited") {
     return (
       <span className="rounded-full border border-border bg-background/40 px-2 py-0.5 text-[11px] text-muted-foreground">
@@ -84,7 +90,10 @@ export function ToolGuardrailTable({
             <tr key={row.toolKey} className="border-b border-border/60 last:border-0">
               <td className="p-3 font-medium">{row.toolKey}</td>
               <td className="p-3 text-xs text-muted-foreground">
-                {[row.ownValue.read && t("Read", "Lesen"), row.ownValue.modify && t("Modify", "Verändern")]
+                {[
+                  row.ownValue.read && t("Read", "Lesen"),
+                  row.ownValue.modify && t("Modify", "Verändern"),
+                ]
                   .filter(Boolean)
                   .join(", ") || "—"}
               </td>

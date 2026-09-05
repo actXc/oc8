@@ -326,9 +326,18 @@ async def set_narrowing(
         for key, raw in raw_tools.items():
             if not isinstance(raw, dict):
                 continue
-            wants_only = raw.get("only") is not None
+            # `only` is a plain tool-name allowlist -- meaningful for ANY
+            # connection that has tools to restrict, with no dependency on a
+            # `value_spec` (github_mcp/jira_mcp/microsoft365/google_workspace
+            # all ship real `only`-based guardrail presets and declare no
+            # value_spec at all; the frontend's own drawer already gates
+            # `only`'s visibility on the connection having tool names, not on
+            # `hasValueSpec` -- `tool-guardrail-editor-drawer.tsx`). Only
+            # `approval_eur` (a monetary threshold) genuinely needs to know a
+            # value_spec exists, since that's where the threshold gets
+            # compared against.
             wants_eur = raw.get("approval_eur") is not None
-            if not (wants_only or wants_eur):
+            if not wants_eur:
                 continue
             mcp_conn = (
                 await db.execute(
@@ -345,10 +354,7 @@ async def set_narrowing(
                 str(_cfg.get("_plugin_name", "")), str(_cfg.get("_connection_key", ""))
             )
             if not connection_supports_value_spec(manifest_conn):
-                if wants_only:
-                    value_spec_violations.append({"connection": key, "field": "only"})
-                if wants_eur:
-                    value_spec_violations.append({"connection": key, "field": "approval_eur"})
+                value_spec_violations.append({"connection": key, "field": "approval_eur"})
     if value_spec_violations:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,

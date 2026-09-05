@@ -1298,7 +1298,10 @@ export function AgentGuardrailsPanel({
     update.mutate(
       { narrowing: { tools } },
       {
-        onSuccess: () => toast.success(t("Guardrails saved", "Guardrails gespeichert"), { description: agent.name }),
+        onSuccess: () =>
+          toast.success(t("Guardrails saved", "Guardrails gespeichert"), {
+            description: agent.name,
+          }),
         onError: () =>
           toast.error(t("Couldn't save guardrails", "Guardrails konnten nicht gespeichert werden")),
       },
@@ -1306,7 +1309,10 @@ export function AgentGuardrailsPanel({
   }
 
   function addTool(name: string, policy: GuardrailValue | null) {
-    persistOne(name, policy ?? { read: true, modify: false, approvalActions: [], approvalEur: null, only: [] });
+    persistOne(
+      name,
+      policy ?? { read: true, modify: false, approvalActions: [], approvalEur: null, only: [] },
+    );
   }
 
   const rows = allKeys.map((key) => {
@@ -1321,15 +1327,21 @@ export function AgentGuardrailsPanel({
           approvalEur: frame[key]?.approvalEur ?? null,
           only: frame[key]?.only ?? [],
         };
-    const hasNarrowingEntry = key in narrowing;
+    // Mere presence in `narrowing` is NOT the signal -- every save rewrites
+    // every currently-relevant key whether or not it was the one edited, so
+    // a key can appear there without the agent ever having deliberately
+    // diverged. `narrowingOverriddenKeys` is the one place that's tracked
+    // explicitly (see its own doc comment on AgentDetail).
+    const hasOverride = agent.narrowingOverriddenKeys?.includes(key) ?? false;
     const status: "inherited" | "narrowed" | "agent-only" = isAgentOnly
       ? "agent-only"
-      : hasNarrowingEntry
+      : hasOverride
         ? "narrowed"
         : "inherited";
     const connection = connectionByName.get(key);
     const pickedCredentialId =
-      (loginsByKey[key] ?? []).find((l) => l.id === effective[key]?.connectionId)?.credentialId ?? "";
+      (loginsByKey[key] ?? []).find((l) => l.id === effective[key]?.connectionId)?.credentialId ??
+      "";
     return {
       toolKey: key,
       connection,
@@ -1346,7 +1358,9 @@ export function AgentGuardrailsPanel({
                 persistOne(key, own, null);
                 return;
               }
-              const existing = (loginsByKey[key] ?? []).find((l) => l.credentialId === credentialId);
+              const existing = (loginsByKey[key] ?? []).find(
+                (l) => l.credentialId === credentialId,
+              );
               if (existing) {
                 persistOne(key, own, existing.id);
                 return;
@@ -1361,7 +1375,10 @@ export function AgentGuardrailsPanel({
                 persistOne(key, own, login.id);
               } catch (err) {
                 toast.error(
-                  t("Could not link this credential", "Anmeldedaten konnten nicht verknüpft werden"),
+                  t(
+                    "Could not link this credential",
+                    "Anmeldedaten konnten nicht verknüpft werden",
+                  ),
                   { description: err instanceof Error ? err.message : String(err) },
                 );
               }
@@ -1373,7 +1390,10 @@ export function AgentGuardrailsPanel({
 
   return (
     <Panel className="p-5">
-      <ConfigSectionHeader hint={t("access and guardrails", "Zugriff und Guardrails")} title={t("Guardrails", "Guardrails")} />
+      <ConfigSectionHeader
+        hint={t("access and guardrails", "Zugriff und Guardrails")}
+        title={t("Guardrails", "Guardrails")}
+      />
       {allKeys.length === 0 ? (
         <p className="mt-3 rounded-md border border-dashed border-border/70 bg-background/30 p-3 text-center text-xs text-muted-foreground">
           {t(

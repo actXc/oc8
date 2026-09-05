@@ -4,7 +4,11 @@ import { ToolGuardrailTable } from "@/components/tool-guardrail-table";
 
 vi.mock("@/lib/hooks", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/hooks")>();
-  return { ...actual, useConnectionToolNames: () => ({ data: { names: [] } }), useMcpLogins: () => ({ data: [] }) };
+  return {
+    ...actual,
+    useConnectionToolNames: () => ({ data: { names: [] } }),
+    useMcpLogins: () => ({ data: [] }),
+  };
 });
 
 const BLANK = { read: false, modify: false, approvalActions: [], approvalEur: null, only: [] };
@@ -38,7 +42,13 @@ describe("ToolGuardrailTable", () => {
       <ToolGuardrailTable
         level="agent"
         rows={[
-          { toolKey: "github", connection: undefined, ceilingPolicy: BLANK, ownValue: BLANK, status: "narrowed" },
+          {
+            toolKey: "github",
+            connection: undefined,
+            ceilingPolicy: BLANK,
+            ownValue: BLANK,
+            status: "narrowed",
+          },
         ]}
         addableNames={[]}
         connections={[]}
@@ -55,7 +65,13 @@ describe("ToolGuardrailTable", () => {
       <ToolGuardrailTable
         level="agent"
         rows={[
-          { toolKey: "internal-wiki", connection: undefined, ceilingPolicy: null, ownValue: BLANK, status: "agent-only" },
+          {
+            toolKey: "internal-wiki",
+            connection: undefined,
+            ceilingPolicy: null,
+            ownValue: BLANK,
+            status: "agent-only",
+          },
         ]}
         addableNames={[]}
         connections={[]}
@@ -97,7 +113,13 @@ describe("ToolGuardrailTable", () => {
       <ToolGuardrailTable
         level="agent"
         rows={[
-          { toolKey: "github", connection: undefined, ceilingPolicy: BLANK, ownValue: BLANK, status: "inherited" },
+          {
+            toolKey: "github",
+            connection: undefined,
+            ceilingPolicy: BLANK,
+            ownValue: BLANK,
+            status: "inherited",
+          },
         ]}
         addableNames={[]}
         connections={[]}

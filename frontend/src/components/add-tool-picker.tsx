@@ -16,7 +16,8 @@ function preferredPreset(connection: McpConnection): GuardrailValue | null {
       only: entry.only,
     };
   }
-  const recommended = connection.guardrailPresets.find((p) => p.recommended) ?? connection.guardrailPresets[0];
+  const recommended =
+    connection.guardrailPresets.find((p) => p.recommended) ?? connection.guardrailPresets[0];
   if (!recommended) return null;
   return {
     read: recommended.read,

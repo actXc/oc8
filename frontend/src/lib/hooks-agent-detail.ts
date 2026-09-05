@@ -37,6 +37,12 @@ export interface AgentDetail {
   // panel doesn't itself edit: effectiveTools dips whenever role_rights
   // does, and re-persisting that dip bakes it into narrowing permanently.
   narrowingTools: Record<string, ToolPolicy>;
+  // Tool keys this agent has deliberately overridden via its own narrowing
+  // save (the ONLY writer of this set is PUT /agents/{id}/narrowing) -- the
+  // authoritative "has this agent diverged from the department default"
+  // signal, NOT the same as a key merely being present in narrowingTools
+  // (every save rewrites every currently-relevant key, touched or not).
+  narrowingOverriddenKeys: string[];
   runtimeRef: string | null;
   // The run this agent is on right now, whoever started it. Without it the live
   // log can only follow a run started in this browser tab, so a scheduled run

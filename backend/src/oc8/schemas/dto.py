@@ -552,6 +552,15 @@ class AgentDetailDTO(AgentDTO):
     #: narrowing forever the next time either tab saves, since a save always
     #: rewrites the full `tools` payload including fields it isn't editing.
     narrowing_tools: dict[str, ToolPolicyDTO] = {}
+    #: Tool keys this agent has deliberately overridden via its own
+    #: `PUT /agents/{id}/narrowing` save -- the ONLY writer of this set (see
+    #: `agents_write.py`'s `set_narrowing`). Mere presence in `narrowing_tools`
+    #: is NOT the same signal: every save rewrites every currently-relevant
+    #: key, touched or not, so a key can appear there without ever having been
+    #: deliberately changed. This is the authoritative "has this agent
+    #: diverged from the department default for this tool" answer -- the same
+    #: one `departments.py`'s `_deviation_counts` (§ Abweichungen) uses.
+    narrowing_overridden_keys: list[str] = []
     runtime_ref: str | None = None
     #: The run this agent is on right now, whoever started it. Without it the
     #: detail screen can only show a live log for a run started in that same

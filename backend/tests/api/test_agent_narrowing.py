@@ -127,9 +127,17 @@ async def test_resaving_a_tool_with_a_changed_value_does_mark_it_as_overridden(
         assert refreshed.narrowing_overridden_keys == ["github"]
 
 
-async def test_setting_only_for_a_connection_with_no_value_spec_is_rejected(
+async def test_setting_only_for_a_connection_with_no_value_spec_is_accepted(
     app_session: AppSessionFactory,
 ) -> None:
+    """Regression: `only` is a plain tool-name allowlist, not a value_spec
+    feature -- github_mcp/jira_mcp/microsoft365/google_workspace all ship real
+    `only`-based guardrail presets (e.g. github's "Support: Issue triage, no
+    code access") and none of them declare a value_spec. Gating `only` behind
+    `connection_supports_value_spec` (this test's own name until this fix)
+    broke every one of those presets; only `approval_eur` genuinely needs a
+    value_spec, since that's where the monetary threshold gets compared
+    against. Found live: applying github's own "Support" preset 422'd."""
     tenant = uuid.UUID(str(ACME_TENANT_ID))
     async with app_session(tenant) as db:
         department = m.Department(
@@ -172,10 +180,61 @@ async def test_setting_only_for_a_connection_with_no_value_spec_is_rejected(
                 },
                 headers=headers,
             )
-            assert r.status_code == 422, r.text
-            body = r.json()["detail"]
-            assert body["error"] == "value_spec_not_supported"
-            assert body["violations"] == [{"connection": "github", "field": "only"}]
+            assert r.status_code == 200, r.text
+
+
+async def test_an_empty_only_list_for_a_connection_with_no_value_spec_is_accepted(
+    app_session: AppSessionFactory,
+) -> None:
+    """The frontend's GuardrailValue always sends `only: []` for a tool that
+    never had an allowlist -- never `null` -- so this must NOT trip the same
+    gate a genuinely non-empty `only` does. Regression for a live-verification
+    finding: every real save from the new ToolGuardrailTable UI was 422ing on
+    any connection with no value_spec, because `only` was checked with
+    `is not None` instead of a real non-empty check."""
+    tenant = uuid.UUID(str(ACME_TENANT_ID))
+    async with app_session(tenant) as db:
+        department = m.Department(
+            tenant_id=tenant,
+            name=f"D-{uuid.uuid4().hex}",
+            frame={"tools": {"github": {"enabled": True, "read": True, "modify": True}}},
+        )
+        db.add(department)
+        await db.flush()
+        agent = m.Agent(tenant_id=tenant, department_id=department.id, name="Probe")
+        conn = m.McpConnection(
+            tenant_id=tenant,
+            name="github",
+            server_url="",
+            transport="stdio",
+            config={"_plugin_name": "github_mcp", "_connection_key": "primary"},
+        )
+        db.add_all([agent, conn])
+        await db.flush()
+        agent_id = agent.id
+
+    app = create_app()
+    async with LifespanManager(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            headers = {"Authorization": f"Bearer {_token(tenant)}"}
+            r = await client.put(
+                f"/api/v1/agents/{agent_id}/narrowing",
+                json={
+                    "narrowing": {
+                        "tools": {
+                            "github": {
+                                "enabled": True,
+                                "read": True,
+                                "modify": True,
+                                "only": [],
+                            }
+                        }
+                    }
+                },
+                headers=headers,
+            )
+            assert r.status_code == 200, r.text
 
 
 async def test_setting_approval_eur_for_a_connection_with_a_value_spec_is_accepted(
