@@ -251,7 +251,7 @@ class TestGitHubMcpGuardrailLibrary:
         gated = authorize_tool_call(
             policies=policies,
             connection_key=_CONNECTION_KEY,
-            right="send",
+            right="modify",
             tool="merge_pull_request",
             value=None,
         )
@@ -260,7 +260,7 @@ class TestGitHubMcpGuardrailLibrary:
             authorize_tool_call(
                 policies=policies,
                 connection_key=_CONNECTION_KEY,
-                right="send",
+                right="modify",
                 tool="create_pull_request",
                 value=None,
             ).effect
@@ -270,7 +270,7 @@ class TestGitHubMcpGuardrailLibrary:
             authorize_tool_call(
                 policies=policies,
                 connection_key=_CONNECTION_KEY,
-                right="send",
+                right="modify",
                 tool="add_issue_comment",
                 value=None,
             ).effect
@@ -283,7 +283,7 @@ class TestGitHubMcpGuardrailLibrary:
         gated = authorize_tool_call(
             policies=policies,
             connection_key=_CONNECTION_KEY,
-            right="send",
+            right="modify",
             tool="create_repository",
             value=None,
         )
@@ -292,7 +292,7 @@ class TestGitHubMcpGuardrailLibrary:
             authorize_tool_call(
                 policies=policies,
                 connection_key=_CONNECTION_KEY,
-                right="send",
+                right="modify",
                 tool="fork_repository",
                 value=None,
             ).effect
@@ -302,7 +302,7 @@ class TestGitHubMcpGuardrailLibrary:
             authorize_tool_call(
                 policies=policies,
                 connection_key=_CONNECTION_KEY,
-                right="send",
+                right="modify",
                 tool="create_pull_request",
                 value=None,
             ).effect
@@ -315,7 +315,7 @@ class TestGitHubMcpGuardrailLibrary:
         denied = authorize_tool_call(
             policies=policies,
             connection_key=_CONNECTION_KEY,
-            right="send",
+            right="modify",
             tool="delete_file",
             value=None,
         )
@@ -324,7 +324,7 @@ class TestGitHubMcpGuardrailLibrary:
             authorize_tool_call(
                 policies=policies,
                 connection_key=_CONNECTION_KEY,
-                right="send",
+                right="modify",
                 tool="add_issue_comment",
                 value=None,
             ).effect

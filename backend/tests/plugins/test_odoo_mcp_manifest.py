@@ -43,9 +43,8 @@ class TestOdooMcpGuardrailPresets:
 
     def test_read_only_grants_read_alone(self) -> None:
         p = next(p for p in _connection().guardrail_presets if p.key == "read_only")
-        assert (p.read, p.write, p.send, p.approval_actions, p.approval_eur) == (
+        assert (p.read, p.modify, p.approval_actions, p.approval_eur) == (
             True,
-            False,
             False,
             [],
             None,
@@ -53,13 +52,13 @@ class TestOdooMcpGuardrailPresets:
 
     def test_assist_with_approval_requires_approval_on_every_send(self) -> None:
         p = next(p for p in _connection().guardrail_presets if p.key == "assist_with_approval")
-        assert (p.read, p.write, p.send) == (True, False, True)
-        assert p.approval_actions == ["send"]
+        assert (p.read, p.modify) == (True, True)
+        assert p.approval_actions == ["modify"]
         assert p.approval_eur is None
 
     def test_autonomous_with_limit_gates_only_above_1000_euro(self) -> None:
         p = next(p for p in _connection().guardrail_presets if p.key == "autonomous_with_limit")
-        assert (p.read, p.write, p.send) == (True, False, True)
+        assert (p.read, p.modify) == (True, True)
         assert p.approval_actions == []
         assert p.approval_eur == 1000
 
@@ -88,7 +87,7 @@ def test_the_approval_preset_needs_no_allowlist_because_a_human_sees_every_send(
     presets = {p.key: p for p in _connection().guardrail_presets}
     assist = presets["assist_with_approval"]
 
-    assert assist.approval_actions == ["send"]
+    assert assist.approval_actions == ["modify"]
     assert not assist.only, "every send already reaches a person; no tool needs hiding"
 
 
@@ -96,12 +95,16 @@ def test_no_preset_grants_write_because_no_odoo_tool_needs_it() -> None:
     """A right that confers nothing must not be advertised as granted.
 
     This connection's `scopes` classify every tool as `read` or `send`; not one
-    is `write`. Two presets shipped with `write = true` anyway, which reads on a
-    permissions screen exactly like a granted capability and is not one -- the
-    same defect as a euro threshold on a connection that carries no amounts.
+    is `write` -- and after collapsing write/send into the single `modify`
+    field, `read_only` is the one preset that needs neither, so it alone should
+    have `modify is False`. Every other preset legitimately needs `modify`
+    (collapsed from `send`) for the tools it grants.
     """
     for preset in _connection().guardrail_presets:
-        assert preset.write is False, f"{preset.key} grants a right no Odoo tool requires"
+        if preset.key == "read_only":
+            assert preset.modify is False, f"{preset.key} should not need modify"
+        else:
+            assert preset.modify is True, f"{preset.key} should need modify (collapsed from send)"
 
 
 def test_internal_only_cannot_reach_the_customer() -> None:
@@ -129,7 +132,7 @@ def test_no_deletions_differs_from_assist_by_never_rather_than_ask() -> None:
     presets = {p.key: p for p in _connection().guardrail_presets}
     assist, never = presets["assist_with_approval"], presets["no_deletions"]
 
-    assert assist.approval_actions == never.approval_actions == ["send"]
+    assert assist.approval_actions == never.approval_actions == ["modify"]
     assert not assist.only, "assist withholds nothing; a human sees every send"
     assert "delete_record" not in never.only
     assert "post_message" in never.only, "only deletion is withheld, not customer contact"

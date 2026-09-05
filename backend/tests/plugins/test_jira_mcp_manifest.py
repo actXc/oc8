@@ -243,7 +243,7 @@ class TestJiraMcpGuardrailLibrary:
         gated = authorize_tool_call(
             policies=policies,
             connection_key=_CONNECTION_KEY,
-            right="send",
+            right="modify",
             tool="jira_add_comment",
             value=None,
         )
@@ -252,7 +252,7 @@ class TestJiraMcpGuardrailLibrary:
             authorize_tool_call(
                 policies=policies,
                 connection_key=_CONNECTION_KEY,
-                right="send",
+                right="modify",
                 tool="jira_update_issue",
                 value=None,
             ).effect
@@ -262,7 +262,7 @@ class TestJiraMcpGuardrailLibrary:
             authorize_tool_call(
                 policies=policies,
                 connection_key=_CONNECTION_KEY,
-                right="send",
+                right="modify",
                 tool="jira_create_issue",
                 value=None,
             ).effect
@@ -275,7 +275,7 @@ class TestJiraMcpGuardrailLibrary:
         gated = authorize_tool_call(
             policies=policies,
             connection_key=_CONNECTION_KEY,
-            right="send",
+            right="modify",
             tool="jira_transition_issue",
             value=None,
         )
@@ -284,7 +284,7 @@ class TestJiraMcpGuardrailLibrary:
             authorize_tool_call(
                 policies=policies,
                 connection_key=_CONNECTION_KEY,
-                right="send",
+                right="modify",
                 tool="jira_update_issue",
                 value=None,
             ).effect
@@ -297,7 +297,7 @@ class TestJiraMcpGuardrailLibrary:
         denied = authorize_tool_call(
             policies=policies,
             connection_key=_CONNECTION_KEY,
-            right="send",
+            right="modify",
             tool="jira_delete_issue",
             value=None,
         )
@@ -306,7 +306,7 @@ class TestJiraMcpGuardrailLibrary:
             authorize_tool_call(
                 policies=policies,
                 connection_key=_CONNECTION_KEY,
-                right="send",
+                right="modify",
                 tool="jira_update_issue",
                 value=None,
             ).effect

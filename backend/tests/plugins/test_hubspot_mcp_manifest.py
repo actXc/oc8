@@ -238,11 +238,11 @@ class TestHubSpotMcpGuardrailLibrary:
 
     def test_integration_sales_pipeline_threshold_is_inclusive(self) -> None:
         g = _entry("sales_pipeline_autonomous_with_limit")
-        below = _decide(g, right="send", tool="hubspot-batch-create-objects", value=4999)
+        below = _decide(g, right="modify", tool="hubspot-batch-create-objects", value=4999)
         assert below.effect is Effect.ALLOW
-        at = _decide(g, right="send", tool="hubspot-batch-create-objects", value=5000)
+        at = _decide(g, right="modify", tool="hubspot-batch-create-objects", value=5000)
         assert at.effect is Effect.REQUIRE_APPROVAL
-        above = _decide(g, right="send", tool="hubspot-batch-create-objects", value=9000)
+        above = _decide(g, right="modify", tool="hubspot-batch-create-objects", value=9000)
         assert above.effect is Effect.REQUIRE_APPROVAL
 
     def test_integration_sales_pipeline_schema_tools_are_out_of_reach_regardless_of_value(
@@ -250,25 +250,25 @@ class TestHubSpotMcpGuardrailLibrary:
     ) -> None:
         g = _entry("sales_pipeline_autonomous_with_limit")
         assert (
-            _decide(g, right="send", tool="hubspot-create-property", value=None).effect
+            _decide(g, right="modify", tool="hubspot-create-property", value=None).effect
             is Effect.DENY
         )
 
     def test_integration_marketing_outreach_gates_engagement_not_records(self) -> None:
         g = _entry("marketing_outreach_needs_approval")
-        gated = _decide(g, right="send", tool="hubspot-create-engagement", value=None)
+        gated = _decide(g, right="modify", tool="hubspot-create-engagement", value=None)
         assert gated.effect is Effect.REQUIRE_APPROVAL
         assert (
-            _decide(g, right="send", tool="hubspot-batch-create-objects", value=None).effect
+            _decide(g, right="modify", tool="hubspot-batch-create-objects", value=None).effect
             is Effect.ALLOW
         )
 
     def test_integration_schema_lock_denies_property_tools_only(self) -> None:
         g = _entry("schema_lock_no_property_changes")
-        denied = _decide(g, right="send", tool="hubspot-create-property", value=None)
+        denied = _decide(g, right="modify", tool="hubspot-create-property", value=None)
         assert denied.effect is Effect.DENY
         assert (
-            _decide(g, right="send", tool="hubspot-create-engagement", value=None).effect
+            _decide(g, right="modify", tool="hubspot-create-engagement", value=None).effect
             is Effect.ALLOW
         )
 
