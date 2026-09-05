@@ -1750,3 +1750,200 @@ async def test_a_rejected_proposal_leaves_no_orphan_draft_behind(app_session: An
                 {"operation_type": "department.create", "payload": {"name": "Support EU"}},
             )
         ).output.startswith("Vorschlag")
+
+
+# ------------------------------------------ the Assistant's decide_approval seam
+
+
+async def _pending_approval(
+    db: Any, tenant: uuid.UUID, *, department_id: uuid.UUID, action_type: str = "tool_send"
+) -> m.ApprovalRequest:
+    approval = m.ApprovalRequest(
+        tenant_id=tenant,
+        agent_id=uuid.uuid4(),
+        department_id=department_id,
+        action_type=action_type,
+        title="Freigabe erforderlich",
+        status="pending",
+    )
+    db.add(approval)
+    await db.flush()
+    return approval
+
+
+async def _decide(
+    db: Any,
+    tenant: uuid.UUID,
+    assistant: m.Agent,
+    task: m.Task,
+    arguments: dict[str, Any],
+    *,
+    run_id: uuid.UUID | None = None,
+) -> ControlOutcome:
+    outcome = await execute_control_tool(
+        db,
+        tenant_id=tenant,
+        agent=assistant,
+        task=task,
+        tc=ToolCall(id="c1", name="decide_approval", arguments=arguments),
+        decision=Decision(Effect.ALLOW),
+        assigned_skills=[],
+        active_skills=[],
+        mcp_conn=None,
+        originating_operator=None,
+        run_id=run_id,
+    )
+    assert outcome is not None
+    return outcome
+
+
+@pytest.mark.asyncio
+async def test_decide_approval_approves_on_behalf_of_the_human_behind_the_chat(
+    app_session: Any,
+) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        await _human_behind(db, tenant, task, all_departments=True)
+        approval = await _pending_approval(db, tenant, department_id=task.department_id)
+
+        outcome = await _decide(
+            db, tenant, assistant, task, {"approval_id": str(approval.id), "decision": "approve"}
+        )
+        assert "approve" in outcome.output.lower()
+        await db.refresh(approval)
+        assert approval.status == "approved"
+
+
+@pytest.mark.asyncio
+async def test_decide_approval_refuses_a_foreign_department(app_session: Any) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        # A seat in some OTHER department, not the one the approval belongs to.
+        other = m.Department(tenant_id=tenant, name="Buchhaltung", frame={})
+        db.add(other)
+        await db.flush()
+        await _human_behind(db, tenant, task, seat_in=other.id)
+        approval = await _pending_approval(db, tenant, department_id=task.department_id)
+
+        outcome = await _decide(
+            db, tenant, assistant, task, {"approval_id": str(approval.id), "decision": "approve"}
+        )
+        assert outcome.output.startswith("ERROR")
+        assert "not found" in outcome.output.lower()
+        await db.refresh(approval)
+        assert approval.status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_decide_approval_fails_closed_with_no_chat_session_behind_the_task(
+    app_session: Any,
+) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        approval = await _pending_approval(db, tenant, department_id=task.department_id)
+
+        outcome = await _decide(
+            db, tenant, assistant, task, {"approval_id": str(approval.id), "decision": "approve"}
+        )
+        assert outcome.output.startswith("ERROR")
+        await db.refresh(approval)
+        assert approval.status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_decide_approval_reports_an_already_decided_approval(app_session: Any) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        await _human_behind(db, tenant, task, all_departments=True)
+        approval = await _pending_approval(db, tenant, department_id=task.department_id)
+        approval.status = "approved"
+        await db.flush()
+
+        outcome = await _decide(
+            db, tenant, assistant, task, {"approval_id": str(approval.id), "decision": "reject"}
+        )
+        assert outcome.output.startswith("ERROR")
+        assert "approved" in outcome.output.lower()
+
+
+@pytest.mark.asyncio
+async def test_decide_approval_refuses_a_management_effect_the_copilot_cannot_apply(
+    app_session: Any,
+) -> None:
+    """hire_agent is a `:manage`-class effect (EFFECT_PERMISSIONS) -- an
+    AgentActor (never a HumanActor) can never satisfy `_may_apply_the_effect`
+    for it, whatever department it stands in. This is the concrete case for
+    NotYourSayAtAll and also the guarantee that the Copilot cannot decide its
+    way into a management act."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        await _human_behind(db, tenant, task, all_departments=True)
+        approval = await _pending_approval(
+            db, tenant, department_id=task.department_id, action_type="hire_agent"
+        )
+
+        outcome = await _decide(
+            db, tenant, assistant, task, {"approval_id": str(approval.id), "decision": "approve"}
+        )
+        assert outcome.output.startswith("ERROR")
+        await db.refresh(approval)
+        assert approval.status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_decide_approval_rejects_an_unknown_option(app_session: Any) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        await _human_behind(db, tenant, task, all_departments=True)
+        approval = await _pending_approval(
+            db, tenant, department_id=task.department_id, action_type="decision"
+        )
+
+        outcome = await _decide(
+            db,
+            tenant,
+            assistant,
+            task,
+            {"approval_id": str(approval.id), "decision": "approve", "option": "not-a-real-option"},
+        )
+        assert outcome.output.startswith("ERROR")
+        await db.refresh(approval)
+        assert approval.status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_decide_approval_is_offered_only_to_the_assistant() -> None:
+    lead = _agent(is_team_lead=True)
+    lead.is_tenant_assistant = False
+    assert "decide_approval" not in [
+        t.name
+        for t in offered_tools(lead, assigned_skills=[], active_skills=[], mcp_tools=MCP_TOOLS)
+    ]
+    lead.is_tenant_assistant = True
+    assert "decide_approval" in [
+        t.name
+        for t in offered_tools(lead, assigned_skills=[], active_skills=[], mcp_tools=MCP_TOOLS)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_decide_approval_dispatch_is_refused_for_a_non_assistant_agent(
+    app_session: Any,
+) -> None:
+    """Withholding the tool from the offer list only hides it -- the dispatch
+    has to refuse it too, or any agent that guesses the name could decide."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        agent, task = await _dept_agent_task(db, tenant, is_team_lead=True)
+        approval = await _pending_approval(db, tenant, department_id=task.department_id)
+        outcome = await _decide(
+            db, tenant, agent, task, {"approval_id": str(approval.id), "decision": "approve"}
+        )
+        assert outcome.output.startswith("ERROR")
+        assert "Assistant" in outcome.output
