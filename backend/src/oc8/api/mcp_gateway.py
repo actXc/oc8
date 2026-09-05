@@ -527,9 +527,6 @@ async def _call_tool(
     value_spec = cfg.get("value_spec") if isinstance(cfg.get("value_spec"), dict) else None
     focus_spec = cfg.get("focus_spec") if isinstance(cfg.get("focus_spec"), dict) else None
     outward_tools = cfg.get("outward_tools") if isinstance(cfg.get("outward_tools"), list) else None
-    outward_skip_spec = (
-        cfg.get("outward_skip_spec") if isinstance(cfg.get("outward_skip_spec"), dict) else None
-    )
     scopes = _manifest_scopes(conn)
     if conn is not None and scopes is None:
         warn_unclassified_connection(conn.id, conn.name)
@@ -900,7 +897,7 @@ async def _call_tool(
     # Before the call, never after: the point is that the recipient is not
     # reached a second time, and a check that ran afterwards would only be able
     # to report it.
-    target = outward_target(tc.name, tc.arguments, focus_spec, outward_tools, outward_skip_spec)
+    target = outward_target(tc.name, tc.arguments, focus_spec, outward_tools)
     if target is not None and run.task_id is not None:
         if await already_delivered(db, tenant_id=run.tenant_id, task_id=run.task_id, target=target):
             return _tool_result(REFUSAL.format(target=target), is_error=True)

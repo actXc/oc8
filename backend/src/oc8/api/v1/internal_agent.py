@@ -545,9 +545,6 @@ async def tool(
     value_spec = cfg.get("value_spec") if isinstance(cfg.get("value_spec"), dict) else None
     focus_spec = cfg.get("focus_spec") if isinstance(cfg.get("focus_spec"), dict) else None
     outward_tools = cfg.get("outward_tools") if isinstance(cfg.get("outward_tools"), list) else None
-    outward_skip_spec = (
-        cfg.get("outward_skip_spec") if isinstance(cfg.get("outward_skip_spec"), dict) else None
-    )
     scopes = _manifest_scopes(conn)
 
     active_ids = {str(s) for s in run.context.get("active_skill_ids", [])}
@@ -715,7 +712,7 @@ async def tool(
     elif (
         (
             target := outward_target(
-                tc.name, tc.arguments, focus_spec, outward_tools, outward_skip_spec
+                tc.name, tc.arguments, focus_spec, outward_tools
             )
         )
         is not None
