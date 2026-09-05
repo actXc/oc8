@@ -5,8 +5,7 @@ label = "Triage only, no new issues"
 summary = "Updates, comments on and moves existing tickets on its own, but creates no new ones and deletes none."
 recommended = false
 read = true
-write = false
-send = true
+modify = true
 approval_actions = []
 approval_eur = ""
 # For a bot that works down an existing backlog (triage, reassignment,

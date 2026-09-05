@@ -5,8 +5,7 @@ label = "With approval, never deletes"
 summary = "Like \"Assist with approval\", except deleting is not possible at all."
 recommended = false
 read = true
-write = false
-send = true
+modify = true
 approval_actions = ["send"]
 approval_eur = ""
 # The difference from `assist_with_approval` is "never" versus "only with a

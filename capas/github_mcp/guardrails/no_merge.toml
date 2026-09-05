@@ -5,8 +5,7 @@ label = "Autonomous, merging needs approval"
 summary = "Opens branches, commits, PRs, reviews and comments on its own; only merging a pull request needs a human. Deleting a file is not covered."
 recommended = false
 read = true
-write = false
-send = true
+modify = true
 # A preset's `approval_actions` is restricted to the RIGHTS (read/write/send)
 # and cannot name one specific tool -- so gating merge_pull_request alone,
 # with everything else free, is not expressible as a preset at all. This is

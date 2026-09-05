@@ -5,8 +5,7 @@ label = "Autonomous with a limit"
 summary = "Creates and updates records on its own; a deal worth €5,000 or more needs approval. Changing the schema itself (custom properties) is not included, since a schema change carries no deal amount the threshold could ever catch."
 recommended = false
 read = true
-write = false
-send = true
+modify = true
 approval_actions = []
 approval_eur = 5000
 # Everything except the two property/schema tools. A schema change carries

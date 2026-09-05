@@ -136,6 +136,7 @@ def _to_dto(c: m.McpConnection) -> McpConnectionDTO:
                 use_case=g.use_case,
                 read=g.read,
                 write=g.modify,
+                send=g.modify,
                 approval_eur=g.approval_eur,
                 approval_actions=sorted(g.approval_actions),
                 only=list(g.only),

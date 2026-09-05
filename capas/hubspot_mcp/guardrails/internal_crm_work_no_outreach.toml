@@ -5,8 +5,7 @@ label = "Internal CRM work, no outreach"
 summary = "Maintains records, properties and associations on its own, but never logs an engagement -- no note, call, email or meeting is ever created or edited on a record."
 recommended = false
 read = true
-write = false
-send = true
+modify = true
 approval_actions = []
 approval_eur = ""
 # `hubspot-create-engagement`/`hubspot-update-engagement` are this

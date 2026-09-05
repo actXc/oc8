@@ -5,8 +5,7 @@ label = "Internal only"
 summary = "Maintains tickets on its own, but never comments -- nobody gets notified by the agent."
 recommended = false
 read = true
-write = false
-send = true
+modify = true
 approval_actions = []
 approval_eur = ""
 # `jira_add_comment`/`jira_edit_comment` are this connection's outward tools
