@@ -24,9 +24,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from oc8 import models as m
 from oc8.agent.components import COMPONENT_CATALOG
-from oc8.approvals import raise_approval
+from oc8.approvals import (
+    AlreadyDecided,
+    NotYourDepartment,
+    NotYourSayAtAll,
+    UnknownDecision,
+    UnknownOption,
+    decide_approval,
+    raise_approval,
+)
+from oc8.approvals.repo import load_for_actor
 from oc8.audit import append_event
 from oc8.authz.pdp import Decision, Effect
+from oc8.authz.scope import AgentActor, scope_for_member
 from oc8.capas.discovery import find_plugin
 from oc8.knowledge.retrieval import retrieve_kb_context
 from oc8.memory.router import retrieve_context, write_memory
@@ -328,6 +338,39 @@ PROPOSE_CHANGE = NeutralTool(
     },
 )
 
+DECIDE_APPROVAL = NeutralTool(
+    name="decide_approval",
+    description=(
+        "Approve or reject a pending approval request on behalf of the human "
+        "you are talking to. You may only decide approvals that human could "
+        "decide themselves -- this is checked the same way it would be if "
+        "they clicked Approve/Reject in oc8 directly, so a call outside "
+        "their own reach is refused, not silently narrowed."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "approval_id": {
+                "type": "string",
+                "description": "The uuid of the approval request, as seen in context.",
+            },
+            "decision": {"type": "string", "enum": ["approve", "reject"]},
+            "reason": {
+                "type": "string",
+                "description": "Optional: why you (on the human's behalf) decided this way.",
+            },
+            "option": {
+                "type": "string",
+                "description": (
+                    "Optional: for a 'decision' approval that offers named options, "
+                    "which one was chosen."
+                ),
+            },
+        },
+        "required": ["approval_id", "decision"],
+    },
+)
+
 CONTROL_TOOL_SCHEMAS: dict[str, NeutralTool] = {
     MEMORY_WRITE.name: MEMORY_WRITE,
     ASK_USER.name: ASK_USER,
@@ -337,6 +380,7 @@ CONTROL_TOOL_SCHEMAS: dict[str, NeutralTool] = {
     SEARCH_MEMORY.name: SEARCH_MEMORY,
     RENDER_COMPONENT.name: RENDER_COMPONENT,
     PROPOSE_CHANGE.name: PROPOSE_CHANGE,
+    DECIDE_APPROVAL.name: DECIDE_APPROVAL,
     READ_REFERENCE_FILE.name: READ_REFERENCE_FILE,
 }
 CONTROL_TOOL_NAMES: frozenset[str] = frozenset(CONTROL_TOOL_SCHEMAS)
@@ -401,6 +445,9 @@ def offered_tools(
         # refuses the call for anyone else regardless -- this just keeps the
         # tool out of a list where it could never succeed.
         offered.append(PROPOSE_CHANGE)
+        # Same reasoning: only the Assistant sits in a 1:1 chat with a human
+        # who might be looking at their own pending approvals right now.
+        offered.append(DECIDE_APPROVAL)
     if has_knowledge:
         offered.append(SEARCH_KNOWLEDGE)
     # Same reasoning as has_knowledge above: offering read_reference_file to
@@ -449,6 +496,26 @@ class ControlOutcome:
     rendered_component: dict[str, Any] | None = None
 
 
+async def _member_behind_task(
+    db: AsyncSession, *, tenant_id: uuid.UUID, task: m.Task
+) -> m.OrgMember | None:
+    """The human whose chat session opened `task`, or None if there isn't one
+    (a delegated or scheduled run with nobody behind it).
+
+    Shared by `_member_may_reach_department` (cross-department delegation) and
+    `_resolve_agent_actor` (the Copilot write-tool seam) -- both need exactly
+    this lookup and neither should re-implement it.
+    """
+    session = await db.scalar(
+        select(m.ChatSession).where(
+            m.ChatSession.tenant_id == tenant_id, m.ChatSession.task_id == task.id
+        )
+    )
+    if session is None:
+        return None
+    return await db.get(m.OrgMember, session.member_id)
+
+
 async def _member_may_reach_department(
     db: AsyncSession,
     *,
@@ -469,32 +536,32 @@ async def _member_may_reach_department(
     Returns False (fail closed) when the task has no chat session at all,
     e.g. a delegated or scheduled run with nobody behind it. "Nobody to
     check" is not "anybody may".
-
-    The answer comes from `authz.scope.scope_for_member` -- the same
-    `DepartmentScope` every HTTP route and the messenger door already resolve --
-    rather than from a fourth hand-rolled reading of the seat tables. The
-    hand-rolled one asked "all_departments, or a live seat here?", which is the
-    ROW term alone: `_upsert_member` mints a member with NEITHER, so on a fresh
-    tenant this refused everybody, including the administrator whose reach comes
-    entirely from their role. It only ever worked in the dev tenant because that
-    one member happened to carry `all_departments=True`.
     """
-    session = await db.scalar(
-        select(m.ChatSession).where(
-            m.ChatSession.tenant_id == tenant_id, m.ChatSession.task_id == task.id
-        )
-    )
-    if session is None:
-        return False
-    member = await db.get(m.OrgMember, session.member_id)
+    member = await _member_behind_task(db, tenant_id=tenant_id, task=task)
     if member is None:
         return False
-    from oc8.authz.scope import scope_for_member
-
     scope = await scope_for_member(
         db, member, token_role=await _acting_token_role(db, tenant_id=tenant_id, run_id=run_id)
     )
     return scope.may_view(department_id)
+
+
+async def _resolve_agent_actor(
+    db: AsyncSession, *, tenant_id: uuid.UUID, task: m.Task, run_id: uuid.UUID | None
+) -> AgentActor | None:
+    """The `AgentActor` a write-capable Copilot tool acts through -- the human
+    behind this chat-driven task, resolved to the SAME `DepartmentScope` any
+    other door would resolve for them. Returns None (fail closed) when there
+    is no chat session behind the task, or no resolvable member -- "nobody to
+    act for" is not "act unrestricted".
+    """
+    member = await _member_behind_task(db, tenant_id=tenant_id, task=task)
+    if member is None:
+        return None
+    scope = await scope_for_member(
+        db, member, token_role=await _acting_token_role(db, tenant_id=tenant_id, run_id=run_id)
+    )
+    return AgentActor(member=member, scope=scope)
 
 
 async def _acting_token_role(
@@ -1091,6 +1158,65 @@ async def execute_control_tool(
                 f"Vorschlag erstellt (Proposal {proposal.id}). Ein Mensch muss ihn "
                 "in oc8 bestätigen, bevor er wirksam wird."
             )
+        )
+
+    if tc.name == DECIDE_APPROVAL.name:
+        if not agent.is_tenant_assistant:
+            return ControlOutcome(output="ERROR: only the oc8 Assistant can decide approvals")
+        approval_id_raw = str(tc.arguments.get("approval_id", "")).strip()
+        verdict = str(tc.arguments.get("decision", "")).strip()
+        if not approval_id_raw or verdict not in ("approve", "reject"):
+            return ControlOutcome(
+                output="ERROR: decide_approval requires approval_id and decision (approve/reject)"
+            )
+        try:
+            approval_id = uuid.UUID(approval_id_raw)
+        except ValueError:
+            return ControlOutcome(output="ERROR: approval_id is not a valid id")
+
+        # Named agent_actor, not actor: this function's earlier PROPOSE_CHANGE
+        # branch already binds `actor` to a `Principal` in this same function
+        # scope (there is no per-if scoping in Python) -- reusing that name
+        # here for an unrelated `AgentActor | None` is exactly the kind of
+        # same-name-different-type hazard this file's `verdict` naming already
+        # guards against for `Decision`, so it gets its own name too.
+        agent_actor = await _resolve_agent_actor(db, tenant_id=tenant_id, task=task, run_id=run_id)
+        if agent_actor is None:
+            return ControlOutcome(output="ERROR: could not resolve who you are acting for")
+
+        # Named approval_row, not approval: REQUEST_DECISION's branch above
+        # already binds `approval` (non-optional) to raise_approval()'s
+        # result in this same function scope; load_for_actor's Optional
+        # return is a different type for the same name.
+        approval_row = await load_for_actor(db, approval_id, actor=agent_actor)
+        if approval_row is None:
+            return ControlOutcome(output="ERROR: approval not found")
+
+        reason = tc.arguments.get("reason")
+        option = tc.arguments.get("option")
+        try:
+            result = await decide_approval(
+                db,
+                approval_row,
+                decision=verdict,
+                tenant_id=tenant_id,
+                actor=agent_actor,
+                reason=str(reason) if reason is not None else None,
+                option=str(option) if option is not None else None,
+            )
+        except NotYourDepartment:
+            return ControlOutcome(output="ERROR: approval not found")
+        except NotYourSayAtAll as exc:
+            return ControlOutcome(output=f"ERROR: {exc}")
+        except UnknownDecision:
+            return ControlOutcome(output="ERROR: unknown decision")
+        except AlreadyDecided as exc:
+            return ControlOutcome(output=f"ERROR: {exc}")
+        except UnknownOption as exc:
+            return ControlOutcome(output=f"ERROR: {exc}")
+
+        return ControlOutcome(
+            output=f"Approval {approval_row.id} {verdict}d.", pending_run=result.resumed_run_id
         )
 
     if tc.name == RENDER_COMPONENT.name:
