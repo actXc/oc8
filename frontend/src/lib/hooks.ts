@@ -425,6 +425,11 @@ export const useDepartmentBoard = (id: string, limit = 25) =>
 
 export interface DepartmentToolsDTO {
   tools: Record<string, Record<string, unknown>>;
+  //: tool key -> count of agents in this department whose narrowing
+  //: overrides that key -- see backend departments.py's `_deviation_counts`.
+  deviationCounts: Record<string, number>;
+  //: total agents in the department, the "M" half of "N of M".
+  agentCount: number;
 }
 
 export function useDepartmentTools(id: string) {

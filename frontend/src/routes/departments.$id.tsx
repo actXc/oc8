@@ -21,12 +21,11 @@ import { toast } from "sonner";
 import { Panel, StatusPill } from "@/components/app-shell";
 import { NewAgentDialog } from "@/components/new-agent-dialog";
 import { MemoryEditor } from "@/components/memory-editor";
-import { PermissionsPanel } from "@/components/permissions-panel";
 import { KnowledgeAssignment } from "@/components/knowledge-assignment";
 import { ComponentGrantPanel } from "@/components/component-grant-panel";
-import { GuardrailPresetPicker, type GuardrailValue } from "@/components/guardrail-preset-picker";
+import type { GuardrailValue } from "@/components/guardrail-preset-picker";
+import { ToolGuardrailTable, type ToolGuardrailRow } from "@/components/tool-guardrail-table";
 import { StatCard } from "@/components/stat-card";
-import { type PolicyMap } from "@/lib/permissions";
 import { contractsFor, type IntakeContract } from "@/lib/collaboration";
 import { formatMs } from "@/lib/format";
 import {
@@ -44,7 +43,6 @@ import {
   useUpdateDepartment,
   type DepartmentContractsDTO,
   type IntakeDTO,
-  type McpConnection,
 } from "@/lib/hooks";
 import {
   AlertTriangle,
@@ -80,69 +78,6 @@ const nowTime = () => {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 
-// The control-plane frame uses the policy shape consumed by the runtime
-// (`read`/`write`/`send`/`approval_eur`).  Keep the UI's grouped permission
-// fields at this boundary only, so a saved department frame is enforceable.
-function fromDepartmentFrame(tools: Record<string, Record<string, unknown>>): PolicyMap {
-  return Object.fromEntries(
-    Object.entries(tools).map(([id, tool]) => {
-      const legacyPerms = (tool.perms ?? {}) as Record<string, unknown>;
-      return [
-        id,
-        {
-          enabled: Boolean(tool.enabled),
-          perms: {
-            read: Boolean(tool.read ?? legacyPerms.read),
-            write: Boolean(tool.write ?? legacyPerms.write),
-            send: Boolean(tool.send ?? legacyPerms.send),
-          },
-          approvalEUR: (tool.approval_eur ?? tool.approvalEUR ?? null) as number | null,
-          defaultConnectionId: (tool.default_connection_id ?? tool.defaultConnectionId ?? null) as
-            | string
-            | null,
-        },
-      ];
-    }),
-  );
-}
-
-/** Rebuild the frame, PRESERVING every field this panel does not model.
- *
- * `PUT /departments/{id}/tools` is a full REPLACE, and `PermissionsPanel`
- * re-emits the WHOLE map on every toggle -- so anything this function forgets
- * is deleted from every connection at once, not just the edited one.
- *
- * That is not hypothetical. This used to emit a fixed five-key object, which
- * silently dropped `only` (a preset's tool allowlist) and `approval_actions`.
- * `autonomous_with_limit` is safe precisely because it withholds
- * `delete_record`, whose deletions carry no amount and so can never meet its
- * EUR 1000 threshold -- so one unrelated click in the old panel re-opened
- * unattended deletion under a name promising a limit.
- *
- * Spreading `previous` rather than naming the two missing keys is the point:
- * the next field added to a tool policy survives this function without anybody
- * remembering it exists.
- */
-export function toDepartmentFrame(
-  policy: PolicyMap,
-  previous: Record<string, Record<string, unknown>> = {},
-): Record<string, Record<string, unknown>> {
-  return Object.fromEntries(
-    Object.entries(policy).map(([id, tool]) => [
-      id,
-      {
-        ...(previous[id] ?? {}),
-        enabled: tool.enabled,
-        read: tool.perms.read,
-        write: tool.perms.write,
-        send: tool.perms.send,
-        approval_eur: tool.approvalEUR,
-        default_connection_id: tool.defaultConnectionId ?? null,
-      },
-    ]),
-  );
-}
-
 function DepartmentDetail() {
   const t = useT();
   const { id } = Route.useParams();
@@ -164,9 +99,7 @@ function DepartmentDetail() {
   // KB grants for this department, not a paginated list view.
   const { data: allBasesPage } = useKnowledgeBases({ pageSize: 200 });
   const allBases = allBasesPage?.items ?? [];
-  const [tab, setTab] = useState<"overview" | "perms" | "guardrails" | "collab" | "settings">(
-    "overview",
-  );
+  const [tab, setTab] = useState<"overview" | "guardrails" | "collab" | "settings">("overview");
   const [hireOpen, setHireOpen] = useState(false);
 
   const taskState = board?.tasks ?? [];
@@ -196,14 +129,6 @@ function DepartmentDetail() {
     [members],
   );
 
-  const { data: persistedTools } = useDepartmentTools(id);
-  const setDepartmentTools = useSetDepartmentTools(id);
-  // The real saved frame is the only source; a fresh department starts empty
-  // rather than inheriting a mock vendor policy.
-  const effectiveDeptPolicy = useMemo<PolicyMap>(
-    () => (persistedTools ? fromDepartmentFrame(persistedTools.tools) : {}),
-    [persistedTools],
-  );
   // Real grants (from useKnowledgeBases -> linkedDepartments), not mock state.
   const deptKbs = useMemo(
     () => allBases.filter((kb) => kb.linkedDepartments.includes(id)).map((kb) => kb.id),
@@ -343,10 +268,6 @@ function DepartmentDetail() {
       <div className="flex gap-1 overflow-x-auto border-b border-border">
         {[
           { id: "overview" as const, label: t("Overview", "Übersicht") },
-          {
-            id: "perms" as const,
-            label: t("Integrations", "Integrationen"),
-          },
           { id: "guardrails" as const, label: t("Guardrails", "Guardrails") },
           { id: "collab" as const, label: t("Collaboration", "Zusammenarbeit") },
           { id: "settings" as const, label: t("Settings", "Einstellungen") },
@@ -366,27 +287,9 @@ function DepartmentDetail() {
         ))}
       </div>
 
-      {tab === "perms" && (
-        <div className="space-y-6">
-          <PermissionsPanel
-            mode="department"
-            dept={dept}
-            deptPolicy={effectiveDeptPolicy}
-            members={members}
-            agentOverrides={{}}
-            onDepartmentPolicyChange={(policy) =>
-              setDepartmentTools.mutate(toDepartmentFrame(policy, persistedTools?.tools ?? {}), {
-                onSuccess: () => toast.success("MCP permissions saved"),
-                onError: () => toast.error("Could not save MCP permissions"),
-              })
-            }
-          />
-        </div>
-      )}
-
       {tab === "guardrails" && (
         <div className="space-y-6">
-          <DepartmentToolsPanel departmentId={dept.id} />
+          <DepartmentGuardrailsPanel departmentId={dept.id} />
         </div>
       )}
 
@@ -662,20 +565,6 @@ export function DepartmentOverviewStats({ departmentId }: { departmentId: string
   );
 }
 
-/** Per-connection guardrail editor for the tools this department has already
- * enabled -- so an operator can apply (or change) a plugin's named preset
- * on a connection after onboarding, not only during it. Deliberately
- * consumes the SAME `GuardrailPresetPicker` the onboarding wizard's
- * `GuardrailsStep` renders (`@/components/guardrail-preset-picker`), not a
- * reimplementation of it: a preset must mean the same thing wherever it's
- * applied.
- *
- * `PUT /departments/{id}/tools` REPLACES the whole `tools` dict server-side
- * -- it does not merge/patch. `save` below spreads the department's
- * existing `existing.tools` into the outgoing body before overwriting the
- * edited connection, the same guard `GuardrailsStep.save` uses; dropping
- * that spread would silently delete every other tool already granted to
- * this department. */
 /** Department-level operational settings -- currently just prompt caching,
  * but its own small independently-fetching component the way
  * DepartmentToolsPanel is, rather than folded into DepartmentDetail's
@@ -869,30 +758,20 @@ function DeleteDepartmentModal({
   );
 }
 
-export function DepartmentToolsPanel({ departmentId }: { departmentId: string }) {
+export function DepartmentGuardrailsPanel({ departmentId }: { departmentId: string }) {
   const t = useT();
-  const {
-    data: existing,
-    isLoading: toolsLoading,
-    isError: toolsErrored,
-  } = useDepartmentTools(departmentId);
+  const { data: existing, isLoading, isError } = useDepartmentTools(departmentId);
   const { data: connections = [] } = useMcpConnections();
   const setTools = useSetDepartmentTools(departmentId);
-  // Local edits per connection, keyed by connection id -- not fed back from
-  // `existing` on every render, so a keystroke or preset click doesn't get
-  // clobbered by a refetch. `valueFor` falls back to the persisted frame
-  // (or sane defaults) until the operator actually touches a connection.
-  const [edited, setEdited] = useState<Record<string, GuardrailValue>>({});
 
-  if (toolsLoading) {
+  if (isLoading) {
     return (
       <Panel className="p-5 text-sm text-muted-foreground">
         {t("Loading guardrails…", "Guardrails werden geladen …")}
       </Panel>
     );
   }
-
-  if (toolsErrored) {
+  if (isError) {
     return (
       <Panel className="p-5 text-sm text-destructive">
         {t(
@@ -903,107 +782,87 @@ export function DepartmentToolsPanel({ departmentId }: { departmentId: string })
     );
   }
 
-  // Only tools already enabled for this department -- enabling a connection
-  // in the first place stays the job of the panel above; this one is about
-  // how far an already-granted tool may go on its own. `existing.tools` is
-  // keyed by the connection's NAME, the same key the runtime reads it by
-  // (`agent/engine.py`, `api/mcp_gateway.py`) -- not its database id.
-  const attached = connections.filter((c) => Boolean(existing?.tools?.[c.name]?.enabled));
+  const tools = existing?.tools ?? {};
+  const deviationCounts = existing?.deviationCounts ?? {};
+  const agentCount = existing?.agentCount ?? 0;
+  const toolKeys = Object.keys(tools);
+  const connectionByName = new Map(connections.map((c) => [c.name, c] as const));
+  const addableNames = connections.map((c) => c.name).filter((n) => !toolKeys.includes(n));
 
-  function valueFor(connection: McpConnection): GuardrailValue {
-    if (edited[connection.id]) return edited[connection.id];
-    const raw = (existing?.tools?.[connection.name] ?? {}) as Record<string, unknown>;
+  function toGuardrailValue(key: string): GuardrailValue {
+    const raw = (tools[key] ?? {}) as Record<string, unknown>;
     return {
       read: raw.read !== undefined ? Boolean(raw.read) : true,
       modify: Boolean(raw.modify),
-      approvalActions: Array.isArray(raw.approval_actions)
-        ? (raw.approval_actions as string[])
-        : [],
+      approvalActions: Array.isArray(raw.approval_actions) ? (raw.approval_actions as string[]) : [],
       approvalEur: typeof raw.approval_eur === "number" ? (raw.approval_eur as number) : null,
       only: Array.isArray(raw.only) ? (raw.only as string[]) : [],
     };
   }
 
-  function save(connection: McpConnection) {
-    const value = valueFor(connection);
+  function persistOne(key: string, next: GuardrailValue) {
     const merged = {
-      ...(existing?.tools ?? {}),
-      [connection.name]: {
+      ...tools,
+      [key]: {
         enabled: true,
-        read: value.read,
-        modify: value.modify,
-        approval_eur: value.approvalEur,
-        approval_actions: value.approvalActions,
-        // Not decoration -- see `GuardrailPreset`/`GuardrailValue` in
-        // `@/components/guardrail-preset-picker`. Dropping this would
-        // silently turn a preset like "Autonomous with a limit" into
-        // read+modify above a euro threshold with EVERY tool reachable,
-        // including `delete_record`, which carries no amount and so can
-        // never meet that threshold -- the unattended-deletion
-        // configuration, under a name promising a limit.
-        only: value.only,
+        read: next.read,
+        modify: next.modify,
+        approval_eur: next.approvalEur,
+        approval_actions: next.approvalActions,
+        only: next.only,
       },
     };
     setTools.mutate(merged, {
-      onSuccess: () =>
-        toast.success(t("Guardrails saved", "Guardrails gespeichert"), {
-          description: connection.name,
-        }),
-      onError: () =>
-        toast.error(t("Could not save guardrails", "Guardrails konnten nicht gespeichert werden"), {
-          description: connection.name,
-        }),
+      onSuccess: () => toast.success(t("Guardrails saved", "Guardrails gespeichert"), { description: key }),
+      onError: () => toast.error(t("Could not save guardrails", "Guardrails konnten nicht gespeichert werden")),
     });
   }
 
+  function addTool(name: string, policy: GuardrailValue | null) {
+    persistOne(name, policy ?? { read: true, modify: false, approvalActions: [], approvalEur: null, only: [] });
+  }
+
+  const rows: ToolGuardrailRow[] = toolKeys
+    .filter((k) => tools[k]?.enabled)
+    .map((key) => ({
+      toolKey: key,
+      connection: connectionByName.get(key),
+      ceilingPolicy: null,
+      ownValue: toGuardrailValue(key),
+      status: null,
+      deviationCount: { count: deviationCounts[key] ?? 0, total: agentCount },
+    }));
+
   return (
     <Panel className="p-5">
-      <div className="mb-3">
-        <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
-          {t("Guardrails", "Guardrails")}
-        </div>
-        <h3 className="mt-0.5 font-serif text-lg">{t("Tool guardrails", "Tool-Guardrails")}</h3>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {t(
-            "How far may each connected tool go on its own -- apply a plugin's named preset, or configure it yourself.",
-            "Wie weit darf jedes verbundene Tool selbstständig gehen -- ein benanntes Preset des Plugins anwenden oder selbst konfigurieren.",
-          )}
-        </p>
-      </div>
-      {attached.length === 0 ? (
-        <p className="rounded-md border border-dashed border-border/70 bg-background/30 p-4 text-center text-xs text-muted-foreground">
-          {t(
-            "No tools enabled yet. Enable one above to configure its guardrails here.",
-            "Noch keine Tools aktiviert. Ein Tool oben aktivieren, um hier seine Guardrails zu konfigurieren.",
-          )}
+      <ConfigSectionHeader hint={t("tool access and guardrails", "Tool-Zugriff und Guardrails")} title={t("Guardrails", "Guardrails")} />
+      {rows.length === 0 ? (
+        <p className="mt-3 rounded-md border border-dashed border-border/70 bg-background/30 p-4 text-center text-xs text-muted-foreground">
+          {t("No tools enabled yet.", "Noch keine Tools aktiviert.")}
         </p>
       ) : (
-        <div className="space-y-5">
-          {attached.map((connection) => (
-            <div key={connection.id} className="rounded-md border border-border p-3">
-              <div className="mb-2 text-sm font-medium text-foreground">{connection.name}</div>
-              <GuardrailPresetPicker
-                presets={connection.guardrailPresets}
-                guardrailLibrary={connection.guardrailLibrary}
-                hasValueSpec={connection.hasValueSpec}
-                value={valueFor(connection)}
-                onChange={(next) => setEdited((prev) => ({ ...prev, [connection.id]: next }))}
-              />
-              <button
-                type="button"
-                onClick={() => save(connection)}
-                disabled={setTools.isPending}
-                className="mt-3 w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:brightness-110 disabled:opacity-60"
-              >
-                {setTools.isPending
-                  ? t("Saving…", "Wird gespeichert …")
-                  : t("Save guardrails", "Guardrails speichern")}
-              </button>
-            </div>
-          ))}
+        <div className="mt-3">
+          <ToolGuardrailTable
+            level="department"
+            rows={rows}
+            addableNames={addableNames}
+            connections={connections}
+            onSave={persistOne}
+            onAdd={addTool}
+            saving={setTools.isPending}
+          />
         </div>
       )}
     </Panel>
+  );
+}
+
+function ConfigSectionHeader({ hint, title }: { hint: string; title: string }) {
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-widest text-muted-foreground">{hint}</div>
+      <h3 className="mt-0.5 font-serif text-lg">{title}</h3>
+    </div>
   );
 }
 
