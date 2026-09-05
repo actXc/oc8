@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from collections.abc import Sequence
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -58,6 +59,12 @@ router = APIRouter()
 
 class DepartmentToolsDTO(CamelModel):
     tools: dict[str, dict[str, Any]] = {}
+    #: tool key -> count of agents in this department whose
+    #: narrowing_overridden_keys contains that key -- the frontend's "N of M
+    #: agents deviate" display. Computed fresh on every read; not stored.
+    deviation_counts: dict[str, int] = {}
+    #: Total agents in the department -- the "M" half of "N of M".
+    agent_count: int = 0
 
 
 class ToolPolicyWriteDTO(CamelModel):
@@ -202,6 +209,15 @@ async def create_department(
     db.add(dept)
     await db.flush()
     return department_to_dto(dept)
+
+
+def _deviation_counts(tools: dict[str, Any], agents: Sequence[m.Agent]) -> dict[str, int]:
+    counts: dict[str, int] = {key: 0 for key in tools}
+    for agent in agents:
+        for key in agent.narrowing_overridden_keys or []:
+            if key in counts:
+                counts[key] += 1
+    return counts
 
 
 async def _get_department(db: DbSession, dept_id: uuid.UUID) -> m.Department:
@@ -391,7 +407,15 @@ async def get_department_tools(
     dept = await _visible_department_or_404(
         db, actor=actor, tenant_wide=tenant_wide, dept_id=dept_id
     )
-    return DepartmentToolsDTO(tools=dict((dept.frame or {}).get("tools", {})))
+    tools = dict((dept.frame or {}).get("tools", {}))
+    agents = (
+        await db.execute(select(m.Agent).where(m.Agent.department_id == dept_id))
+    ).scalars().all()
+    return DepartmentToolsDTO(
+        tools=tools,
+        deviation_counts=_deviation_counts(tools, agents),
+        agent_count=len(agents),
+    )
 
 
 @router.put(
@@ -485,10 +509,10 @@ async def set_department_tools(
         if bool(policy_data.get("enabled", False))
         != bool(old_tools.get(key, {}).get("enabled", False))
     ]
+    agents = (
+        await db.execute(select(m.Agent).where(m.Agent.department_id == dept_id))
+    ).scalars().all()
     if changed_keys:
-        agents = (
-            await db.execute(select(m.Agent).where(m.Agent.department_id == dept_id))
-        ).scalars().all()
         for key in changed_keys:
             # The full new frame policy, not just `enabled` -- a sparse
             # `{"enabled": ...}` entry still counts as a NON-None narrowing
@@ -510,7 +534,11 @@ async def set_department_tools(
                 agent.narrowing = narrowing
 
     await db.flush()
-    return DepartmentToolsDTO(tools=frame["tools"])
+    return DepartmentToolsDTO(
+        tools=frame["tools"],
+        deviation_counts=_deviation_counts(frame["tools"], agents),
+        agent_count=len(agents),
+    )
 
 
 @router.get(

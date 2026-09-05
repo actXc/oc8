@@ -109,7 +109,9 @@ async def test_well_formed_payload_is_accepted_and_echoed_back(
                 "only": ["search_records", "post_message"],
                 "default_connection_id": None,
             }
-        }
+        },
+        "deviationCounts": {"odoo": 0},
+        "agentCount": 0,
     }
     async with _http() as http:
         h = _headers(tenant, "org_admin")
@@ -406,3 +408,62 @@ async def test_setting_only_for_a_connection_with_a_value_spec_is_accepted(
         resp = await http.put(f"/api/v1/departments/{dept_id}/tools", json=payload, headers=h)
         assert resp.status_code == 200, resp.text
         assert resp.json()["tools"]["odoo"]["only"] == ["search_records"]
+
+
+# ---------------------------- deviation_counts and agent_count (Task 6)
+
+
+async def test_get_department_tools_reports_deviation_counts(
+    app_session: AppSessionFactory,
+) -> None:
+    tenant, dept_id = await _seed_department(app_session)
+    async with app_session(tenant) as db:
+        dept = await db.get(m.Department, dept_id)
+        dept.frame = {"tools": {"github": {"enabled": True, "read": True, "modify": True}}}
+        agent_a = m.Agent(
+            tenant_id=tenant, department_id=dept_id, name="A",
+            narrowing_overridden_keys=["github"],
+        )
+        agent_b = m.Agent(
+            tenant_id=tenant, department_id=dept_id, name="B",
+            narrowing_overridden_keys=[],
+        )
+        agent_c = m.Agent(
+            tenant_id=tenant, department_id=dept_id, name="C",
+            narrowing_overridden_keys=["github"],
+        )
+        db.add_all([agent_a, agent_b, agent_c])
+        await db.flush()
+
+    async with _http() as http:
+        h = _headers(tenant, "org_admin")
+        resp = await http.get(f"/api/v1/departments/{dept_id}/tools", headers=h)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["deviationCounts"]["github"] == 2
+        assert body["agentCount"] == 3
+
+
+async def test_put_department_tools_also_reports_deviation_counts(
+    app_session: AppSessionFactory,
+) -> None:
+    """The write endpoint returns the same DTO shape as the read endpoint --
+    a caller acting on the PUT response directly must not see stale zeros
+    for a department that already has agents with real overrides."""
+    tenant, dept_id = await _seed_department(app_session)
+    async with app_session(tenant) as db:
+        agent = m.Agent(
+            tenant_id=tenant, department_id=dept_id, name="A",
+            narrowing_overridden_keys=["odoo"],
+        )
+        db.add(agent)
+        await db.flush()
+
+    payload = {"tools": {"odoo": {"enabled": True, "read": True, "modify": True}}}
+    async with _http() as http:
+        h = _headers(tenant, "org_admin")
+        resp = await http.put(f"/api/v1/departments/{dept_id}/tools", json=payload, headers=h)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["deviationCounts"]["odoo"] == 1
+        assert body["agentCount"] == 1
