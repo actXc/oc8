@@ -115,6 +115,7 @@ def _to_dto(c: m.McpConnection) -> McpConnectionDTO:
                 recommended=p.recommended,
                 read=p.read,
                 write=p.modify,
+                send=p.modify,
                 approval_actions=p.approval_actions,
                 approval_eur=p.approval_eur,
                 only=p.only,
