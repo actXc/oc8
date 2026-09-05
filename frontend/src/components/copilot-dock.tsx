@@ -18,6 +18,7 @@ import {
   useChatMessages,
   useSendChatMessage,
 } from "@/lib/hooks-chat";
+import { ChatSessionPicker } from "@/components/chat-window";
 
 // Set by DoneStep right before the full-page navigation into "/" that follows
 // onboarding — sessionStorage (not React state) because that navigation
@@ -157,14 +158,13 @@ function PendingProposals({ de }: { de: boolean }) {
 // are plain `useQuery` calls with no `enabled` gate, so they fire on mount
 // regardless of what a later `if (!mayUseCopilot) return null` decides --
 // every signed-in user would otherwise cause a GET /assistant + GET
-// /chat/sessions (a 403 for anyone without copilot:manage) on every page
+// /chat/sessions (a 403 for anyone without copilot:use) on every page
 // load, permitted or not.
 export function CopilotDock() {
   const can = useCan();
-  // Only org_admin holds copilot:manage (a prepared proposal can name any
-  // agent in any department) — everyone else never sees the dock, and now
-  // never causes it to fire a single request either.
-  if (!can("copilot:manage")) return null;
+  // Every human role holds copilot:use by default (see COPILOT_USE's own
+  // docstring) -- this is the door that opens the Copilot to everyone.
+  if (!can("copilot:use")) return null;
   return <CopilotDockPanel />;
 }
 
@@ -301,6 +301,14 @@ function CopilotDockPanel() {
                 {de ? "bereit" : "ready"}
               </div>
             </div>
+            {assistantAgentId && sessions && sessions.length > 0 && (
+              <ChatSessionPicker
+                agentId={assistantAgentId}
+                sessions={sessions}
+                sessionId={sessionId}
+                onSelect={setSessionId}
+              />
+            )}
             <button
               type="button"
               onClick={() => setOpen(false)}
