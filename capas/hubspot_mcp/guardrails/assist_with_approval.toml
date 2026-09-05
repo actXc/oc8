@@ -12,5 +12,5 @@ modify = true
 # permissions screen, as though it did. If a future tool is scoped `write`,
 # these presets deny it until somebody decides otherwise -- the safe
 # direction.
-approval_actions = ["send"]
+approval_actions = ["modify"]
 approval_eur = ""

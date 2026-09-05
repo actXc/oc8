@@ -5,6 +5,6 @@ summary = "Every category is reachable; every action that reaches a person (send
 use_case = "general"
 read = true
 modify = true
-approval_actions = ["send"]
+approval_actions = ["modify"]
 approval_eur = ""
 only = []

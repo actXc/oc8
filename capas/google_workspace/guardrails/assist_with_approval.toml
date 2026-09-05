@@ -6,5 +6,5 @@ summary = "Works alongside you, but nothing goes out without a person approving 
 recommended = true
 read = true
 modify = true
-approval_actions = ["send"]
+approval_actions = ["modify"]
 approval_eur = ""

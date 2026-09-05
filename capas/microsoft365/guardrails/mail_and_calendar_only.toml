@@ -5,7 +5,7 @@ summary = "Restricted to Outlook Mail and Calendar — Files, Teams, Word/Excel/
 use_case = "mail"
 read = true
 modify = true
-approval_actions = ["send"]
+approval_actions = ["modify"]
 approval_eur = ""
 only = [
     "mail_search", "mail_get", "mail_list_folders", "mail_send", "mail_reply", "mail_create_draft",

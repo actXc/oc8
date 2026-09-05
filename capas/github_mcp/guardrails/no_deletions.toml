@@ -6,7 +6,7 @@ summary = "Like \"Assist with approval\", except deleting a file from a reposito
 recommended = false
 read = true
 modify = true
-approval_actions = ["send"]
+approval_actions = ["modify"]
 approval_eur = ""
 # The difference from `assist_with_approval` is "never" versus "only with a
 # human": there, a deletion is merely held for approval and somebody can wave

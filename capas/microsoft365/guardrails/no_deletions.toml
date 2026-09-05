@@ -6,7 +6,7 @@ summary = "Like \"Assist with approval\", except deleting is not possible at all
 recommended = false
 read = true
 modify = true
-approval_actions = ["send"]
+approval_actions = ["modify"]
 approval_eur = ""
 only = [
     "mail_search", "mail_get", "mail_list_folders", "mail_send", "mail_reply", "mail_create_draft", "mail_mark_read",

@@ -5,6 +5,6 @@ summary = "Access to everything; every send (email, calendar invite response) re
 use_case = "general"
 read = true
 modify = true
-approval_actions = ["send"]
+approval_actions = ["modify"]
 approval_eur = ""
 only = []
