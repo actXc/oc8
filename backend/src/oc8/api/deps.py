@@ -279,46 +279,51 @@ def require_permission(permission: str) -> Callable[..., Awaitable[Principal]]:
     return _dep
 
 
-def require_departmental(permission: str) -> Callable[..., Awaitable[HumanActor]]:
-    """Admit a caller who holds `permission` tenant-wide OR in at least one seat.
+def require_departmental(
+    permission: str, *, or_tenant_wide: str | None = None
+) -> Callable[..., Awaitable[HumanActor]]:
+    """Admit a caller who holds `permission` tenant-wide OR in at least one seat
+    OR (when given) `or_tenant_wide` tenant-wide.
 
     The workspace's door, and deliberately a SECOND gate rather than a widening
     of `require_permission`: only the routes that can be reached from a seat go
     looking for one, and the other 110 never load a seat they have no use for.
 
-    Both gates now read the same `Authority` -- once per request, memoised -- so
-    the difference between them is what they do with it and not where they read
-    it from.
+    `or_tenant_wide` exists for exactly one caller today: `chat.py`'s five
+    session routes, which resolve a `HumanActor` (for its `member`/`scope`,
+    used for session OWNERSHIP) via `require_departmental(perm(AGENT, VIEW))`
+    even for a caller who holds no `agent:view` seat anywhere, as long as they
+    hold `copilot:use` tenant-wide -- see `_assistant_visible`. It is boxed in
+    a 1-tuple and read back through a local inside `_dep` rather than closed
+    over directly: `test_every_route_is_governed._closed_over_permission`
+    returns the FIRST string-valued freevar cell it finds on the closure, and
+    Python does not guarantee freevar cell order matches declaration order --
+    an unboxed second string parameter could nondeterministically be picked up
+    instead of `permission`, silently mislabelling which permission a route is
+    pinned on.
 
-    These eight routes therefore pay one SELECT more than they did: the resolver
-    reads the person, and `scope_for_principal` reads them again because it also
-    MINTS and because it reads the SEATS, which the resolver deliberately does
-    not. That is stated rather than optimised away, because the obvious way to
-    remove it costs more than a query: building the scope from the resolver's
-    rows would give this repository two producers of a `DepartmentScope` -- one
-    for this door and one for the messenger door -- and a door and a filter that
-    disagree about which departments somebody sits in is a bug nobody can see.
-    Skipping the resolver when the seat term already admits would make the cost
-    depend on who is calling, which is the kind of cleverness a profile should
-    ask for.
+    Both gates now read the same `Authority`, once per request, memoised -- so
+    the difference between them is what they do with it and not where they
+    read it from.
 
     What it yields is the resolved `HumanActor`, and what it does NOT do is
     narrow anything. The row narrowing belongs to `approvals/repo.py` and
-    `decide_approval`, because a gate can only answer "at all" -- it runs before
-    any row is loaded and has no department to check against. Admitting here and
-    narrowing there is what makes the two empty states of §7 distinguishable: a
-    seat-holder with a quiet queue gets 200 and `[]`, a person with no seat
-    anywhere gets 403 and a sentence telling him to ask an administrator.
+    `decide_approval`, because a gate can only answer "at all" -- it runs
+    before any row is loaded and has no department to check against.
 
-    Do NOT commit in here. `scope_for_principal` does not, on purpose: a commit
-    inside `tenant_session` unbinds `app.tenant_id` for the rest of the request,
-    and the whole route body after this dependency would then silently see no
-    rows at all rather than fail.
+    Do NOT commit in here. `scope_for_principal` does not, on purpose: a
+    commit inside `tenant_session` unbinds `app.tenant_id` for the rest of the
+    request, and the whole route body after this dependency would then
+    silently see no rows at all rather than fail.
     """
     if permission not in ALL_PERMISSIONS:
         raise ValueError(f"unknown permission {permission!r}; add it to oc8.authz.permissions")
+    if or_tenant_wide is not None and or_tenant_wide not in ALL_PERMISSIONS:
+        raise ValueError(f"unknown permission {or_tenant_wide!r}; add it to oc8.authz.permissions")
+    _or_tenant_wide_box = (or_tenant_wide,)
 
     async def _dep(request: Request, principal: CurrentPrincipal, db: DbSession) -> HumanActor:
+        or_tenant_wide = _or_tenant_wide_box[0]
         try:
             # `upsert=True`: the first workspace request is what mints the person,
             # which is what keeps `approval_request.decided_by` from being NULL
@@ -333,29 +338,13 @@ def require_departmental(permission: str) -> Callable[..., Awaitable[HumanActor]
             # gets loosened.
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
-        # Two terms, and neither is redundant. The TENANT-WIDE term is how
-        # `operator`/`org_admin`/`auditor` still reach this route at all;
-        # `holds_anywhere` is the SEAT term and is the only thing a `member` token
-        # -- which holds the empty set -- can be admitted on.
-        #
-        # The tenant-wide term is RESOLVED and no longer `role_has(principal.role,
-        # ...)`, and without that one line this whole slice does not reach the
-        # workspace: an assigned "Freigabe Vertrieb" holding `approval:view` and
-        # `approval:decide` would grant nothing at `GET /approvals` or at
-        # `POST /approvals/{id}/decision`, which are the two doors the seat slice
-        # was built around. It also subtracts, which is the point: a demoted
-        # administrator no longer walks in on a claim in his token.
-        #
-        # The seat term is asked of the SCOPE, and the scope is now the only
-        # thing that can answer it. `Authority` carried a `holds_anywhere` of its
-        # own for one release -- a second implementation of the seat term, with
-        # no call site and therefore no test, sitting behind a docstring calling
-        # itself "the seat term of require_departmental". It is gone: the scope
-        # is what the route body then narrows rows with, so asking one object at
-        # the door and another behind it is how a door and a filter come to
-        # disagree.
         authority = await _authority(request, db, principal)
-        if not (permission in authority.tenant_wide or scope.holds_anywhere(permission)):
+        admitted = (
+            permission in authority.tenant_wide
+            or scope.holds_anywhere(permission)
+            or (or_tenant_wide is not None and or_tenant_wide in authority.tenant_wide)
+        )
+        if not admitted:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"requires permission: {permission}",
