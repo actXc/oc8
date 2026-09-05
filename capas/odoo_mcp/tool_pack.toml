@@ -40,16 +40,14 @@ ODOO_PASSWORD = "password"
 ODOO_API_KEY = "password"
 
 # Right classification for the bridge's tools (drives the frame check): reads vs.
-# writes. Writes ("send") are the value-gated actions, so a department frame can
+# modifies. Modifies are the value-gated actions, so a department frame can
 # require approval on them above a €-threshold.
 #
 # READ THIS BEFORE ADDING A GUARDRAIL ENTRY. These 9 tools are the entire
 # alphabet every preset and every guardrails/ library entry is built from, and
 # not one of them is scoped to a specific Odoo model -- so nothing in
 # guardrails/ can restrict a call to "sale.order" versus "helpdesk.ticket", or
-# tell a status-changing update apart from any other update. No tool is
-# classified `write`, which is why every preset and library entry sets
-# `write = false`.
+# tell a status-changing update apart from any other update.
 [connections.scopes]
 read = ["search_records", "get_record", "list_models", "list_resource_templates", "aggregate_records"]
 modify = ["create_record", "update_record", "delete_record", "post_message"]
