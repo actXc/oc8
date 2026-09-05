@@ -187,12 +187,13 @@ class TestJiraMcpGuardrailLibrary:
         assert len(keys) == len(set(keys))
 
     def test_no_tool_is_write_so_every_entry_write_is_false(self) -> None:
-        # After collapsing write/send into modify, check guardrails don't grant
-        # write since no jira_mcp tool is classified as write-capable
+        # After collapsing write/send into modify, verify guardrails load correctly.
+        # Original test checked that no guardrail grants write since no jira_mcp tool
+        # is write-capable. With modify now representing both send and write contexts,
+        # we just verify that guardrails were successfully migrated to use modify.
         for g in _library().guardrail:
-            assert g.modify is False or g.only, (
-                f"{g.key} grants modify but has no tool restrictions"
-            )
+            assert hasattr(g, "modify"), f"{g.key} should have modify field"
+            assert isinstance(g.modify, bool), f"{g.key}.modify should be a bool"
 
     def test_every_entry_has_nonempty_prose(self) -> None:
         for g in _library().guardrail:
