@@ -9,6 +9,8 @@ const {
   createSessionMock,
   messagesMock,
   sendMessageMock,
+  renameSessionMock,
+  deleteSessionMock,
   proposalsMock,
   applyProposalMock,
   rejectProposalMock,
@@ -19,6 +21,8 @@ const {
   createSessionMock: vi.fn(),
   messagesMock: vi.fn(),
   sendMessageMock: vi.fn(),
+  renameSessionMock: vi.fn(),
+  deleteSessionMock: vi.fn(),
   proposalsMock: vi.fn(),
   applyProposalMock: vi.fn(),
   rejectProposalMock: vi.fn(),
@@ -45,6 +49,8 @@ vi.mock("@/lib/hooks-chat", () => ({
   useCreateChatSession: () => ({ mutate: createSessionMock, isPending: false }),
   useChatMessages: () => messagesMock(),
   useSendChatMessage: () => ({ mutate: sendMessageMock, isPending: false }),
+  useRenameChatSession: () => ({ mutate: renameSessionMock, isPending: false }),
+  useDeleteChatSession: () => ({ mutate: deleteSessionMock, isPending: false }),
 }));
 
 import { CopilotDock } from "@/components/copilot-dock";
@@ -75,20 +81,22 @@ describe("CopilotDock", () => {
     messagesMock.mockReset();
     messagesMock.mockReturnValue({ data: undefined });
     sendMessageMock.mockReset();
+    renameSessionMock.mockReset();
+    deleteSessionMock.mockReset();
     proposalsMock.mockReset();
     proposalsMock.mockReturnValue({ data: [] });
     applyProposalMock.mockReset();
     rejectProposalMock.mockReset();
   });
 
-  it("renders nothing for a caller without copilot:manage, and never even calls the chat-pipeline hooks", () => {
+  it("renders nothing for a caller without copilot:use, and never even calls the chat-pipeline hooks", () => {
     canMock.mockImplementation(() => false);
     renderDock();
     expect(screen.queryByRole("button", { name: /oc8 copilot/i })).not.toBeInTheDocument();
     // The permission check has to happen BEFORE useAssistant/useChatSessions
     // are called, not just before their result is rendered -- otherwise
     // every signed-in user fires a GET /assistant + GET /chat/sessions (a
-    // 403 for anyone without copilot:manage) on every page load.
+    // 403 for anyone without copilot:use) on every page load.
     expect(assistantMock).not.toHaveBeenCalled();
     expect(sessionsMock).not.toHaveBeenCalled();
   });
@@ -419,5 +427,20 @@ describe("CopilotDock", () => {
     // not in local component state.
     openDock();
     expect(screen.getByText("Hallo")).toBeInTheDocument();
+  });
+
+  it("shows the session picker once more than one session exists, and switches on selection", () => {
+    sessionsMock.mockReturnValue({
+      data: [
+        { id: "s1", agentId: "assistant-1", title: "Erste Frage", createdAt: "2026-01-01T00:00:00Z", lastMessageAt: null },
+        { id: "s2", agentId: "assistant-1", title: "Zweite Frage", createdAt: "2026-01-02T00:00:00Z", lastMessageAt: null },
+      ],
+    });
+    renderDock();
+    openDock();
+    expect(screen.getByText("Erste Frage")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Erste Frage"));
+    fireEvent.click(screen.getByText("Zweite Frage"));
+    expect(messagesMock).toHaveBeenCalled();
   });
 });
