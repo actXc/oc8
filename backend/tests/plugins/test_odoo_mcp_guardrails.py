@@ -356,20 +356,20 @@ def test_integration_quote_approval_threshold_decides_as_its_summary_claims() ->
     assert _entry(key).approval_eur == 3000
 
     assert _decide(key, right="read", tool="search_records").effect is Effect.ALLOW
-    assert _decide(key, right="send", tool="create_record", value=2999).effect is Effect.ALLOW
+    assert _decide(key, right="modify", tool="create_record", value=2999).effect is Effect.ALLOW
 
-    at_threshold = _decide(key, right="send", tool="create_record", value=3000)
+    at_threshold = _decide(key, right="modify", tool="create_record", value=3000)
     assert at_threshold.effect is Effect.REQUIRE_APPROVAL
     assert "3000" in at_threshold.reason
-    assert _decide(key, right="send", tool="create_record", value=9000).effect is (
+    assert _decide(key, right="modify", tool="create_record", value=9000).effect is (
         Effect.REQUIRE_APPROVAL
     )
 
     # The documented gap, verified as real rather than assumed: `only` is empty,
     # so both tools are offered, and neither call carries an amount the €3000
     # threshold could catch (an unreadable value counts as zero).
-    assert _decide(key, right="send", tool="delete_record").effect is Effect.ALLOW
-    assert _decide(key, right="send", tool="post_message").effect is Effect.ALLOW
+    assert _decide(key, right="modify", tool="delete_record").effect is Effect.ALLOW
+    assert _decide(key, right="modify", tool="post_message").effect is Effect.ALLOW
 
 
 def test_integration_sales_autonomous_with_limit_decides_as_its_summary_claims() -> None:
@@ -382,12 +382,12 @@ def test_integration_sales_autonomous_with_limit_decides_as_its_summary_claims()
     assert _entry(key).approval_eur == 1000
 
     assert _decide(key, right="read", tool="search_records").effect is Effect.ALLOW
-    assert _decide(key, right="send", tool="create_record", value=999).effect is Effect.ALLOW
-    assert _decide(key, right="send", tool="update_record", value=1000).effect is (
+    assert _decide(key, right="modify", tool="create_record", value=999).effect is Effect.ALLOW
+    assert _decide(key, right="modify", tool="update_record", value=1000).effect is (
         Effect.REQUIRE_APPROVAL
     )
 
-    denied = _decide(key, right="send", tool="delete_record")
+    denied = _decide(key, right="modify", tool="delete_record")
     assert denied.effect is Effect.DENY
     assert "delete_record" in denied.reason
 
@@ -400,19 +400,19 @@ def test_integration_helpdesk_reply_needs_approval_gates_only_that_one_tool() ->
     key = "helpdesk_reply_needs_approval"
     assert _entry(key).approval_actions == frozenset({"post_message"})
 
-    gated = _decide(key, right="send", tool="post_message")
+    gated = _decide(key, right="modify", tool="post_message")
     assert gated.effect is Effect.REQUIRE_APPROVAL
     assert "post_message" in gated.reason
 
     # Same right, same connection, different tool: must not be swept up.
-    assert _decide(key, right="send", tool="update_record").effect is Effect.ALLOW
-    assert _decide(key, right="send", tool="create_record").effect is Effect.ALLOW
+    assert _decide(key, right="modify", tool="update_record").effect is Effect.ALLOW
+    assert _decide(key, right="modify", tool="create_record").effect is Effect.ALLOW
     assert _decide(key, right="read", tool="search_records").effect is Effect.ALLOW
 
     # And the gap this entry discloses in its own summary ("a ticket can be
     # deleted without review while only sending is filtered"), asserted so the
     # disclosure cannot silently stop matching the behaviour.
-    assert _decide(key, right="send", tool="delete_record").effect is Effect.ALLOW
+    assert _decide(key, right="modify", tool="delete_record").effect is Effect.ALLOW
 
 
 def test_integration_cross_internal_only_withholds_the_outward_tool() -> None:
@@ -425,12 +425,12 @@ def test_integration_cross_internal_only_withholds_the_outward_tool() -> None:
     assert entry.approval_actions == frozenset()
 
     for tool in ("post_message", "delete_record"):
-        denied = _decide(key, right="send", tool=tool)
+        denied = _decide(key, right="modify", tool=tool)
         assert denied.effect is Effect.DENY, f"{tool} must be unreachable, got {denied.effect}"
         assert tool in denied.reason
 
-    assert _decide(key, right="send", tool="create_record").effect is Effect.ALLOW
-    assert _decide(key, right="send", tool="update_record").effect is Effect.ALLOW
+    assert _decide(key, right="modify", tool="create_record").effect is Effect.ALLOW
+    assert _decide(key, right="modify", tool="update_record").effect is Effect.ALLOW
     assert _decide(key, right="read", tool="get_record").effect is Effect.ALLOW
 
 
@@ -448,11 +448,11 @@ def test_integration_every_threshold_entrys_boundary_is_inclusive() -> None:
     for g in thresholds:
         threshold = g.approval_eur
         assert threshold is not None
-        at = _decide(g.key, right="send", tool="create_record", value=threshold)
+        at = _decide(g.key, right="modify", tool="create_record", value=threshold)
         assert at.effect is Effect.REQUIRE_APPROVAL, (
             f"{g.key}: a call worth exactly €{threshold} must need approval"
         )
-        below = _decide(g.key, right="send", tool="create_record", value=threshold - 1)
+        below = _decide(g.key, right="modify", tool="create_record", value=threshold - 1)
         assert below.effect is Effect.ALLOW, f"{g.key}: €{threshold - 1} must not need approval"
 
 
@@ -559,7 +559,7 @@ def test_integration_every_plugin_toml_presets_boundary_is_inclusive() -> None:
             return authorize_tool_call(
                 policies=policies,
                 connection_key=_CONNECTION_KEY,
-                right="send",
+                right="modify",
                 value=value,
                 tool="create_record",
             )
@@ -627,6 +627,6 @@ def test_integration_the_raw_frame_helper_cannot_see_a_tool_name() -> None:
     }
     assert authorize_tool(frame, {}, tool_key=_CONNECTION_KEY, action="modify").effect is Effect.ALLOW
     # The live gate, given the same entry and the tool the call actually names:
-    assert _decide("helpdesk_reply_needs_approval", right="send", tool="post_message").effect is (
+    assert _decide("helpdesk_reply_needs_approval", right="modify", tool="post_message").effect is (
         Effect.REQUIRE_APPROVAL
     )
