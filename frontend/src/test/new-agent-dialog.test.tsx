@@ -28,6 +28,10 @@ const connections = [
     scopes: [],
     health: {},
     credentialType: null as string | null,
+    guardrailPresets: [] as unknown[],
+    guardrailLibrary: null,
+    hasValueSpec: false,
+    pluginName: null,
   },
 ];
 
@@ -51,7 +55,7 @@ const connectionsMock = vi.fn().mockReturnValue({ data: connections });
 const createLoginMock = vi.fn();
 const createCredentialMock = vi.fn();
 const departmentToolsMock = vi.fn().mockReturnValue({
-  data: { tools: { Odoo: { enabled: true, read: true, write: true, send: false } } },
+  data: { tools: { Odoo: { enabled: true, read: true, modify: true } } },
 });
 
 vi.mock("@/lib/hooks", () => ({
@@ -107,7 +111,7 @@ beforeEach(() => {
   createCredentialMock.mockReset();
   departmentToolsMock.mockReset();
   departmentToolsMock.mockReturnValue({
-    data: { tools: { Odoo: { enabled: true, read: true, write: true, send: false } } },
+    data: { tools: { Odoo: { enabled: true, read: true, modify: true } } },
   });
 });
 
@@ -149,7 +153,8 @@ describe("NewAgentDialog: inline credential picker", () => {
     renderDialog();
     await screen.findByText("Hire a new agent");
     fillIdentityAndGoToTools();
-    fireEvent.click(screen.getByText("Odoo"));
+    fireEvent.click(screen.getByRole("button", { name: "Add tool" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
     expect(screen.getByText(/select a credential/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /create new/i })).toBeInTheDocument();
     expect(screen.queryByLabelText(/approval/i)).not.toBeInTheDocument();
@@ -159,7 +164,8 @@ describe("NewAgentDialog: inline credential picker", () => {
     renderDialog(); // default fixture: connections[0].credentialType is null
     await screen.findByText("Hire a new agent");
     fillIdentityAndGoToTools();
-    fireEvent.click(screen.getByText("Odoo"));
+    fireEvent.click(screen.getByRole("button", { name: "Add tool" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
     expect(screen.queryByText(/select a credential/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /create new/i })).not.toBeInTheDocument();
   });
@@ -175,7 +181,8 @@ describe("NewAgentDialog: inline credential picker", () => {
     renderDialog();
     await screen.findByText("Hire a new agent");
     fillIdentityAndGoToTools();
-    fireEvent.click(screen.getByText("Odoo"));
+    fireEvent.click(screen.getByRole("button", { name: "Add tool" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
     expect(screen.getByText(/select a credential/i)).toBeInTheDocument();
     expect(screen.getByText(/not yet enabled for this department/i)).toBeInTheDocument();
   });
@@ -185,7 +192,8 @@ describe("NewAgentDialog: inline credential picker", () => {
     renderDialog();
     await screen.findByText("Hire a new agent");
     fillIdentityAndGoToTools();
-    fireEvent.click(screen.getByText("Odoo"));
+    fireEvent.click(screen.getByRole("button", { name: "Add tool" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
     fireEvent.click(screen.getByRole("button", { name: /Next/i })); // -> Guardrails & Trigger
     fireEvent.click(screen.getByRole("button", { name: /Hire agent/i }));
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
@@ -202,7 +210,8 @@ describe("NewAgentDialog: inline credential picker", () => {
     renderDialog();
     await screen.findByText("Hire a new agent");
     fillIdentityAndGoToTools();
-    fireEvent.click(screen.getByText("Odoo"));
+    fireEvent.click(screen.getByRole("button", { name: "Add tool" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
     // "cred-1" is the credential logins[0] ("login-1") is already backed by
     // -- picking it reuses that login, no POST /mcp/logins round trip.
@@ -219,8 +228,7 @@ describe("NewAgentDialog: inline credential picker", () => {
     expect(body.narrowing.tools.Odoo).toMatchObject({
       enabled: true,
       read: true,
-      write: true,
-      send: false,
+      modify: true,
       approval_eur: null,
       connection_id: "login-1",
     });
@@ -260,7 +268,8 @@ describe("NewAgentDialog: inline credential picker", () => {
     renderDialog();
     await screen.findByText("Hire a new agent");
     fillIdentityAndGoToTools();
-    fireEvent.click(screen.getByText("Odoo"));
+    fireEvent.click(screen.getByRole("button", { name: "Add tool" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
     fireEvent.click(screen.getByRole("button", { name: /create new/i }));
     expect(screen.queryByLabelText(/tool/i)).not.toBeInTheDocument();

@@ -8,6 +8,7 @@ import {
   Plug,
   Shield,
   Sparkles,
+  Trash2,
   User,
   Webhook,
   Wrench,
@@ -21,6 +22,7 @@ import {
   Field,
   type AgentIdentity,
 } from "@/components/agent-identity-fields";
+import { AddToolPicker } from "@/components/add-tool-picker";
 import { ModelPicker } from "@/components/model-picker";
 import { CronBuilder } from "@/components/cron-builder";
 import { CredentialPicker } from "@/components/credential-picker";
@@ -93,6 +95,7 @@ export function NewAgentDialog({
   });
   const [llm, setLlm] = useState<string>("");
   const [tools, setTools] = useState<string[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [trigger, setTrigger] = useState("on-demand");
   const [cronExpression, setCronExpression] = useState(DEFAULT_CRON);
   const [guardrail, setGuardrail] = useState("Approval from €5,000");
@@ -144,6 +147,15 @@ export function NewAgentDialog({
 
   function toggleTool(id: string) {
     setTools((t) => (t.includes(id) ? t.filter((x) => x !== id) : [...t, id]));
+  }
+
+  function removeTool(id: string) {
+    setTools((t) => t.filter((x) => x !== id));
+    setConnectionId((s) => {
+      const next = { ...s };
+      delete next[id];
+      return next;
+    });
   }
 
   function reset() {
@@ -204,8 +216,7 @@ export function NewAgentDialog({
       toolsPayload[key] = {
         enabled: true,
         read: !!frame.read,
-        write: !!frame.write,
-        send: !!frame.send,
+        modify: !!frame.modify,
         approval_eur: (frame.approval_eur as number | null | undefined) ?? null,
         connection_id: hasLogins ? connectionId[key] || null : null,
       };
@@ -402,60 +413,54 @@ export function NewAgentDialog({
               <div className="flex items-center justify-between text-xs text-muted-foreground">
                 <span className="inline-flex items-center gap-1.5">
                   <Plug className="h-3.5 w-3.5 text-primary" />
-                  Available MCP interfaces ({mcpTools.length})
+                  {tools.length} tool{tools.length === 1 ? "" : "s"} selected
                 </span>
-                <span>
-                  <span className="text-primary">{tools.length}</span> selected
-                </span>
+                <button
+                  type="button"
+                  onClick={() => setPickerOpen(true)}
+                  disabled={connections.filter((c) => !tools.includes(c.name)).length === 0}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition hover:bg-background/70 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Wrench className="h-3.5 w-3.5" /> Add tool
+                </button>
               </div>
               {mcpTools.length === 0 && (
                 <p className="rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
                   No MCP connections yet. Add one under Capas to offer it here.
                 </p>
               )}
+              {tools.length === 0 && mcpTools.length > 0 && (
+                <p className="rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+                  No tools selected yet — click "Add tool" to pick one.
+                </p>
+              )}
               <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-                {mcpTools.map((i) => {
-                  const on = tools.includes(i.id);
-                  const disabled = !connectedNames.has(i.id);
-                  const Icon = i.icon;
-                  const inFrame = !!frameTools[i.id]?.enabled;
-                  const toolLogins = loginsByKey[i.id] ?? [];
-                  const credentialType = connections.find((c) => c.name === i.id)?.credentialType;
-                  const pickedCredentialId =
-                    toolLogins.find((l) => l.id === connectionId[i.id])?.credentialId ?? "";
-                  return (
-                    <div
-                      key={i.id}
-                      className={cn(
-                        "group relative flex flex-col items-start gap-2 rounded-xl border p-3 text-left transition",
-                        on
-                          ? "border-primary bg-primary/10 glow-teal"
-                          : "border-border bg-background/30 hover:-translate-y-0.5 hover:border-primary/40",
-                        disabled &&
-                          "cursor-not-allowed opacity-50 hover:translate-y-0 hover:border-border",
-                      )}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => !disabled && toggleTool(i.id)}
-                        disabled={disabled}
-                        title={disabled ? "This connection is disconnected" : undefined}
-                        className="flex w-full flex-col items-start gap-2 text-left disabled:cursor-not-allowed"
+                {mcpTools
+                  .filter((i) => tools.includes(i.id))
+                  .map((i) => {
+                    const Icon = i.icon;
+                    const inFrame = !!frameTools[i.id]?.enabled;
+                    const toolLogins = loginsByKey[i.id] ?? [];
+                    const credentialType = connections.find((c) => c.name === i.id)?.credentialType;
+                    const pickedCredentialId =
+                      toolLogins.find((l) => l.id === connectionId[i.id])?.credentialId ?? "";
+                    return (
+                      <div
+                        key={i.id}
+                        className="group relative flex flex-col items-start gap-2 rounded-xl border border-primary bg-primary/10 glow-teal p-3 text-left"
                       >
                         <div className="flex w-full items-center justify-between">
                           <div className="grid h-9 w-9 place-items-center rounded-lg bg-primary/15 text-primary">
                             <Icon className="h-4 w-4" />
                           </div>
-                          <span
-                            className={cn(
-                              "grid h-5 w-5 place-items-center rounded-full border text-[10px] transition",
-                              on
-                                ? "border-primary bg-primary text-primary-foreground"
-                                : "border-border bg-background/40 text-transparent",
-                            )}
+                          <button
+                            type="button"
+                            onClick={() => removeTool(i.id)}
+                            title="Remove tool"
+                            className="grid h-6 w-6 place-items-center rounded-md text-muted-foreground transition hover:text-destructive"
                           >
-                            <Check className="h-3 w-3" />
-                          </span>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
                         </div>
                         <div className="w-full min-w-0">
                           <div className="truncate text-sm font-medium">{i.name}</div>
@@ -463,32 +468,40 @@ export function NewAgentDialog({
                             {connectedNames.has(i.id) ? "via MCP" : "not connected"}
                           </div>
                         </div>
-                      </button>
-                      {on && credentialType && (
-                        <div
-                          className="w-full min-w-0 border-t border-border/60 pt-2"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <CredentialPicker
-                            credentialType={credentialType}
-                            value={pickedCredentialId}
-                            onChange={(credentialId) =>
-                              pinCredential(i.id, credentialType, credentialId)
-                            }
-                          />
-                          {!inFrame && (
-                            <p className="mt-1.5 text-[10px] text-muted-foreground">
-                              Not yet enabled for this department — the pick is saved, but won't
-                              grant access until it is.
-                            </p>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                        {credentialType && (
+                          <div className="w-full min-w-0 border-t border-border/60 pt-2">
+                            <CredentialPicker
+                              credentialType={credentialType}
+                              value={pickedCredentialId}
+                              onChange={(credentialId) =>
+                                pinCredential(i.id, credentialType, credentialId)
+                              }
+                            />
+                            {!inFrame && (
+                              <p className="mt-1.5 text-[10px] text-muted-foreground">
+                                Not yet enabled for this department — the pick is saved, but won't
+                                grant access until it is.
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
               </div>
             </div>
+          )}
+
+          {pickerOpen && (
+            <AddToolPicker
+              addableNames={connections.filter((c) => !tools.includes(c.name)).map((c) => c.name)}
+              connections={connections}
+              onAdd={(name) => {
+                toggleTool(name);
+                setPickerOpen(false);
+              }}
+              onClose={() => setPickerOpen(false)}
+            />
           )}
 
           {step === 3 && (
