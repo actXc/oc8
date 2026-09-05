@@ -403,7 +403,7 @@ async def run_agent(
             connection_key: str | None = CODING_FRAME_KEY
             tool_scopes: dict[str, Any] | None = {
                 right: [n for n, r in CODING_TOOL_RIGHTS.items() if r == right]
-                for right in ("read", "send")
+                for right in ("read", "modify")
             }
             value_spec: dict[str, Any] | None = None
             focus_spec: dict[str, Any] | None = None

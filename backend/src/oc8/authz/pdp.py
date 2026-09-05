@@ -386,20 +386,20 @@ def missing_skill_requirements(
 
 
 def required_right(tool_name: str, scopes: Mapping[str, Any] | None) -> str:
-    """Classify a tool call as read / write / send.
+    """Classify a tool call as read / modify.
 
     `scopes` is the connection's classification, e.g.
-    `{"read": ["fs_read"], "send": ["send_email"]}`. Anything unlisted requires
-    `write` -- fail-closed, so an unknown tool is treated as the more dangerous
+    `{"read": ["fs_read"], "modify": ["send_email"]}`. Anything unlisted requires
+    `modify` -- fail-closed, so an unknown tool is treated as the more dangerous
     case rather than waved through.
     """
     if not scopes:
-        return "write"
+        return "modify"
     for right in RIGHTS:
         names = scopes.get(right)
         if isinstance(names, (list, tuple)) and tool_name in names:
             return right
-    return "write"
+    return "modify"
 
 
 def authorize_tool_call(

@@ -63,7 +63,6 @@ FRAME: dict[str, Any] = {
             "only": ["res_partner_read", "crm_lead_write", "mail_send"],
         },
         "drive": {"enabled": True, "read": True, "modify": False},
-        "stripe": {"enabled": False, "read": True, "modify": True},
     }
 }
 
@@ -73,7 +72,6 @@ NARROWING: dict[str, Any] = {
             "enabled": True,
             "read": True,
             "modify": True,
-            "modify": False,
             "approval_eur": 500,
             "only": ["res_partner_read", "crm_lead_write"],
         }

@@ -734,7 +734,7 @@ async def test_a_repeated_write_does_not_reach_the_tool_server_twice(
 # ------------------------------------------------- tool-call timing (KPIs)
 
 
-async def _mcp_backed_run(db: Any, tenant: uuid.UUID, *, write: bool = True) -> tuple[Any, Any]:
+async def _mcp_backed_run(db: Any, tenant: uuid.UUID, *, modify: bool = True) -> tuple[Any, Any]:
     """An agent + RUNNING run with an `odoo` MCP connection bound, the fixture
     the two timing tests below share. Returns (agent_id, run_id)."""
     from oc8 import models as m
@@ -742,7 +742,7 @@ async def _mcp_backed_run(db: Any, tenant: uuid.UUID, *, write: bool = True) -> 
     dept = m.Department(
         tenant_id=tenant,
         name="Vertrieb",
-        frame={"tools": {"odoo": {"enabled": True, "read": True, "write": write}}},
+        frame={"tools": {"odoo": {"enabled": True, "read": True, "modify": modify}}},
     )
     db.add(dept)
     await db.flush()

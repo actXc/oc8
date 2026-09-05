@@ -82,7 +82,6 @@ async def _coding_agent(db: Any, tenant: uuid.UUID) -> m.Agent:
                     "enabled": True,
                     "read": True,
                     "modify": True,
-                    "modify": False,
                     "approval_eur": None,
                 }
             }

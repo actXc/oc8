@@ -13,20 +13,20 @@ def _policies(**kw: ToolPolicy) -> dict[str, ToolPolicy]:
     return dict(kw)
 
 
-def test_unclassified_tool_requires_write() -> None:
+def test_unclassified_tool_requires_modify() -> None:
     # Fail-closed: an unknown tool is treated as the more dangerous case.
-    assert required_right("anything", {"read": ["fs_read"]}) == "write"
+    assert required_right("anything", {"read": ["fs_read"]}) == "modify"
 
 
-def test_scopes_classify_read_and_send() -> None:
-    scopes = {"read": ["fs_read"], "send": ["send_email"]}
+def test_scopes_classify_read_and_modify() -> None:
+    scopes = {"read": ["fs_read"], "modify": ["send_email"]}
     assert required_right("fs_read", scopes) == "read"
-    assert required_right("send_email", scopes) == "send"
+    assert required_right("send_email", scopes) == "modify"
 
 
-def test_missing_scopes_means_everything_is_write() -> None:
-    assert required_right("fs_read", None) == "write"
-    assert required_right("fs_read", {}) == "write"
+def test_missing_scopes_means_everything_is_modify() -> None:
+    assert required_right("fs_read", None) == "modify"
+    assert required_right("fs_read", {}) == "modify"
 
 
 def test_no_frame_entry_denies() -> None:
@@ -65,11 +65,11 @@ def test_missing_right_denies_and_names_it() -> None:
     d = authorize_tool_call(
         policies=_policies(odoo=ToolPolicy(enabled=True, read=True, modify=False)),
         connection_key="odoo",
-        right="write",
+        right="modify",
         value=None,
     )
     assert d.effect is Effect.DENY
-    assert "write" in d.reason
+    assert "modify" in d.reason
 
 
 def test_granted_right_allows() -> None:
@@ -86,7 +86,7 @@ def test_value_over_policy_threshold_requires_approval() -> None:
     d = authorize_tool_call(
         policies=_policies(odoo=ToolPolicy(enabled=True, modify=True, approval_eur=2500)),
         connection_key="odoo",
-        right="write",
+        right="modify",
         value=3000.0,
     )
     assert d.effect is Effect.REQUIRE_APPROVAL
@@ -97,7 +97,7 @@ def test_value_under_every_threshold_allows() -> None:
     d = authorize_tool_call(
         policies=_policies(odoo=ToolPolicy(enabled=True, modify=True, approval_eur=2500)),
         connection_key="odoo",
-        right="write",
+        right="modify",
         value=100.0,
         extra_thresholds=(5000.0,),
     )
@@ -109,7 +109,7 @@ def test_the_strictest_threshold_governs() -> None:
     d = authorize_tool_call(
         policies=_policies(odoo=ToolPolicy(enabled=True, modify=True, approval_eur=2500)),
         connection_key="odoo",
-        right="write",
+        right="modify",
         value=500.0,
         extra_thresholds=(100.0, None),
     )
@@ -121,7 +121,7 @@ def test_none_thresholds_are_ignored() -> None:
     d = authorize_tool_call(
         policies=_policies(odoo=ToolPolicy(enabled=True, modify=True, approval_eur=None)),
         connection_key="odoo",
-        right="write",
+        right="modify",
         value=1_000_000.0,
         extra_thresholds=(None,),
     )
@@ -131,7 +131,7 @@ def test_none_thresholds_are_ignored() -> None:
 def test_non_rights_attribute_denies() -> None:
     # `right` must be a member of RIGHTS, not just any ToolPolicy attribute --
     # otherwise "approval_eur" (or any other field) could be smuggled in as a
-    # right and bypass read/write/send entirely.
+    # right and bypass read/modify entirely.
     d = authorize_tool_call(
         policies=_policies(
             odoo=ToolPolicy(enabled=True, read=False, modify=False, approval_eur=100)
@@ -153,14 +153,11 @@ def test_unknown_right_denies() -> None:
     assert d.effect is Effect.DENY
 
 
-def test_scopes_write_key_classifies_write() -> None:
-    # The tool appears in both write and send buckets. Old code skipped write
-    # entirely and would incorrectly classify this as "send"; new code checks
-    # write before send (RIGHTS order) and correctly returns "write".
-    # This overlap is the point -- without it, the test passes identically
-    # under both old and new implementations and proves nothing.
-    scopes = {"read": ["fs_read"], "write": ["fs_write"], "send": ["fs_write", "send_email"]}
-    assert required_right("fs_write", scopes) == "write"
+def test_scopes_modify_key_classifies_modify() -> None:
+    # The tool appears in the modify bucket. The right is correctly classified
+    # as "modify" based on RIGHTS order.
+    scopes = {"read": ["fs_read"], "modify": ["fs_write", "send_email"]}
+    assert required_right("fs_write", scopes) == "modify"
 
 
 def test_coding_tools_are_classified() -> None:
@@ -168,8 +165,8 @@ def test_coding_tools_are_classified() -> None:
 
     assert CODING_FRAME_KEY == "coding"
     assert CODING_TOOL_RIGHTS["fs_read"] == "read"
-    assert CODING_TOOL_RIGHTS["fs_write"] == "write"
-    assert CODING_TOOL_RIGHTS["shell_run"] == "write"
+    assert CODING_TOOL_RIGHTS["fs_write"] == "modify"
+    assert CODING_TOOL_RIGHTS["shell_run"] == "modify"
 
 
 def test_a_zero_threshold_gates_an_action_that_carries_no_value() -> None:
@@ -185,7 +182,7 @@ def test_a_zero_threshold_gates_an_action_that_carries_no_value() -> None:
     d = authorize_tool_call(
         policies=_policies(odoo=ToolPolicy(enabled=True, modify=True, approval_eur=0)),
         connection_key="odoo",
-        right="write",
+        right="modify",
         value=None,
     )
     assert d.effect is Effect.REQUIRE_APPROVAL
@@ -197,7 +194,7 @@ def test_a_valueless_call_under_a_real_threshold_is_still_allowed() -> None:
     d = authorize_tool_call(
         policies=_policies(odoo=ToolPolicy(enabled=True, modify=True, approval_eur=3000)),
         connection_key="odoo",
-        right="write",
+        right="modify",
         value=None,
     )
     assert d.effect is Effect.ALLOW
@@ -212,7 +209,7 @@ def test_approval_actions_right_requires_approval_with_no_threshold_at_all() -> 
             odoo=ToolPolicy(enabled=True, modify=True, approval_actions=frozenset({"send"}))
         ),
         connection_key="odoo",
-        right="send",
+        right="modify",
         tool="post_message",
         value=None,
     )
@@ -228,7 +225,7 @@ def test_approval_actions_tool_name_gates_only_that_tool() -> None:
     gated = authorize_tool_call(
         policies=_policies(odoo=policy),
         connection_key="odoo",
-        right="send",
+        right="modify",
         tool="post_message",
         value=None,
     )
@@ -238,7 +235,7 @@ def test_approval_actions_tool_name_gates_only_that_tool() -> None:
     ungated = authorize_tool_call(
         policies=_policies(odoo=policy),
         connection_key="odoo",
-        right="send",
+        right="modify",
         tool="create_record",
         value=None,
     )
@@ -258,7 +255,7 @@ def test_approval_actions_wins_over_a_high_euro_threshold() -> None:
             )
         ),
         connection_key="odoo",
-        right="send",
+        right="modify",
         tool="post_message",
         value=1.0,
     )
@@ -275,7 +272,7 @@ def test_a_denied_right_stays_denied_even_if_listed_in_approval_actions() -> Non
             odoo=ToolPolicy(enabled=True, modify=False, approval_actions=frozenset({"send"}))
         ),
         connection_key="odoo",
-        right="send",
+        right="modify",
         tool="post_message",
         value=None,
     )
@@ -289,7 +286,7 @@ def test_empty_approval_actions_is_a_full_regression_no_op() -> None:
     below = authorize_tool_call(
         policies=_policies(odoo=ToolPolicy(enabled=True, modify=True, approval_eur=2500)),
         connection_key="odoo",
-        right="send",
+        right="modify",
         tool="post_message",
         value=100.0,
     )
@@ -298,7 +295,7 @@ def test_empty_approval_actions_is_a_full_regression_no_op() -> None:
     above = authorize_tool_call(
         policies=_policies(odoo=ToolPolicy(enabled=True, modify=True, approval_eur=2500)),
         connection_key="odoo",
-        right="send",
+        right="modify",
         tool="post_message",
         value=3000.0,
     )
