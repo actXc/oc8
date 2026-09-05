@@ -9,8 +9,9 @@ convention exactly."""
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import pytest
 from asgi_lifespan import LifespanManager
@@ -18,10 +19,22 @@ from httpx import ASGITransport, AsyncClient
 
 from oc8 import models as m
 from oc8.auth import get_identity_provider
+from oc8.config import get_settings
 from oc8.main import create_app
 from tests.conftest import AppSessionFactory
 
 pytestmark = pytest.mark.asyncio
+
+# tests/api/<this file> -> tests -> backend -> repo root, where capas/ lives.
+_PLUGINS_DIR = Path(__file__).resolve().parents[3] / "capas"
+
+
+@pytest.fixture(autouse=True)
+def _plugins_path(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    monkeypatch.setenv("OC8_CAPAS_PATH", str(_PLUGINS_DIR))
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 def _headers(tenant: uuid.UUID, role: str) -> dict[str, str]:
@@ -48,6 +61,18 @@ async def _seed_department(app_session: AppSessionFactory) -> tuple[uuid.UUID, u
             presentation={"icon": "building", "slug": "sales"},
         )
         db.add(dept)
+        # Every existing test in this file writes `approvalEur`/`only` for the
+        # "odoo" key -- since Task 5, that now needs to resolve back to a real
+        # manifest connection with a `value_spec` to be accepted (odoo_mcp's
+        # `primary` connection has one; see `capas/odoo_mcp/tool_pack.toml`).
+        conn = m.McpConnection(
+            tenant_id=tenant,
+            name="odoo",
+            server_url="",
+            transport="stdio",
+            config={"_plugin_name": "odoo_mcp", "_connection_key": "primary"},
+        )
+        db.add(conn)
         await db.flush()
         return tenant, dept.id
 
@@ -61,11 +86,7 @@ async def test_well_formed_payload_is_accepted_and_echoed_back(
             "odoo": {
                 "enabled": True,
                 "read": True,
-                # `ToolPolicyWriteDTO` (departments.py) is still write/send-shaped
-                # -- its rename onto `modify` is Task 5's scope, unrelated to this
-                # task's read-side collapse in `authz.pdp`/`ToolPolicyDTO`.
-                "write": False,
-                "send": False,
+                "modify": False,
                 "approvalEur": 3000,
                 "approvalActions": ["send"],
                 "only": ["search_records", "post_message"],
@@ -82,8 +103,7 @@ async def test_well_formed_payload_is_accepted_and_echoed_back(
             "odoo": {
                 "enabled": True,
                 "read": True,
-                "write": False,
-                "send": False,
+                "modify": False,
                 "approval_eur": 3000,
                 "approval_actions": ["send"],
                 "only": ["search_records", "post_message"],
@@ -209,8 +229,7 @@ async def test_applying_a_guardrail_with_nonempty_only_persists_the_exact_list(
             "odoo": {
                 "enabled": True,
                 "read": True,
-                "write": False,
-                "send": False,
+                "modify": False,
                 "approvalEur": 1000,
                 "approvalActions": [],
                 "only": [
@@ -256,8 +275,7 @@ async def test_applying_a_guardrail_with_empty_only_persists_explicit_empty_list
             "odoo": {
                 "enabled": True,
                 "read": True,
-                "write": False,
-                "send": False,
+                "modify": False,
                 "approvalEur": 3000,
                 "approvalActions": [],
                 "only": [],
@@ -346,3 +364,45 @@ async def test_empty_string_default_connection_id_is_normalised_to_null(
         resp = await http.put(f"/api/v1/departments/{dept_id}/tools", json=payload, headers=h)
         assert resp.status_code == 200, resp.text
         assert resp.json()["tools"]["odoo"]["default_connection_id"] is None
+
+
+# ---------------------------- only/approval_eur value-spec gate (Task 5)
+
+
+async def test_setting_approval_eur_for_a_connection_with_no_value_spec_is_rejected(
+    app_session: AppSessionFactory,
+) -> None:
+    tenant, dept_id = await _seed_department(app_session)
+    async with app_session(tenant) as db:
+        conn = m.McpConnection(
+            tenant_id=tenant,
+            name="github",
+            server_url="",
+            transport="stdio",
+            config={"_plugin_name": "github_mcp", "_connection_key": "primary"},
+        )
+        db.add(conn)
+        await db.flush()
+
+    payload = {"tools": {"github": {"enabled": True, "read": True, "approvalEur": 3000}}}
+    async with _http() as http:
+        h = _headers(tenant, "org_admin")
+        resp = await http.put(f"/api/v1/departments/{dept_id}/tools", json=payload, headers=h)
+        assert resp.status_code == 422, resp.text
+        body = resp.json()["detail"]
+        assert body["error"] == "value_spec_not_supported"
+        assert body["violations"] == [{"connection": "github", "field": "approval_eur"}]
+
+
+async def test_setting_only_for_a_connection_with_a_value_spec_is_accepted(
+    app_session: AppSessionFactory,
+) -> None:
+    # `_seed_department` already seeds an "odoo" McpConnection stamped to
+    # `odoo_mcp`'s `primary` connection, which HAS a `value_spec` block.
+    tenant, dept_id = await _seed_department(app_session)
+    payload = {"tools": {"odoo": {"enabled": True, "read": True, "only": ["search_records"]}}}
+    async with _http() as http:
+        h = _headers(tenant, "org_admin")
+        resp = await http.put(f"/api/v1/departments/{dept_id}/tools", json=payload, headers=h)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["tools"]["odoo"]["only"] == ["search_records"]

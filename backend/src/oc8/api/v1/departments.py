@@ -47,6 +47,7 @@ from oc8.audit import append_event
 from oc8.authz.authority import authority_for_principal, tenant_wide_read
 from oc8.authz.permissions import DEPARTMENT, MANAGE, VIEW, perm
 from oc8.authz.scope import HumanActor
+from oc8.capas.discovery import connection_supports_value_spec, resolve_tool_pack_connection
 from oc8.departments.repo import visible_department, visible_departments
 from oc8.schemas.base import CamelModel
 from oc8.schemas.dto import AgentDTO, BoardDTO, DepartmentDTO, TaskDTO
@@ -76,8 +77,7 @@ class ToolPolicyWriteDTO(CamelModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool = False
     read: bool = False
-    write: bool = False
-    send: bool = False
+    modify: bool = False
     approval_eur: int | None = None
     approval_actions: list[str] = []
     only: list[str] | None = None
@@ -408,7 +408,38 @@ async def set_department_tools(
     dept = await _get_department(db, dept_id)
     frame = dict(dept.frame or {})
     old_tools = dict(frame.get("tools", {}))
-    frame["tools"] = {k: v.model_dump() for k, v in body.tools.items()}
+    new_tools = {k: v.model_dump() for k, v in body.tools.items()}
+
+    value_spec_violations: list[dict[str, str]] = []
+    for key, policy in body.tools.items():
+        wants_only = policy.only is not None
+        wants_eur = policy.approval_eur is not None
+        if not (wants_only or wants_eur):
+            continue
+        mcp_conn = (
+            await db.execute(
+                select(m.McpConnection).where(
+                    m.McpConnection.tenant_id == _p.tenant_id,
+                    m.McpConnection.name == key,
+                )
+            )
+        ).scalar_one_or_none()
+        _cfg = mcp_conn.config if mcp_conn is not None and isinstance(mcp_conn.config, dict) else {}
+        manifest_conn = resolve_tool_pack_connection(
+            str(_cfg.get("_plugin_name", "")), str(_cfg.get("_connection_key", ""))
+        )
+        if not connection_supports_value_spec(manifest_conn):
+            if wants_only:
+                value_spec_violations.append({"connection": key, "field": "only"})
+            if wants_eur:
+                value_spec_violations.append({"connection": key, "field": "approval_eur"})
+    if value_spec_violations:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            {"error": "value_spec_not_supported", "violations": value_spec_violations},
+        )
+
+    frame["tools"] = new_tools
     dept.frame = frame
 
     # Cascade each tool's new `enabled` default to every CURRENT agent in this

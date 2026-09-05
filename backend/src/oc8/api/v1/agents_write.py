@@ -31,6 +31,7 @@ from oc8.api.v1.files import _attachment_dto, _store_upload
 from oc8.audit import append_event
 from oc8.authz.pdp import ToolPolicy, missing_skill_requirements, narrowing_within_frame
 from oc8.authz.scope import HumanActor
+from oc8.capas.discovery import connection_supports_value_spec, resolve_tool_pack_connection
 from oc8.modelrouter.subscription_guard import (
     SubscriptionModelNotManualOnly,
     assert_manual_only_compatible,
@@ -317,6 +318,41 @@ async def set_narrowing(
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             {"error": "narrowing_exceeds_frame", "violations": [v.__dict__ for v in violations]},
+        )
+
+    raw_tools = body.narrowing.get("tools", {}) if isinstance(body.narrowing, dict) else {}
+    value_spec_violations: list[dict[str, str]] = []
+    if isinstance(raw_tools, dict):
+        for key, raw in raw_tools.items():
+            if not isinstance(raw, dict):
+                continue
+            wants_only = raw.get("only") is not None
+            wants_eur = raw.get("approval_eur") is not None
+            if not (wants_only or wants_eur):
+                continue
+            mcp_conn = (
+                await db.execute(
+                    select(m.McpConnection).where(
+                        m.McpConnection.tenant_id == principal.tenant_id,
+                        m.McpConnection.name == key,
+                    )
+                )
+            ).scalar_one_or_none()
+            _cfg: dict[str, Any] = {}
+            if mcp_conn is not None and isinstance(mcp_conn.config, dict):
+                _cfg = mcp_conn.config
+            manifest_conn = resolve_tool_pack_connection(
+                str(_cfg.get("_plugin_name", "")), str(_cfg.get("_connection_key", ""))
+            )
+            if not connection_supports_value_spec(manifest_conn):
+                if wants_only:
+                    value_spec_violations.append({"connection": key, "field": "only"})
+                if wants_eur:
+                    value_spec_violations.append({"connection": key, "field": "approval_eur"})
+    if value_spec_violations:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            {"error": "value_spec_not_supported", "violations": value_spec_violations},
         )
 
     await _enforce_narrowing_logins(

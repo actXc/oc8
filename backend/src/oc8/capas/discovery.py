@@ -798,3 +798,15 @@ def resolve_tool_pack_connection(
         None,
     )
     return None
+
+
+def connection_supports_value_spec(conn: ToolPackConnection | None) -> bool:
+    """Whether a manifest connection declares a value_spec -- the single gate
+    behind BOTH `only` and `approval_eur` on a submitted tool policy (design
+    spec: "gated the same way the €-threshold field is ... same 'don't show a
+    field that means nothing for this tool' rule already applied to
+    approval_eur"). None (no manifest, plugin removed from disk, or the
+    connection key no longer exists) fails closed to False -- neither field
+    is supported without a resolvable manifest to prove otherwise.
+    """
+    return conn is not None and "value_spec" in conn.config
