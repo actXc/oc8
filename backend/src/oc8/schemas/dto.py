@@ -527,7 +527,8 @@ class IngestionJobDTO(CamelModel):
 class ToolPolicyDTO(CamelModel):
     enabled: bool
     read: bool
-    modify: bool
+    write: bool
+    send: bool
     approval_eur: int | None = None
     # Both default empty/None rather than being required: `**ToolPolicy.to_json()`
     # (agent_tools_dto's frame path) and the raw frame JSON dict (this DTO's
@@ -634,7 +635,8 @@ class GuardrailPresetDTO(CamelModel):
     summary_translations: dict[str, str] = {}
     recommended: bool
     read: bool
-    modify: bool
+    write: bool
+    send: bool
     approval_actions: list[str] = []
     approval_eur: int | None = None
     #: The ONLY tool names this preset puts within reach; empty means all of
@@ -674,7 +676,8 @@ class GuardrailDTO(CamelModel):
     summary_translations: dict[str, str] = {}
     use_case: str
     read: bool = False
-    modify: bool = False
+    write: bool = False
+    send: bool = False
     approval_eur: float | None = None
     approval_actions: list[str] = []
     #: The ONLY tool names this guardrail puts within reach; empty means all
