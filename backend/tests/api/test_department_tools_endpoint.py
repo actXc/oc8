@@ -61,7 +61,11 @@ async def test_well_formed_payload_is_accepted_and_echoed_back(
             "odoo": {
                 "enabled": True,
                 "read": True,
-                "modify": False,
+                # `ToolPolicyWriteDTO` (departments.py) is still write/send-shaped
+                # -- its rename onto `modify` is Task 5's scope, unrelated to this
+                # task's read-side collapse in `authz.pdp`/`ToolPolicyDTO`.
+                "write": False,
+                "send": False,
                 "approvalEur": 3000,
                 "approvalActions": ["send"],
                 "only": ["search_records", "post_message"],
@@ -78,7 +82,8 @@ async def test_well_formed_payload_is_accepted_and_echoed_back(
             "odoo": {
                 "enabled": True,
                 "read": True,
-                "modify": False,
+                "write": False,
+                "send": False,
                 "approval_eur": 3000,
                 "approval_actions": ["send"],
                 "only": ["search_records", "post_message"],
@@ -204,7 +209,8 @@ async def test_applying_a_guardrail_with_nonempty_only_persists_the_exact_list(
             "odoo": {
                 "enabled": True,
                 "read": True,
-                "modify": False,
+                "write": False,
+                "send": False,
                 "approvalEur": 1000,
                 "approvalActions": [],
                 "only": [
@@ -250,7 +256,8 @@ async def test_applying_a_guardrail_with_empty_only_persists_explicit_empty_list
             "odoo": {
                 "enabled": True,
                 "read": True,
-                "modify": False,
+                "write": False,
+                "send": False,
                 "approvalEur": 3000,
                 "approvalActions": [],
                 "only": [],

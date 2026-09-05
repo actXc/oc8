@@ -1,16 +1,16 @@
 """`AgentDetailDTO.narrowing_tools` -- the agent's own stored narrowing,
-returned verbatim alongside `effective_tools` (role_rights ∩ frame ∩
-narrowing) and `department_frame_tools`.
+returned verbatim alongside `effective_tools` (frame ∩ narrowing) and
+`department_frame_tools`.
 
 Exists because the Configuration and Guardrails tabs both resave whatever
 fields they don't themselves edit by reading from *some* prior source --
-and until this field existed, that source was `effective_tools`. A dangling
-or wrong-kind `agent.role_id` (see `pdp.agent_tool_rights`'s own docstring)
-makes `agent_tool_rights` return no rights at all, which zeroes read/write/
-send in `effective_tools` even though the agent's actual narrowing and the
-department frame are both untouched -- and re-persisting that zeroed value
-bakes a transient role problem into the agent's stored narrowing forever.
-`narrowing_tools` gives the frontend a source immune to that dip.
+and until this field existed, that source was `effective_tools`, which used
+to dip to zero whenever `agent.role_id` dangled or resolved to no rights
+(the role term the permission algebra has since dropped entirely -- see
+`authz.pdp`'s module docstring; `Agent.role_id` stays in the schema,
+dormant, per this redesign's own constraint, so it can no longer degrade
+anything). `narrowing_tools` gives the frontend a source immune to that
+kind of dip regardless.
 """
 
 from __future__ import annotations
@@ -92,12 +92,17 @@ async def test_narrowing_tools_reflects_the_agents_own_stored_narrowing(
             }
 
 
-async def test_narrowing_tools_stays_clean_when_a_dangling_role_degrades_effective_tools(
+async def test_a_dangling_role_id_no_longer_touches_effective_tools(
     app_session: AppSessionFactory,
 ) -> None:
-    """The regression this field exists to fix: a role reference that no
-    longer resolves must not appear to have touched the agent's own stored
-    narrowing, even though it zeroes `effectiveTools`."""
+    """The regression this field was built to work around no longer exists:
+    `effective_tools` used to dip to zero when `agent.role_id` dangled, because
+    the old permission algebra intersected in `role_rights`. That term is gone
+    (`authz.pdp.effective_tool_policies` takes only frame and narrowing now),
+    so a dangling role_id -- which the schema still allows, dormant -- must
+    have no effect on `effectiveTools`, `narrowingTools`, or
+    `departmentFrameTools` at all; all three should read exactly as if
+    `role_id` were unset."""
     tenant = uuid.uuid4()
     dangling_role_id = uuid.uuid4()
     agent_id = await _seed_agent_with_narrowing(app_session, tenant, role_id=dangling_role_id)
@@ -108,20 +113,12 @@ async def test_narrowing_tools_stays_clean_when_a_dangling_role_degrades_effecti
             assert r.status_code == 200, r.text
             body = r.json()
 
-            # The dangling role_id really does degrade effectiveTools -- this
-            # asserts the premise, not just the fix.
-            assert body["effectiveTools"]["odoo"]["read"] is False
-            assert body["effectiveTools"]["odoo"]["write"] is False
-            assert body["effectiveTools"]["odoo"]["send"] is False
-
-            # narrowingTools and departmentFrameTools are both untouched by
-            # the role problem -- this is what the frontend must resave from.
+            assert body["effectiveTools"]["odoo"]["read"] is True
+            assert body["effectiveTools"]["odoo"]["modify"] is True
             assert body["narrowingTools"]["odoo"]["read"] is True
-            assert body["narrowingTools"]["odoo"]["write"] is True
-            assert body["narrowingTools"]["odoo"]["send"] is True
+            assert body["narrowingTools"]["odoo"]["modify"] is True
             assert body["departmentFrameTools"]["odoo"]["read"] is True
-            assert body["departmentFrameTools"]["odoo"]["write"] is True
-            assert body["departmentFrameTools"]["odoo"]["send"] is True
+            assert body["departmentFrameTools"]["odoo"]["modify"] is True
 
 
 async def test_narrowing_tools_is_empty_for_an_agent_with_no_narrowing_set(

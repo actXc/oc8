@@ -78,7 +78,12 @@ async def _load_agent(db: DbSession, agent_id: uuid.UUID) -> m.Agent:
 
 
 async def _enforce_narrowing_logins(
-    db: DbSession, *, tenant_id: uuid.UUID, agent: m.Agent, narrowing: dict[str, Any]
+    db: DbSession,
+    *,
+    tenant_id: uuid.UUID,
+    agent: m.Agent,
+    narrowing: dict[str, Any],
+    frame: dict[str, Any],
 ) -> None:
     """Shared by `create_agent` and `set_narrowing`. A tool key can name a
     Credential-backed login (an `McpConnection` row with `credential_id` set
@@ -89,16 +94,25 @@ async def _enforce_narrowing_logins(
     A key with no such row -- every existing, non-login tool -- is untouched.
 
     Also records provenance in `narrowing_overridden_keys`: a tool key is
-    recorded only when its submitted value actually differs from what was
-    already stored in `agent.narrowing`, not merely because it appears in
-    the payload. Append-only union, never removed here. This is the ONLY
-    writer of `narrowing_overridden_keys` anywhere in the codebase;
-    `set_department_tools`'s cascade (departments.py) reads it but must
-    never add to it -- that asymmetry is what makes "has this agent
-    explicitly overridden this tool" unambiguous, instead of having to infer
-    it from `narrowing["tools"][key]`'s mere presence/value, which the
-    cascade also writes into and is provably not a reliable signal on its
-    own (agent tool login selection design, Task 5 fix round 2).
+    recorded only when its submitted value actually differs from what the
+    DEPARTMENT FRAME currently grants for that key by default -- not from
+    what the agent's own prior narrowing happened to hold, which would mark
+    an agent's very first save as "overridden" even when the submitted value
+    merely matches the frame's own default (there is no prior narrowing to
+    compare against yet). Comparing against the frame is also what "has this
+    agent deliberately diverged from department policy" (the "Abweichungen"
+    deviation count this column exists for) actually means. Append-only
+    union, never removed here -- once a save's value diverges from the frame
+    default AT THE TIME of that save, the key stays marked even if a later
+    frame change happens to bring the two back into alignment; that's what
+    keeps `set_department_tools`'s cascade (departments.py) from re-syncing a
+    key the operator has ever deliberately touched. This is the ONLY writer
+    of `narrowing_overridden_keys` anywhere in the codebase; the cascade
+    reads it but must never add to it -- that asymmetry is what makes "has
+    this agent explicitly overridden this tool" unambiguous, instead of
+    having to infer it from `narrowing["tools"][key]`'s mere presence/value,
+    which the cascade also writes into and is provably not a reliable signal
+    on its own (agent tool login selection design, Task 5 fix round 2).
     """
     raw_tools = narrowing.get("tools", {}) if isinstance(narrowing, dict) else {}
     if isinstance(raw_tools, dict):
@@ -121,14 +135,10 @@ async def _enforce_narrowing_logins(
                     f"tool {key!r} needs a login: set connection_id before enabling it",
                 )
     if isinstance(raw_tools, dict) and raw_tools:
-        previous_tools = (
-            agent.narrowing.get("tools", {})
-            if isinstance(agent.narrowing, dict)
-            else {}
-        )
+        frame_tools = frame.get("tools", {}) if isinstance(frame, dict) else {}
         overridden = set(agent.narrowing_overridden_keys or [])
         for key, raw in raw_tools.items():
-            if raw != previous_tools.get(key):
+            if raw != frame_tools.get(key):
                 overridden.add(key)
         agent.narrowing_overridden_keys = sorted(overridden)
 
@@ -190,7 +200,11 @@ async def create_agent(
     )
     if body.narrowing:
         await _enforce_narrowing_logins(
-            db, tenant_id=principal.tenant_id, agent=agent, narrowing=body.narrowing
+            db,
+            tenant_id=principal.tenant_id,
+            agent=agent,
+            narrowing=body.narrowing,
+            frame=dept.frame or {},
         )
         agent.narrowing = body.narrowing
     db.add(agent)
@@ -306,7 +320,11 @@ async def set_narrowing(
         )
 
     await _enforce_narrowing_logins(
-        db, tenant_id=principal.tenant_id, agent=agent, narrowing=body.narrowing
+        db,
+        tenant_id=principal.tenant_id,
+        agent=agent,
+        narrowing=body.narrowing,
+        frame=frame,
     )
     agent.narrowing = body.narrowing
     await db.flush()

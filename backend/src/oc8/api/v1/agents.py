@@ -219,11 +219,20 @@ async def _agent_detail_dto(db: DbSession, agent: m.Agent) -> AgentDetailDTO:
     dept_name = dept.name if dept else None
 
     effective = effective_tool_policies(frame, agent.narrowing)
-    frame_tools = {k: ToolPolicyDTO(**v) for k, v in _frame_tools_json(frame).items()}
+    # Through `ToolPolicy.from_json(v).to_json()`, not a raw `**v` passthrough:
+    # a stored frame row can predate migration 0087's write/send -> modify data
+    # merge (Task 3) and still carry the old keys, which `from_json` no longer
+    # recognizes -- normalizing here is what keeps this from raising on an
+    # unmigrated row instead of just showing modify=False for it until that
+    # migration runs.
+    frame_tools = {
+        k: ToolPolicyDTO(**ToolPolicy.from_json(v).to_json())
+        for k, v in _frame_tools_json(frame).items()
+    }
     # Same normalization `narrowing_within_frame`/`effective_tool_policies`
     # already apply to this same raw dict -- a stored narrowing row can be
     # partial (only the keys a given save actually touched), so this must
-    # default missing read/write/send the same way, not require them present.
+    # default missing read/modify the same way, not require them present.
     raw_narrowing_tools = (agent.narrowing or {}).get("tools", {})
     narrowing_tools = {
         k: ToolPolicyDTO(**ToolPolicy.from_json(v).to_json())

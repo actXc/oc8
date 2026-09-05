@@ -58,7 +58,11 @@ async def test_resaving_an_unchanged_tool_does_not_mark_it_as_overridden(
             # Resave the narrowing with the exact same value as what's already stored.
             r = await client.put(
                 f"/api/v1/agents/{agent_id}/narrowing",
-                json={"narrowing": {"tools": {"github": {"enabled": True, "read": True, "modify": False}}}},
+                json={
+                    "narrowing": {
+                        "tools": {"github": {"enabled": True, "read": True, "modify": False}}
+                    }
+                },
                 headers=headers,
             )
             assert r.status_code == 200, r.text
@@ -95,7 +99,11 @@ async def test_resaving_a_tool_with_a_changed_value_does_mark_it_as_overridden(
             headers = {"Authorization": f"Bearer {_token(tenant)}"}
             r = await client.put(
                 f"/api/v1/agents/{agent_id}/narrowing",
-                json={"narrowing": {"tools": {"github": {"enabled": True, "read": True, "modify": False}}}},
+                json={
+                    "narrowing": {
+                        "tools": {"github": {"enabled": True, "read": True, "modify": False}}
+                    }
+                },
                 headers=headers,
             )
             assert r.status_code == 200, r.text
