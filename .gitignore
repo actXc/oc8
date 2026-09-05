@@ -81,3 +81,4 @@ plugins/**/__pycache__/
 
 # Serena MCP tool local cache/config
 .serena/
+.superpowers/

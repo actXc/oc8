@@ -33,7 +33,7 @@ async def _seed_department_with_two_agents(
             name="Helpdesk",
             frame={
                 "tools": {
-                    "odoo": {"enabled": True, "read": True, "write": False, "send": False}
+                    "odoo": {"enabled": True, "read": True, "modify": False, "modify": False}
                 }
             },
         )
@@ -60,7 +60,7 @@ async def test_enabling_a_tool_absent_from_the_frame_succeeds(
                     "narrowing": {
                         "tools": {
                             "odoo": {"enabled": True, "read": True},
-                            "salesforce": {"enabled": True, "read": True, "write": False},
+                            "salesforce": {"enabled": True, "read": True, "modify": False},
                         }
                     }
                 },

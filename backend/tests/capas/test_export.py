@@ -280,8 +280,8 @@ async def test_build_department_export_drops_null_policy_fields(
                     "odoo": {
                         "only": None,
                         "read": True,
-                        "send": True,
-                        "write": True,
+                        "modify": True,
+                        "modify": True,
                         "enabled": True,
                         "approval_eur": None,
                         "approval_actions": [],

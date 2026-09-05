@@ -62,8 +62,8 @@ async def test_run_agent_codes_in_sandbox(
         dept = m.Department(
             tenant_id=tenant,
             name="Eng",
-            frame={"tools": {"coding": {"enabled": True, "read": True, "write": True,
-                                         "send": False, "approval_eur": None}}},
+            frame={"tools": {"coding": {"enabled": True, "read": True, "modify": True,
+                                         "modify": False, "approval_eur": None}}},
         )
         db.add(dept)
         await db.flush()

@@ -71,7 +71,6 @@ from oc8.audit import append_event
 from oc8.authz.pdp import (
     Decision,
     Effect,
-    agent_tool_rights,
     effective_tool_policies,
     required_right,
 )
@@ -285,9 +284,7 @@ async def _list_tools(
     another.
     """
     frame = dept.frame if dept is not None else {}
-    policies = effective_tool_policies(
-        frame, agent.narrowing or {}, role_rights=await agent_tool_rights(db, agent)
-    )
+    policies = effective_tool_policies(frame, agent.narrowing or {})
 
     allowed: dict[str, list[Any]] = {}
     for conn in conns:
@@ -514,10 +511,6 @@ async def _call_tool(
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
     frame = dept.frame if dept is not None else {}
-    # §5.3's first term, resolved once per call rather than at each of the two
-    # places below that intersect it: one call must not be judged against two
-    # different answers to "what may this agent's role do".
-    role_rights = await agent_tool_rights(db, agent)
     # Which system this call belongs to, and what it is called THERE. Every
     # seam below -- the right classification, the value, the record, whether it
     # reaches a person -- belongs to that connection and to no other, which is
@@ -534,6 +527,9 @@ async def _call_tool(
     value_spec = cfg.get("value_spec") if isinstance(cfg.get("value_spec"), dict) else None
     focus_spec = cfg.get("focus_spec") if isinstance(cfg.get("focus_spec"), dict) else None
     outward_tools = cfg.get("outward_tools") if isinstance(cfg.get("outward_tools"), list) else None
+    outward_skip_spec = (
+        cfg.get("outward_skip_spec") if isinstance(cfg.get("outward_skip_spec"), dict) else None
+    )
     scopes = _manifest_scopes(conn)
     if conn is not None and scopes is None:
         warn_unclassified_connection(conn.id, conn.name)
@@ -662,9 +658,7 @@ async def _call_tool(
                 skill_tool_names=skill_tool_names,
                 delegation_depth=int(run.context.get("delegation_depth", 0)),
                 skill_thresholds=(),
-                tool_policies=effective_tool_policies(
-                    frame, agent.narrowing or {}, role_rights=role_rights
-                ),
+                tool_policies=effective_tool_policies(frame, agent.narrowing or {}),
                 # A core tool belongs to no connection, so it has neither scopes
                 # nor a connection key -- the checks that matter for it (self,
                 # real id, depth) are inside _authorize.
@@ -749,9 +743,7 @@ async def _call_tool(
             for g in s.definition.guardrails
             if g.type == "value_threshold" and g.then == "require_approval"
         ),
-        tool_policies=effective_tool_policies(
-            frame, agent.narrowing or {}, role_rights=role_rights
-        ),
+        tool_policies=effective_tool_policies(frame, agent.narrowing or {}),
         connection_key=conn.name if conn is not None else None,
         tool_scopes=scopes,
         value_spec=value_spec,
@@ -908,7 +900,7 @@ async def _call_tool(
     # Before the call, never after: the point is that the recipient is not
     # reached a second time, and a check that ran afterwards would only be able
     # to report it.
-    target = outward_target(tc.name, tc.arguments, focus_spec, outward_tools)
+    target = outward_target(tc.name, tc.arguments, focus_spec, outward_tools, outward_skip_spec)
     if target is not None and run.task_id is not None:
         if await already_delivered(db, tenant_id=run.tenant_id, task_id=run.task_id, target=target):
             return _tool_result(REFUSAL.format(target=target), is_error=True)

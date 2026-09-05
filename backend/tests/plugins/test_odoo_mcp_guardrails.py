@@ -98,7 +98,7 @@ def test_no_tool_is_write_so_every_guardrail_write_is_false() -> None:
     # confer nothing while implying an entitlement that does not exist.
     lib = _library()
     for g in lib.guardrail:
-        assert g.write is False, f"{g.key} sets write=True but odoo_mcp has no write tool"
+        assert g.write is False, f"{g.key} sets modify=True but odoo_mcp has no write tool"
 
 
 def test_helpdesk_entry_gates_only_post_message_and_keeps_send_true() -> None:
@@ -625,7 +625,7 @@ def test_integration_the_raw_frame_helper_cannot_see_a_tool_name() -> None:
             }
         }
     }
-    assert authorize_tool(frame, {}, tool_key=_CONNECTION_KEY, action="send").effect is Effect.ALLOW
+    assert authorize_tool(frame, {}, tool_key=_CONNECTION_KEY, action="modify").effect is Effect.ALLOW
     # The live gate, given the same entry and the tool the call actually names:
     assert _decide("helpdesk_reply_needs_approval", right="send", tool="post_message").effect is (
         Effect.REQUIRE_APPROVAL

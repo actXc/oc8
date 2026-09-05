@@ -68,6 +68,17 @@ args = ["tool", "run", "mcp-server-odoo"]
 # else here writes to the system, not to a human, and stays unlimited.
 outward_tools = ["post_message"]
 
+# NEUTRAL SEAM (outward_skip_spec): `post_message` writes BOTH an internal note
+# (subtype "note", staff-only, never reaches the customer) and a genuine
+# customer-visible reply (subtype "comment") through the same tool. Without
+# this, the outward guard above cannot tell them apart -- it saw an internal
+# note land on a ticket and refused the real reply right after as a "duplicate
+# answer", so the ticket looked handled (note written, status changed) while
+# the customer got nothing. Live, 2026-08-31: both fresh helpdesk tickets in
+# this run's queue. A `subtype = "note"` call never counts as reaching anyone.
+[connections.config.outward_skip_spec.post_message]
+subtype = ["note"]
+
 # NEUTRAL SEAM (tool_notes): free text appended to a specific tool's own
 # description, applied generically by oc8.agent.tool_notes -- core has no
 # idea this is about Odoo. This entry only ever grows by adding a SPECIFIC

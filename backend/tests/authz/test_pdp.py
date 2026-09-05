@@ -60,88 +60,88 @@ def _frame(**tool_kwargs: object) -> dict:
 
 
 def test_approval_action_forces_approval_regardless_of_value() -> None:
-    frame = _frame(write=True, approval_actions=["write"])
-    decision = authorize_tool(frame, {}, tool_key="crm", action="write")
+    frame = _frame(modify=True, approval_actions=["modify"])
+    decision = authorize_tool(frame, {}, tool_key="crm", action="modify")
     assert decision.effect is Effect.REQUIRE_APPROVAL
-    assert "write" in decision.reason
+    assert "modify" in decision.reason
     assert "always needs approval" in decision.reason
 
 
 def test_approval_action_forces_approval_even_without_a_euro_threshold() -> None:
-    frame = _frame(send=True, approval_actions=["send"])
+    frame = _frame(modify=True, approval_actions=["modify"])
     # No approval_eur is set at all -- the old mechanism could not express this.
-    decision = authorize_tool(frame, {}, tool_key="crm", action="send", value_eur=0)
+    decision = authorize_tool(frame, {}, tool_key="crm", action="modify", value_eur=0)
     assert decision.effect is Effect.REQUIRE_APPROVAL
 
 
 def test_approval_action_wins_over_the_euro_threshold() -> None:
     # If it were compared, a low value would ALLOW. It must not be compared.
-    frame = _frame(send=True, approval_actions=["send"], approval_eur=100000)
-    decision = authorize_tool(frame, {}, tool_key="crm", action="send", value_eur=1)
+    frame = _frame(modify=True, approval_actions=["modify"], approval_eur=100000)
+    decision = authorize_tool(frame, {}, tool_key="crm", action="modify", value_eur=1)
     assert decision.effect is Effect.REQUIRE_APPROVAL
     assert "always needs approval" in decision.reason
 
 
 def test_narrowing_cannot_remove_a_frame_approval_requirement() -> None:
-    frame = _frame(send=True, approval_actions=["send"])
+    frame = _frame(modify=True, approval_actions=["modify"])
     narrowing = {
-        "tools": {"crm": {"enabled": True, "read": True, "send": True, "approval_actions": []}}
+        "tools": {"crm": {"enabled": True, "read": True, "modify": True, "approval_actions": []}}
     }
     eff = effective_tool_policies(frame, narrowing)
-    assert "send" in eff["crm"].approval_actions
-    decision = authorize_tool(frame, narrowing, tool_key="crm", action="send", value_eur=0)
+    assert "modify" in eff["crm"].approval_actions
+    decision = authorize_tool(frame, narrowing, tool_key="crm", action="modify", value_eur=0)
     assert decision.effect is Effect.REQUIRE_APPROVAL
 
 
 def test_narrowing_can_add_an_approval_requirement_the_frame_lacked() -> None:
-    frame = _frame(write=True)
+    frame = _frame(modify=True)
     narrowing = {
         "tools": {
-            "crm": {"enabled": True, "read": True, "write": True, "approval_actions": ["write"]}
+            "crm": {"enabled": True, "read": True, "modify": True, "approval_actions": ["modify"]}
         }
     }
     eff = effective_tool_policies(frame, narrowing)
-    assert "write" in eff["crm"].approval_actions
+    assert "modify" in eff["crm"].approval_actions
 
 
 def test_absent_approval_actions_behaves_exactly_as_before() -> None:
-    frame = _frame(send=True, approval_eur=500)
-    decision_below = authorize_tool(frame, {}, tool_key="crm", action="send", value_eur=100)
-    decision_above = authorize_tool(frame, {}, tool_key="crm", action="send", value_eur=500)
+    frame = _frame(modify=True, approval_eur=500)
+    decision_below = authorize_tool(frame, {}, tool_key="crm", action="modify", value_eur=100)
+    decision_above = authorize_tool(frame, {}, tool_key="crm", action="modify", value_eur=500)
     assert decision_below.effect is Effect.ALLOW
     assert decision_above.effect is Effect.REQUIRE_APPROVAL
 
 
 def test_to_json_round_trips_approval_actions() -> None:
-    policy = ToolPolicy(enabled=True, read=True, write=True, approval_actions=frozenset({"write"}))
+    policy = ToolPolicy(enabled=True, read=True, modify=True, approval_actions=frozenset({"modify"}))
     restored = ToolPolicy.from_json(policy.to_json())
-    assert restored.approval_actions == frozenset({"write"})
+    assert restored.approval_actions == frozenset({"modify"})
 
 
 def test_approval_action_by_tool_name_forces_approval_even_though_the_right_is_not_listed() -> None:
-    # "post_message" is a TOOL, not a right. The right it exercises ("send")
+    # "post_message" is a TOOL, not a right. The right it exercises ("modify")
     # is deliberately absent from approval_actions -- only the tool name is
     # listed, and that alone must be enough to require a human.
     frame = {
         "tools": {
-            "post_message": {"enabled": True, "send": True, "approval_actions": ["post_message"]}
+            "post_message": {"enabled": True, "modify": True, "approval_actions": ["post_message"]}
         }
     }
-    decision = authorize_tool(frame, {}, tool_key="post_message", action="send")
+    decision = authorize_tool(frame, {}, tool_key="post_message", action="modify")
     assert decision.effect is Effect.REQUIRE_APPROVAL
     assert "post_message" in decision.reason
 
 
 def test_approval_action_by_tool_name_does_not_gate_other_tools_sharing_the_right() -> None:
     # Precision, not just strictness: naming "post_message" must leave
-    # "create_record" -- which shares the "send" right -- untouched.
+    # "create_record" -- which shares the "modify" right -- untouched.
     frame = {
         "tools": {
-            "post_message": {"enabled": True, "send": True, "approval_actions": ["post_message"]},
-            "create_record": {"enabled": True, "send": True},
+            "post_message": {"enabled": True, "modify": True, "approval_actions": ["post_message"]},
+            "create_record": {"enabled": True, "modify": True},
         }
     }
-    decision = authorize_tool(frame, {}, tool_key="create_record", action="send")
+    decision = authorize_tool(frame, {}, tool_key="create_record", action="modify")
     assert decision.effect is Effect.ALLOW
 
 
@@ -150,26 +150,26 @@ def test_narrowing_cannot_remove_a_frame_tool_name_approval_requirement() -> Non
     # for a tool-name entry: a narrowing must not be able to drop it.
     frame = {
         "tools": {
-            "post_message": {"enabled": True, "send": True, "approval_actions": ["post_message"]}
+            "post_message": {"enabled": True, "modify": True, "approval_actions": ["post_message"]}
         }
     }
-    narrowing = {"tools": {"post_message": {"enabled": True, "send": True, "approval_actions": []}}}
+    narrowing = {"tools": {"post_message": {"enabled": True, "modify": True, "approval_actions": []}}}
     eff = effective_tool_policies(frame, narrowing)
     assert "post_message" in eff["post_message"].approval_actions
-    decision = authorize_tool(frame, narrowing, tool_key="post_message", action="send")
+    decision = authorize_tool(frame, narrowing, tool_key="post_message", action="modify")
     assert decision.effect is Effect.REQUIRE_APPROVAL
 
 
 def test_narrowing_can_add_a_tool_name_approval_requirement_the_frame_lacked() -> None:
     # Mirror of test_narrowing_can_add_an_approval_requirement_the_frame_lacked,
     # but the added entry is a tool name rather than a right.
-    frame = _frame(send=True)
+    frame = _frame(modify=True)
     narrowing = {
-        "tools": {"crm": {"enabled": True, "read": True, "send": True, "approval_actions": ["crm"]}}
+        "tools": {"crm": {"enabled": True, "read": True, "modify": True, "approval_actions": ["crm"]}}
     }
     eff = effective_tool_policies(frame, narrowing)
     assert "crm" in eff["crm"].approval_actions
-    decision = authorize_tool(frame, narrowing, tool_key="crm", action="send")
+    decision = authorize_tool(frame, narrowing, tool_key="crm", action="modify")
     assert decision.effect is Effect.REQUIRE_APPROVAL
 
 
@@ -183,8 +183,8 @@ def test_narrowing_within_frame_does_not_flag_a_tool_absent_from_the_frame() -> 
 
 
 def test_narrowing_within_frame_still_flags_a_frame_tool_widened_beyond_it() -> None:
-    frame = _frame(write=False)
-    narrowing = {"tools": {"crm": {"enabled": True, "read": True, "write": True}}}
+    frame = _frame(modify=False)
+    narrowing = {"tools": {"crm": {"enabled": True, "read": True, "modify": True}}}
     violations = narrowing_within_frame(frame, narrowing)
     assert any(v.tool_key == "crm" for v in violations)
 
@@ -198,8 +198,7 @@ def test_effective_tool_policies_grants_an_agent_exclusive_tool() -> None:
             "salesforce": {
                 "enabled": True,
                 "read": True,
-                "write": True,
-                "send": False,
+                "modify": True,
                 "connection_id": "conn-1",
             }
         }
@@ -207,20 +206,11 @@ def test_effective_tool_policies_grants_an_agent_exclusive_tool() -> None:
     eff = effective_tool_policies(frame, narrowing)
     assert eff["salesforce"].enabled is True
     assert eff["salesforce"].read is True
-    assert eff["salesforce"].write is True
-    assert eff["salesforce"].send is False
+    assert eff["salesforce"].modify is True
     assert eff["salesforce"].connection_id == "conn-1"
     # The frame's own tool is unaffected by the agent-exclusive addition.
     assert "crm" in eff
     assert eff["crm"].enabled is True
-
-
-def test_effective_tool_policies_agent_exclusive_tool_still_masked_by_role_rights() -> None:
-    frame = _frame()
-    narrowing = {"tools": {"salesforce": {"enabled": True, "read": True, "write": True}}}
-    eff = effective_tool_policies(frame, narrowing, role_rights=frozenset({"read"}))
-    assert eff["salesforce"].read is True
-    assert eff["salesforce"].write is False
 
 
 def test_effective_tool_policies_agent_exclusive_tool_disabled_stays_disabled() -> None:
@@ -228,3 +218,30 @@ def test_effective_tool_policies_agent_exclusive_tool_disabled_stays_disabled() 
     narrowing = {"tools": {"salesforce": {"enabled": False, "read": True}}}
     eff = effective_tool_policies(frame, narrowing)
     assert eff["salesforce"].enabled is False
+
+
+# ---------- New tests for modify right (replacing write+send) ----------
+
+
+def test_modify_right_replaces_write_and_send() -> None:
+    frame = {"tools": {"odoo": ToolPolicy(enabled=True, read=True, modify=True).to_json()}}
+    policies = effective_tool_policies(frame, {})
+    assert policies["odoo"].modify is True
+    assert not hasattr(policies["odoo"], "write")
+    assert not hasattr(policies["odoo"], "send")
+
+
+def test_effective_tool_policies_no_longer_takes_role_rights() -> None:
+    import inspect
+
+    sig = inspect.signature(effective_tool_policies)
+    assert "role_rights" not in sig.parameters
+
+
+def test_a_narrowing_that_disables_modify_is_enforced() -> None:
+    frame = {"tools": {"odoo": {"enabled": True, "read": True, "modify": True}}}
+    narrowing = {"tools": {"odoo": {"enabled": True, "read": True, "modify": False}}}
+    decision = authorize_tool(
+        frame, narrowing, tool_key="odoo", action="modify", value_eur=None
+    )
+    assert decision.effect is Effect.DENY

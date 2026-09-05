@@ -35,7 +35,7 @@ from oc8.api.deps import DbSession, require_departmental
 from oc8.api.v1._serializers import agent_to_dto
 from oc8.api.v1.files import _attachment_dto
 from oc8.authz.authority import authority_for_principal, tenant_wide_read
-from oc8.authz.pdp import ToolPolicy, agent_tool_rights, effective_tool_policies
+from oc8.authz.pdp import ToolPolicy, effective_tool_policies
 from oc8.authz.permissions import AGENT, VIEW, perm
 from oc8.authz.scope import HumanActor
 from oc8.runtime.states import TERMINAL
@@ -218,9 +218,7 @@ async def _agent_detail_dto(db: DbSession, agent: m.Agent) -> AgentDetailDTO:
     frame = dept.frame if dept else {}
     dept_name = dept.name if dept else None
 
-    effective = effective_tool_policies(
-        frame, agent.narrowing, role_rights=await agent_tool_rights(db, agent)
-    )
+    effective = effective_tool_policies(frame, agent.narrowing)
     frame_tools = {k: ToolPolicyDTO(**v) for k, v in _frame_tools_json(frame).items()}
     # Same normalization `narrowing_within_frame`/`effective_tool_policies`
     # already apply to this same raw dict -- a stored narrowing row can be

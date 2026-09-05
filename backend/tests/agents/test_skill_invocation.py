@@ -89,8 +89,8 @@ SKILL_DEF: dict[str, Any] = {
 async def _setup(db: Any, tenant: uuid.UUID) -> tuple[m.Agent, m.Skill, m.SkillVersion]:
     dept = m.Department(
         id=uuid.uuid4(), tenant_id=tenant, name="Buchhaltung", goal="",
-        frame={"tools": {"demo-fs": {"enabled": True, "read": True, "write": True,
-                                     "send": False, "approval_eur": None}},
+        frame={"tools": {"demo-fs": {"enabled": True, "read": True, "modify": True,
+                                     "modify": False, "approval_eur": None}},
                "kbs": [], "memory": {}},
         presentation={"icon": "building", "slug": "buchhaltung"},
     )

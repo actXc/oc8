@@ -52,7 +52,7 @@ def test_unknown_connection_key_denies() -> None:
 
 def test_disabled_entry_denies() -> None:
     d = authorize_tool_call(
-        policies=_policies(odoo=ToolPolicy(enabled=False, read=True, write=True)),
+        policies=_policies(odoo=ToolPolicy(enabled=False, read=True, modify=True)),
         connection_key="odoo",
         right="read",
         value=None,
@@ -63,7 +63,7 @@ def test_disabled_entry_denies() -> None:
 
 def test_missing_right_denies_and_names_it() -> None:
     d = authorize_tool_call(
-        policies=_policies(odoo=ToolPolicy(enabled=True, read=True, write=False)),
+        policies=_policies(odoo=ToolPolicy(enabled=True, read=True, modify=False)),
         connection_key="odoo",
         right="write",
         value=None,
@@ -84,7 +84,7 @@ def test_granted_right_allows() -> None:
 
 def test_value_over_policy_threshold_requires_approval() -> None:
     d = authorize_tool_call(
-        policies=_policies(odoo=ToolPolicy(enabled=True, write=True, approval_eur=2500)),
+        policies=_policies(odoo=ToolPolicy(enabled=True, modify=True, approval_eur=2500)),
         connection_key="odoo",
         right="write",
         value=3000.0,
@@ -95,7 +95,7 @@ def test_value_over_policy_threshold_requires_approval() -> None:
 
 def test_value_under_every_threshold_allows() -> None:
     d = authorize_tool_call(
-        policies=_policies(odoo=ToolPolicy(enabled=True, write=True, approval_eur=2500)),
+        policies=_policies(odoo=ToolPolicy(enabled=True, modify=True, approval_eur=2500)),
         connection_key="odoo",
         right="write",
         value=100.0,
@@ -107,7 +107,7 @@ def test_value_under_every_threshold_allows() -> None:
 def test_the_strictest_threshold_governs() -> None:
     # Policy says 2500, a skill guardrail says 100 -> 100 wins.
     d = authorize_tool_call(
-        policies=_policies(odoo=ToolPolicy(enabled=True, write=True, approval_eur=2500)),
+        policies=_policies(odoo=ToolPolicy(enabled=True, modify=True, approval_eur=2500)),
         connection_key="odoo",
         right="write",
         value=500.0,
@@ -119,7 +119,7 @@ def test_the_strictest_threshold_governs() -> None:
 
 def test_none_thresholds_are_ignored() -> None:
     d = authorize_tool_call(
-        policies=_policies(odoo=ToolPolicy(enabled=True, write=True, approval_eur=None)),
+        policies=_policies(odoo=ToolPolicy(enabled=True, modify=True, approval_eur=None)),
         connection_key="odoo",
         right="write",
         value=1_000_000.0,
@@ -134,7 +134,7 @@ def test_non_rights_attribute_denies() -> None:
     # right and bypass read/write/send entirely.
     d = authorize_tool_call(
         policies=_policies(
-            odoo=ToolPolicy(enabled=True, read=False, write=False, send=False, approval_eur=100)
+            odoo=ToolPolicy(enabled=True, read=False, modify=False, approval_eur=100)
         ),
         connection_key="odoo",
         right="approval_eur",
@@ -145,7 +145,7 @@ def test_non_rights_attribute_denies() -> None:
 
 def test_unknown_right_denies() -> None:
     d = authorize_tool_call(
-        policies=_policies(odoo=ToolPolicy(enabled=True, read=True, write=True, send=True)),
+        policies=_policies(odoo=ToolPolicy(enabled=True, read=True, modify=True)),
         connection_key="odoo",
         right="admin",
         value=None,
@@ -183,7 +183,7 @@ def test_a_zero_threshold_gates_an_action_that_carries_no_value() -> None:
     that; `None` still means "no threshold at all".
     """
     d = authorize_tool_call(
-        policies=_policies(odoo=ToolPolicy(enabled=True, write=True, approval_eur=0)),
+        policies=_policies(odoo=ToolPolicy(enabled=True, modify=True, approval_eur=0)),
         connection_key="odoo",
         right="write",
         value=None,
@@ -195,7 +195,7 @@ def test_a_valueless_call_under_a_real_threshold_is_still_allowed() -> None:
     """The compatibility half: every existing frame carries a positive threshold,
     and a valueless call under one must keep passing untouched."""
     d = authorize_tool_call(
-        policies=_policies(odoo=ToolPolicy(enabled=True, write=True, approval_eur=3000)),
+        policies=_policies(odoo=ToolPolicy(enabled=True, modify=True, approval_eur=3000)),
         connection_key="odoo",
         right="write",
         value=None,
@@ -209,7 +209,7 @@ def test_approval_actions_right_requires_approval_with_no_threshold_at_all() -> 
     # `approval_actions`.
     d = authorize_tool_call(
         policies=_policies(
-            odoo=ToolPolicy(enabled=True, send=True, approval_actions=frozenset({"send"}))
+            odoo=ToolPolicy(enabled=True, modify=True, approval_actions=frozenset({"send"}))
         ),
         connection_key="odoo",
         right="send",
@@ -224,7 +224,7 @@ def test_approval_actions_tool_name_gates_only_that_tool() -> None:
     # "post_message" is listed by TOOL NAME, not by right. It must require
     # approval; "create_record", which shares the same "send" right on the
     # same connection, must not.
-    policy = ToolPolicy(enabled=True, send=True, approval_actions=frozenset({"post_message"}))
+    policy = ToolPolicy(enabled=True, modify=True, approval_actions=frozenset({"post_message"}))
     gated = authorize_tool_call(
         policies=_policies(odoo=policy),
         connection_key="odoo",
@@ -252,7 +252,7 @@ def test_approval_actions_wins_over_a_high_euro_threshold() -> None:
         policies=_policies(
             odoo=ToolPolicy(
                 enabled=True,
-                send=True,
+                modify=True,
                 approval_eur=100_000,
                 approval_actions=frozenset({"send"}),
             )
@@ -272,7 +272,7 @@ def test_a_denied_right_stays_denied_even_if_listed_in_approval_actions() -> Non
     # route to a human.
     d = authorize_tool_call(
         policies=_policies(
-            odoo=ToolPolicy(enabled=True, send=False, approval_actions=frozenset({"send"}))
+            odoo=ToolPolicy(enabled=True, modify=False, approval_actions=frozenset({"send"}))
         ),
         connection_key="odoo",
         right="send",
@@ -287,7 +287,7 @@ def test_empty_approval_actions_is_a_full_regression_no_op() -> None:
     # before: euro threshold governs, nothing forces approval that the
     # threshold logic wouldn't have already required.
     below = authorize_tool_call(
-        policies=_policies(odoo=ToolPolicy(enabled=True, send=True, approval_eur=2500)),
+        policies=_policies(odoo=ToolPolicy(enabled=True, modify=True, approval_eur=2500)),
         connection_key="odoo",
         right="send",
         tool="post_message",
@@ -296,7 +296,7 @@ def test_empty_approval_actions_is_a_full_regression_no_op() -> None:
     assert below.effect is Effect.ALLOW
 
     above = authorize_tool_call(
-        policies=_policies(odoo=ToolPolicy(enabled=True, send=True, approval_eur=2500)),
+        policies=_policies(odoo=ToolPolicy(enabled=True, modify=True, approval_eur=2500)),
         connection_key="odoo",
         right="send",
         tool="post_message",
@@ -310,14 +310,14 @@ def test_the_frame_path_gates_a_valueless_send_at_zero_too() -> None:
     by the in-process toolset). The two must not disagree about what €0 means, or
     the same department behaves differently depending on which runtime executes it.
     """
-    frame = {"tools": {"odoo": {"enabled": True, "read": True, "send": True, "approval_eur": 0}}}
-    gated = authorize_tool(frame, {}, tool_key="odoo", action="send", value_eur=None)
+    frame = {"tools": {"odoo": {"enabled": True, "read": True, "modify": True, "approval_eur": 0}}}
+    gated = authorize_tool(frame, {}, tool_key="odoo", action="modify", value_eur=None)
     assert gated.effect is Effect.REQUIRE_APPROVAL
 
     frame_3000 = {
-        "tools": {"odoo": {"enabled": True, "read": True, "send": True, "approval_eur": 3000}}
+        "tools": {"odoo": {"enabled": True, "read": True, "modify": True, "approval_eur": 3000}}
     }
     assert (
-        authorize_tool(frame_3000, {}, tool_key="odoo", action="send", value_eur=None).effect
+        authorize_tool(frame_3000, {}, tool_key="odoo", action="modify", value_eur=None).effect
         is Effect.ALLOW
     )

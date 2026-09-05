@@ -26,7 +26,7 @@ def _headers(tenant: uuid.UUID) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-_FRAME_TOOL_POLICY = {"enabled": True, "read": True, "write": False, "send": False}
+_FRAME_TOOL_POLICY = {"enabled": True, "read": True, "modify": False, "modify": False}
 
 
 async def _seed_agent_with_frame_tool(

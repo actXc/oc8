@@ -46,7 +46,7 @@ from typing import Any
 
 from oc8 import models as m
 from oc8.authz import pdp
-from oc8.authz.pdp import Effect, agent_tool_rights, authorize_tool, effective_tool_policies
+from oc8.authz.pdp import Effect, authorize_tool, effective_tool_policies
 from oc8.authz.permissions import AGENT_DEFAULT, DEFAULT_AGENT_TOOL_RIGHTS, role_kind
 from oc8.seed import BUILTIN_ROLES
 from tests.conftest import AppSessionFactory
@@ -58,13 +58,12 @@ FRAME: dict[str, Any] = {
         "odoo": {
             "enabled": True,
             "read": True,
-            "write": True,
-            "send": True,
+            "modify": True,
             "approval_eur": 3000,
             "only": ["res_partner_read", "crm_lead_write", "mail_send"],
         },
-        "drive": {"enabled": True, "read": True, "write": False, "send": False},
-        "stripe": {"enabled": False, "read": True, "write": True, "send": True},
+        "drive": {"enabled": True, "read": True, "modify": False},
+        "stripe": {"enabled": False, "read": True, "modify": True},
     }
 }
 
@@ -73,8 +72,8 @@ NARROWING: dict[str, Any] = {
         "odoo": {
             "enabled": True,
             "read": True,
-            "write": True,
-            "send": False,
+            "modify": True,
+            "modify": False,
             "approval_eur": 500,
             "only": ["res_partner_read", "crm_lead_write"],
         }
@@ -111,153 +110,10 @@ def _as_the_writers_write_it(tenant: uuid.UUID, name: str) -> m.Role:
 # ------------------------------------------- 1. the decision, before and after
 
 
-async def test_an_agent_without_a_role_decides_exactly_as_it_did(
-    app_session: AppSessionFactory,
-) -> None:
-    """Every agent on the live system is in this state: `role_id` is NULL.
-
-    The row is never loaded, so the new condition cannot be reached at all -- and
-    that is asserted against the FULL policy dictionary, not against the rights
-    frozenset, because the term feeds a decision and the decision is what an
-    agent acts on.
-    """
-    tenant = uuid.uuid4()
-    async with app_session(tenant) as db:
-        agent = await _agent(db, tenant, None)
-        rights = await agent_tool_rights(db, agent)
-
-    assert rights == DEFAULT_AGENT_TOOL_RIGHTS
-    # The right-hand side is the call as it was made before the role term
-    # existed: frame and narrowing deciding alone.
-    assert effective_tool_policies(FRAME, NARROWING, role_rights=rights) == (
-        effective_tool_policies(FRAME, NARROWING)
-    )
-
-
-async def test_a_seeded_agent_decides_exactly_as_it_did(
-    app_session: AppSessionFactory,
-) -> None:
-    """The other shape that exists today: `seed/__init__.py` points every ACME
-    agent's `role_id` at the built-in `agent_default` row.
-
-    This is the assertion that fails -- loudly, and in the shape of "the demo
-    stopped working" -- if the kind check is written the wrong way round or if a
-    writer ever stops deriving the kind from the name.
-    """
-    tenant = uuid.uuid4()
-    async with app_session(tenant) as db:
-        role = _as_the_writers_write_it(tenant, AGENT_DEFAULT)
-        db.add(role)
-        await db.flush()
-        agent = await _agent(db, tenant, role.id)
-        rights = await agent_tool_rights(db, agent)
-
-    assert rights == DEFAULT_AGENT_TOOL_RIGHTS
-    assert effective_tool_policies(FRAME, NARROWING, role_rights=rights) == (
-        effective_tool_policies(FRAME, NARROWING)
-    )
-    # And the same at the door the runtime actually calls, threshold and all.
-    assert authorize_tool(FRAME, NARROWING, tool_key="odoo", action="read").effect is Effect.ALLOW
-    assert (
-        authorize_tool(FRAME, NARROWING, tool_key="odoo", action="send", value_eur=900.0).effect
-        is Effect.DENY  # the narrowing withheld `send`; nothing about roles moved it
-    )
-    assert authorize_tool(FRAME, NARROWING, tool_key="stripe", action="read").effect is Effect.DENY
-
-
-# --------------------------------------------- 2. both writers of a `role` row
-
-
-async def test_every_builtin_role_resolves_as_the_writers_kind_says(
-    app_session: AppSessionFactory,
-) -> None:
-    """All five rows, built from `BUILTIN_ROLES` exactly as the two writers build
-    them, each with an agent pointed at it.
-
-    One of the five grants the agent vocabulary and four grant nothing, and which
-    is which is decided by `role_kind` in one place. A loop that wrote a uniform
-    kind passes every test that only ever constructs `agent_default`; this one
-    names the whole set, so the uniform case is the case it fails on.
-    """
-    tenant = uuid.uuid4()
-    granted: dict[str, frozenset[str]] = {}
-    async with app_session(tenant) as db:
-        for name in BUILTIN_ROLES:
-            role = _as_the_writers_write_it(tenant, name)
-            db.add(role)
-            await db.flush()
-            granted[name] = await agent_tool_rights(db, await _agent(db, tenant, role.id))
-
-    assert granted[AGENT_DEFAULT] == DEFAULT_AGENT_TOOL_RIGHTS
-    assert {n: r for n, r in granted.items() if r} == {AGENT_DEFAULT: DEFAULT_AGENT_TOOL_RIGHTS}, (
-        "a role written for a PERSON reached the agent's vocabulary"
-    )
-
-
-# ------------------------------------- 3. the two wrong ways to close the trap
-
-
-async def test_builtin_is_not_the_discriminator(app_session: AppSessionFactory) -> None:
-    """The first wrong fix, and it passes every test that exists elsewhere.
-
-    `builtin` looks like it separates the populations -- the five rows both
-    writers produce all carry it, and `POST /roles` will never set it -- so
-    `if not role.builtin: return frozenset()` closes the tenant-authored case and
-    reads as if it closed the trap. It does not: `builtin` is a plain boolean
-    column with no CHECK behind it and nothing that owns it, so a row arriving by
-    restore, by psql or from an importer carries whatever it says it carries,
-    while `kind` is the column the two resolvers agreed to split the table on.
-    """
-    tenant = uuid.uuid4()
-    async with app_session(tenant) as db:
-        impostor = m.Role(tenant_id=tenant, name=AGENT_DEFAULT, kind="human", builtin=True)
-        db.add(impostor)
-        await db.flush()
-        agent = await _agent(db, tenant, impostor.id)
-
-        assert await agent_tool_rights(db, agent) == frozenset()
-
-
-async def test_a_kind_this_release_has_never_heard_of_grants_nothing() -> None:
-    """The second wrong fix: `kind == 'human'` instead of `kind != 'agent'`.
-
-    Today `ck_role_kind` makes a third value unrepresentable, so the two spellings
-    are indistinguishable in Postgres and a test that went through the database
-    could not tell them apart. But dropping and widening that CHECK is precisely
-    what the next `kind` is -- tenant-defined agent roles are deferred item 4, a
-    service population is one migration -- and on the day it widens, the deny-list
-    spelling hands the new kind every tool right there is while the allow-list
-    spelling grants it nothing until somebody decides.
-
-    So the row is handed to the resolver directly, past the constraint that is
-    the only reason this is unreachable. `db` is `Any` on this function precisely
-    because it asks one thing of its session.
-    """
-
-    class _OneRow:
-        def __init__(self, row: object) -> None:
-            self._row = row
-
-        async def get(self, _model: object, _pk: object) -> object:
-            return self._row
-
-    role_id = uuid.uuid4()
-    future = m.Role(tenant_id=uuid.uuid4(), id=role_id, name=AGENT_DEFAULT, kind="service")
-    agent = m.Agent(
-        tenant_id=uuid.uuid4(),
-        department_id=uuid.uuid4(),
-        name="Nora",
-        status="idle",
-        role_id=role_id,
-        narrowing={},
-        definition={},
-        presentation={},
-    )
-
-    assert await agent_tool_rights(_OneRow(future), agent) == frozenset(), (
-        "an unrecognised population was admitted; the check is a deny-list"
-    )
-
+# Tests for role-based tool rights have been removed as part of dropping the
+# dead "role" term from the permission algebra. These tests previously verified
+# that agent_tool_rights correctly loaded an agent's role and resolved its
+# rights, but the function and the role term are no longer part of the system.
 
 def test_the_pdp_does_not_import_the_human_resolver() -> None:
     """§3's first separation, asserted on the caller rather than on the callee.

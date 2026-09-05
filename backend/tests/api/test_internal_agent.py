@@ -687,7 +687,7 @@ async def test_a_repeated_write_does_not_reach_the_tool_server_twice(
     async with app_session(tenant) as db:  # type: ignore[operator]
         dept = m.Department(
             tenant_id=tenant, name="Vertrieb",
-            frame={"tools": {"odoo": {"enabled": True, "read": True, "write": True}}},
+            frame={"tools": {"odoo": {"enabled": True, "read": True, "modify": True}}},
         )
         db.add(dept)
         await db.flush()
@@ -878,8 +878,8 @@ async def test_a_denied_call_records_no_timing(
 
     tenant = uuid.uuid4()
     async with app_session(tenant) as db:  # type: ignore[operator]
-        # write=False -> the frame denies create_record outright.
-        agent_id, run_id = await _mcp_backed_run(db, tenant, write=False)
+        # modify=False -> the frame denies create_record outright.
+        agent_id, run_id = await _mcp_backed_run(db, tenant, modify=False)
 
     code, body = await _post_tool(
         tenant,

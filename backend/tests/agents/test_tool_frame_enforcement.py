@@ -25,9 +25,9 @@ def _agent(threshold: float | None = None) -> m.Agent:
 
 FRAME: dict[str, Any] = {
     "tools": {
-        "odoo": {"enabled": True, "read": True, "write": True, "send": False,
+        "odoo": {"enabled": True, "read": True, "modify": True, "modify": False,
                  "approval_eur": 2500},
-        "email": {"enabled": True, "read": True, "write": False, "send": True,
+        "email": {"enabled": True, "read": True, "modify": False, "modify": True,
                   "approval_eur": None},
     }
 }

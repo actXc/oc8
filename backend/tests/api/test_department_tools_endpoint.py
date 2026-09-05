@@ -61,8 +61,8 @@ async def test_well_formed_payload_is_accepted_and_echoed_back(
             "odoo": {
                 "enabled": True,
                 "read": True,
-                "write": False,
-                "send": True,
+                "modify": False,
+                "modify": True,
                 "approvalEur": 3000,
                 "approvalActions": ["send"],
                 "only": ["search_records", "post_message"],
@@ -79,8 +79,8 @@ async def test_well_formed_payload_is_accepted_and_echoed_back(
             "odoo": {
                 "enabled": True,
                 "read": True,
-                "write": False,
-                "send": True,
+                "modify": False,
+                "modify": True,
                 "approval_eur": 3000,
                 "approval_actions": ["send"],
                 "only": ["search_records", "post_message"],
@@ -206,8 +206,8 @@ async def test_applying_a_guardrail_with_nonempty_only_persists_the_exact_list(
             "odoo": {
                 "enabled": True,
                 "read": True,
-                "write": False,
-                "send": True,
+                "modify": False,
+                "modify": True,
                 "approvalEur": 1000,
                 "approvalActions": [],
                 "only": [
@@ -253,8 +253,8 @@ async def test_applying_a_guardrail_with_empty_only_persists_explicit_empty_list
             "odoo": {
                 "enabled": True,
                 "read": True,
-                "write": False,
-                "send": True,
+                "modify": False,
+                "modify": True,
                 "approvalEur": 3000,
                 "approvalActions": [],
                 "only": [],

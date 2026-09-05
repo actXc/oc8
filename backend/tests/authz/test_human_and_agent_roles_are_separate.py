@@ -45,7 +45,6 @@ from httpx import ASGITransport, AsyncClient
 
 from oc8 import models as m
 from oc8.auth import get_identity_provider
-from oc8.authz.pdp import agent_tool_rights
 from oc8.authz.permissions import (
     AGENT_DEFAULT,
     BUILTIN_ROLE_PERMISSIONS,
@@ -147,72 +146,6 @@ async def test_a_tenant_role_is_always_written_as_a_humans(
     assert [r.kind for r in rows] in ([], ["human"]), (
         "the request body chose which population to write into"
     )
-
-
-async def test_an_agent_pointed_at_a_human_kind_role_gets_no_tool_rights(
-    app_session: AppSessionFactory,
-) -> None:
-    """The live trap, reproduced exactly.
-
-    A tenant-created role named `agent_default`, human-kind, holding nothing --
-    and an agent pointed at it. Today `tool_rights_for_role(role.name)` looks the
-    NAME up in `BUILTIN_ROLE_PERMISSIONS`, finds the agent's own bundle, and
-    returns all three rights. The name a tenant typed must not be able to reach
-    the agent's vocabulary; only the `kind` column may.
-    """
-    tenant = uuid.uuid4()
-    async with app_session(tenant) as db:
-        impostor = m.Role(tenant_id=tenant, name=AGENT_DEFAULT, kind="human", builtin=False)
-        db.add(impostor)
-        await db.flush()
-        agent = await _agent_on(db, tenant, impostor.id)
-
-        granted = await agent_tool_rights(db, agent)
-
-    assert granted == frozenset(), (
-        "a role a tenant NAMED `agent_default` handed an agent every tool right "
-        "there is; the name is still the discriminator"
-    )
-
-
-async def test_a_soft_deleted_agent_role_grants_no_tool_rights(
-    app_session: AppSessionFactory,
-) -> None:
-    """`SoftDeleteMixin` adds no query filter, so `deleted_at` is load-bearing on
-    this path too. A deleted role that still grants is worse than a dangling one:
-    the row is gone from every screen and the agent keeps acting."""
-    tenant = uuid.uuid4()
-    async with app_session(tenant) as db:
-        role = m.Role(tenant_id=tenant, name=AGENT_DEFAULT, kind="agent", builtin=True)
-        db.add(role)
-        await db.flush()
-        role.deleted_at = dt.datetime.now(tz=dt.UTC)
-        await db.flush()
-        agent = await _agent_on(db, tenant, role.id)
-
-        assert await agent_tool_rights(db, agent) == frozenset()
-
-
-async def test_the_agents_own_role_still_grants_all_three(
-    app_session: AppSessionFactory,
-) -> None:
-    """The other half of the guard, and the reason it is not simply "return
-    nothing".
-
-    Every seeded ACME agent points at this row (`seed/__init__.py:1004`). If the
-    kind check were written the obvious wrong way round -- or if the seed wrote a
-    uniform `'human'` -- this is the assertion that fails, instead of every agent
-    in the demo silently refusing every tool call for a reason no log line
-    mentions a role in.
-    """
-    tenant = uuid.uuid4()
-    async with app_session(tenant) as db:
-        role = m.Role(tenant_id=tenant, name=AGENT_DEFAULT, kind="agent", builtin=True)
-        db.add(role)
-        await db.flush()
-        agent = await _agent_on(db, tenant, role.id)
-
-        assert await agent_tool_rights(db, agent) == DEFAULT_AGENT_TOOL_RIGHTS
 
 
 def test_tool_rights_for_role_is_still_a_pure_function() -> None:

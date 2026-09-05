@@ -133,7 +133,7 @@ async def test_a_skill_guardrail_tightens_the_approval_threshold(
             "tools": {
                 **department.frame["tools"],
                 "coding": {
-                    "enabled": True, "read": True, "write": True, "send": True,
+                    "enabled": True, "read": True, "modify": True, "modify": True,
                     "approval_eur": None,
                 },
             },
@@ -177,7 +177,7 @@ async def _guarded_run(app_session, monkeypatch, pre_decided):
             **department.frame,
             "tools": {
                 **department.frame["tools"],
-                "coding": {"enabled": True, "read": True, "write": True, "send": True,
+                "coding": {"enabled": True, "read": True, "modify": True, "modify": True,
                            "approval_eur": None},
             },
         }

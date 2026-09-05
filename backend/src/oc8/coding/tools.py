@@ -55,8 +55,8 @@ CODING_TOOLS: list[NeutralTool] = [
 CODING_FRAME_KEY = "coding"
 CODING_TOOL_RIGHTS: dict[str, str] = {
     "fs_read": "read",
-    "fs_write": "write",
-    "shell_run": "write",
+    "fs_write": "modify",
+    "shell_run": "modify",
 }
 
 

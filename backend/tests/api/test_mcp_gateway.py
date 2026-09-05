@@ -29,7 +29,7 @@ from tests.conftest import AppSessionFactory
 pytestmark = pytest.mark.asyncio
 
 MCP = "/mcp"
-FRAME = {"tools": {"odoo": {"enabled": True, "read": True, "write": True, "approval_eur": 3000}}}
+FRAME = {"tools": {"odoo": {"enabled": True, "read": True, "modify": True, "approval_eur": 3000}}}
 
 # tests/api/test_mcp_gateway.py -> repo root -> plugins/claude_code_runtime.
 # One test in this file (the end-to-end ask_user path) imports claude_code_runtime
@@ -296,7 +296,7 @@ async def test_tools_list_hides_what_the_frame_forbids(
     from a non-lead."""
     monkeypatch.setattr("oc8.agent.mcp_pool.McpSession", _FakeMcp)
     tenant = uuid.uuid4()
-    read_only = {"tools": {"odoo": {"enabled": True, "read": True, "write": False, "send": False}}}
+    read_only = {"tools": {"odoo": {"enabled": True, "read": True, "modify": False, "modify": False}}}
     async with app_session(tenant) as db:
         agent_id, run_id, _t = await _seed(db, tenant, frame=read_only)
 
@@ -486,7 +486,7 @@ async def test_a_denied_call_is_a_readable_tool_error_not_a_transport_error(
     _FakeMcp.calls = []
     monkeypatch.setattr("oc8.agent.mcp_pool.McpSession", _FakeMcp)
     tenant = uuid.uuid4()
-    read_only = {"tools": {"odoo": {"enabled": True, "read": True, "write": False, "send": False}}}
+    read_only = {"tools": {"odoo": {"enabled": True, "read": True, "modify": False, "modify": False}}}
     async with app_session(tenant) as db:
         agent_id, run_id, _t = await _seed(db, tenant, frame=read_only)
 
@@ -530,7 +530,7 @@ async def test_a_second_message_to_the_same_record_never_reaches_the_server(
     _FakeMcp.calls = []
     monkeypatch.setattr("oc8.agent.mcp_pool.McpSession", _FakeMcp)
     tenant = uuid.uuid4()
-    may_send = {"tools": {"odoo": {"enabled": True, "read": True, "write": True, "send": True}}}
+    may_send = {"tools": {"odoo": {"enabled": True, "read": True, "modify": True, "modify": True}}}
     async with app_session(tenant) as db:
         agent_id, run_id, _t = await _seed(
             db,
@@ -576,7 +576,7 @@ async def test_a_message_to_a_different_record_is_still_allowed(
     _FakeMcp.calls = []
     monkeypatch.setattr("oc8.agent.mcp_pool.McpSession", _FakeMcp)
     tenant = uuid.uuid4()
-    may_send = {"tools": {"odoo": {"enabled": True, "read": True, "write": True, "send": True}}}
+    may_send = {"tools": {"odoo": {"enabled": True, "read": True, "modify": True, "modify": True}}}
     async with app_session(tenant) as db:
         agent_id, run_id, _t = await _seed(
             db,
@@ -616,7 +616,7 @@ async def test_a_connection_that_declares_no_outward_tool_is_unguarded(
     _FakeMcp.calls = []
     monkeypatch.setattr("oc8.agent.mcp_pool.McpSession", _FakeMcp)
     tenant = uuid.uuid4()
-    may_send = {"tools": {"odoo": {"enabled": True, "read": True, "write": True, "send": True}}}
+    may_send = {"tools": {"odoo": {"enabled": True, "read": True, "modify": True, "modify": True}}}
     async with app_session(tenant) as db:
         agent_id, run_id, _t = await _seed(db, tenant, frame=may_send)
 
@@ -674,8 +674,8 @@ async def test_both_systems_tools_are_offered(
     tenant = uuid.uuid4()
     frame = {
         "tools": {
-            "odoo": {"enabled": True, "read": True, "write": True},
-            "gitea": {"enabled": True, "read": True, "write": True},
+            "odoo": {"enabled": True, "read": True, "modify": True},
+            "gitea": {"enabled": True, "read": True, "modify": True},
         }
     }
     async with app_session(tenant) as db:
@@ -712,8 +712,8 @@ async def test_a_call_reaches_the_system_that_owns_the_tool(
     tenant = uuid.uuid4()
     frame = {
         "tools": {
-            "odoo": {"enabled": True, "read": True, "write": True},
-            "gitea": {"enabled": True, "read": True, "write": True},
+            "odoo": {"enabled": True, "read": True, "modify": True},
+            "gitea": {"enabled": True, "read": True, "modify": True},
         }
     }
     async with app_session(tenant) as db:
@@ -754,8 +754,8 @@ async def test_a_name_both_systems_offer_is_only_callable_qualified(
     tenant = uuid.uuid4()
     frame = {
         "tools": {
-            "odoo": {"enabled": True, "read": True, "write": True},
-            "gitea": {"enabled": True, "read": True, "write": True},
+            "odoo": {"enabled": True, "read": True, "modify": True},
+            "gitea": {"enabled": True, "read": True, "modify": True},
         }
     }
     async with app_session(tenant) as db:
@@ -796,7 +796,7 @@ async def test_the_frame_can_grant_one_system_and_withhold_the_other(
     tenant = uuid.uuid4()
     frame = {
         "tools": {
-            "odoo": {"enabled": True, "read": True, "write": True},
+            "odoo": {"enabled": True, "read": True, "modify": True},
             "gitea": {"enabled": False},
         }
     }
@@ -1287,8 +1287,8 @@ async def test_a_frame_can_name_which_tools_a_system_offers(
             "odoo": {
                 "enabled": True,
                 "read": True,
-                "write": True,
-                "send": True,
+                "modify": True,
+                "modify": True,
                 "only": ["search_records", "send_email"],
             }
         }
@@ -1317,8 +1317,8 @@ async def test_a_withheld_tool_is_refused_even_when_called_anyway(
             "odoo": {
                 "enabled": True,
                 "read": True,
-                "write": True,
-                "send": True,
+                "modify": True,
+                "modify": True,
                 "only": ["search_records"],
             }
         }
@@ -1338,7 +1338,7 @@ async def test_a_withheld_tool_is_refused_even_when_called_anyway(
 # ------------------------------------------- two agents, one queue, one record
 
 FOCUS = {"entity_field": "model", "id_fields": ["record_id"], "search_tools": ["search_records"]}
-MAY_WRITE = {"tools": {"odoo": {"enabled": True, "read": True, "write": True, "send": True}}}
+MAY_WRITE = {"tools": {"odoo": {"enabled": True, "read": True, "modify": True, "modify": True}}}
 
 
 async def _colleague(

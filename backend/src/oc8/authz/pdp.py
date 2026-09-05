@@ -23,13 +23,13 @@ Frame / narrowing JSON shape (stored on ``department.frame`` / ``agent.narrowing
       "tools": {
         "<tool_key>": {
           "enabled": bool,
-          "read": bool, "write": bool, "send": bool,
-          "approval_eur": int | null,  # threshold at or above which send needs approval
-          "approval_actions": ["send", ...]  # rights and/or tool keys that always need a human
+          "read": bool, "modify": bool,
+          "approval_eur": int | null,  # threshold at or above which modify needs approval
+          "approval_actions": ["modify", ...]  # rights and/or tool keys that always need a human
         }
       },
       "kbs": ["<kb_id>", ...],
-      "memory": {"department": ["read","write"], "company": ["read"]}
+      "memory": {"department": ["read","modify"], "company": ["read"]}
     }
 """
 
@@ -41,11 +41,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from oc8.authz.permissions import DEFAULT_AGENT_TOOL_RIGHTS
-
 logger = logging.getLogger(__name__)
 
-RIGHTS = ("read", "write", "send")
+RIGHTS = ("read", "modify")
 
 
 class Effect(StrEnum):
@@ -58,8 +56,7 @@ class Effect(StrEnum):
 class ToolPolicy:
     enabled: bool = False
     read: bool = False
-    write: bool = False
-    send: bool = False
+    modify: bool = False
     approval_eur: int | None = None
     #: Rights and/or tool keys that always need a human, whatever the call is
     #: worth. `approval_eur` answers "how expensive before someone checks";
@@ -98,8 +95,7 @@ class ToolPolicy:
         return cls(
             enabled=bool(data.get("enabled", False)),
             read=bool(data.get("read", False)),
-            write=bool(data.get("write", False)),
-            send=bool(data.get("send", False)),
+            modify=bool(data.get("modify", False)),
             approval_eur=data.get("approval_eur"),
             approval_actions=frozenset(str(a) for a in raw_actions) if raw_actions else frozenset(),
             only=frozenset(str(t) for t in raw_only) if raw_only else None,
@@ -110,8 +106,7 @@ class ToolPolicy:
         return {
             "enabled": self.enabled,
             "read": self.read,
-            "write": self.write,
-            "send": self.send,
+            "modify": self.modify,
             "approval_eur": self.approval_eur,
             "approval_actions": sorted(self.approval_actions),
             "only": sorted(self.only) if self.only is not None else None,
@@ -143,32 +138,18 @@ def _tools(frame: dict[str, Any]) -> dict[str, dict[str, Any]]:
 def effective_tool_policies(
     frame: dict[str, Any],
     narrowing: dict[str, Any],
-    *,
-    role_rights: frozenset[str] = DEFAULT_AGENT_TOOL_RIGHTS,
 ) -> dict[str, ToolPolicy]:
-    """§5.3's intersection, now with all three terms.
+    """§5.3's intersection, with frame and narrowing terms.
 
-        effective = role_permissions(agent.role) ∩ frame ∩ narrowing
+        effective = frame ∩ narrowing
 
-    The frame and the narrowing were always here; `role_rights` is the term that
-    was missing, and the decision simply started at the frame. It carries which
-    of read/write/send the agent's ROLE grants -- see
-    `permissions.tool_rights_for_role` -- and, like every other term here, it can
-    only tighten. A role granting `write` on a tool the frame withholds still
-    yields nothing: the intersection is taken rather than the union, for the same
-    reason `_narrower_surface` gives.
-
-    The default is all three rights, which is what every agent alive has (none
-    carries a `role_id`), so this changes no existing decision. It is a keyword
-    with a default rather than a required argument because eight call sites pass
-    it; it is spelled out at each of them anyway, so a reader of any one call can
-    see which agent's role is being applied.
+    The frame and the narrowing intersect: each can only tighten, never widen.
+    A tool the frame withholds cannot be granted by the narrowing; a right the
+    frame denies cannot be granted by the narrowing. The intersection is taken
+    rather than the union, for the same reason `_narrower_surface` gives.
     """
     frame_tools = _tools(frame)
     narrow_tools = _tools(narrowing)
-    may_read = "read" in role_rights
-    may_write = "write" in role_rights
-    may_send = "send" in role_rights
     out: dict[str, ToolPolicy] = {}
     for key, raw in frame_tools.items():
         f = ToolPolicy.from_json(raw)
@@ -176,9 +157,8 @@ def effective_tool_policies(
         no = ToolPolicy.from_json(n) if n is not None else None
         out[key] = ToolPolicy(
             enabled=f.enabled and (no.enabled if no else True),
-            read=f.read and (no.read if no else True) and may_read,
-            write=f.write and (no.write if no else True) and may_write,
-            send=f.send and (no.send if no else True) and may_send,
+            read=f.read and (no.read if no else True),
+            modify=f.modify and (no.modify if no else True),
             approval_eur=_min_threshold(f.approval_eur, no.approval_eur if no else None),
             approval_actions=f.approval_actions | (no.approval_actions if no else frozenset()),
             only=_narrower_surface(f.only, no.only if no else None),
@@ -192,19 +172,17 @@ def effective_tool_policies(
         )
     # Agent-exclusive grants: a narrowing key with no frame counterpart at
     # all. There is nothing to intersect against, so the narrowing term IS
-    # the policy outright -- only role_rights still applies, same as every
-    # tool above. `narrowing_within_frame` is what allows this key to reach
-    # here in the first place (its `key not in frame_tools` branch no longer
-    # flags it); this loop is where that grant actually takes effect.
+    # the policy outright. `narrowing_within_frame` is what allows this key to
+    # reach here in the first place (its `key not in frame_tools` branch no
+    # longer flags it); this loop is where that grant actually takes effect.
     for key, raw in narrow_tools.items():
         if key in frame_tools:
             continue
         exclusive = ToolPolicy.from_json(raw)
         out[key] = ToolPolicy(
             enabled=exclusive.enabled,
-            read=exclusive.read and may_read,
-            write=exclusive.write and may_write,
-            send=exclusive.send and may_send,
+            read=exclusive.read,
+            modify=exclusive.modify,
             approval_eur=exclusive.approval_eur,
             approval_actions=exclusive.approval_actions,
             only=exclusive.only,
@@ -296,16 +274,16 @@ def authorize_tool(
             else f"'{tool_key}' always needs approval"
         )
         return Decision(Effect.REQUIRE_APPROVAL, reason)
-    if action == "send" and eff.approval_eur is not None:
+    if action == "modify" and eff.approval_eur is not None:
         # See authorize_tool_call: an unreadable value counts as zero, so a
-        # threshold of €0 means "a human decides every send".
+        # threshold of €0 means "a human decides every modify".
         effective_value = value_eur if value_eur is not None else 0.0
         if effective_value >= eff.approval_eur:
             return Decision(
                 Effect.REQUIRE_APPROVAL,
                 f"value €{value_eur:g} meets approval threshold €{eff.approval_eur}"
                 if value_eur is not None
-                else f"every send needs approval (threshold €{eff.approval_eur})",
+                else f"every modify needs approval (threshold €{eff.approval_eur})",
             )
     return Decision(Effect.ALLOW)
 
@@ -502,62 +480,3 @@ def authorize_tool_call(
                 else f"every action needs approval (threshold €{strictest:g})",
             )
     return Decision(Effect.ALLOW)
-
-
-async def agent_tool_rights(db: Any, agent: Any) -> frozenset[str]:
-    """Which of read/write/send this agent's ROLE grants (§5.3, first term).
-
-    One extra read, and only when an agent actually has a role: `agent.role_id`
-    is NULL for every agent on the live system, so the common path costs nothing
-    and resolves to `agent_default` -- all three rights, the frame and narrowing
-    deciding alone exactly as before.
-
-    A `role_id` pointing at a row that no longer exists grants NOTHING rather
-    than everything. That is the uncomfortable direction and the right one: a
-    dangling reference means the deployment does not know what this agent is
-    allowed to do, and an agent that stops acting is a visible, reversible
-    failure, while one that acts on a guess is neither.
-
-    **The row must be an AGENT row.** `tool_rights_for_role` resolves a role
-    back through the CODE dictionary by its NAME, which was harmless while
-    nothing but provisioning and the seed could write a `role` row. Once a
-    tenant's IT admin has a form with a name field in it, a role called
-    `agent_default` pointed at by an `agent.role_id` would hand that agent
-    `read`, `write` and `send` -- every right the vocabulary has -- because a
-    string matched a dictionary key. `role.kind` is the discriminator that
-    closes it, and it closes it for rows written in psql, restored from a
-    backup, or created by an importer written next year, none of which passes
-    through the endpoint that also refuses the name.
-
-    `deleted_at` is checked here for the same reason `role_permissions` checks
-    it on the human side: `SoftDeleteMixin` adds no query filter, and a deleted
-    role that still grants is worse than a dangling one -- the row is gone from
-    every screen and the agent keeps acting.
-
-    Nothing about the agents that exist today moves. Every live agent has
-    `role_id = NULL` and returns before the row is ever loaded; every seeded
-    ACME agent points at a `builtin` `agent_default` row whose `kind` both
-    writers derive from `permissions.role_kind`, so it is `'agent'` and still
-    resolves to all three rights.
-    """
-    from oc8.authz.permissions import tool_rights_for_role
-
-    role_id = getattr(agent, "role_id", None)
-    if role_id is None:
-        return tool_rights_for_role(None)
-    from oc8 import models as m
-
-    role = await db.get(m.Role, role_id)
-    if role is None or role.deleted_at is not None or role.kind != "agent":
-        logger.warning(
-            "agent %s references role %s (%s); granting no tool rights",
-            getattr(agent, "id", "?"),
-            role_id,
-            "no such row"
-            if role is None
-            else "soft-deleted"
-            if role.deleted_at is not None
-            else f"kind={role.kind!r}, which is not an agent role",
-        )
-        return frozenset()
-    return tool_rights_for_role(role.name)

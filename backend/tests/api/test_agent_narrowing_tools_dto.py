@@ -43,7 +43,7 @@ async def _seed_agent_with_narrowing(
             name="General",
             frame={
                 "tools": {
-                    "odoo": {"enabled": True, "read": True, "write": True, "send": True}
+                    "odoo": {"enabled": True, "read": True, "modify": True, "modify": True}
                 }
             },
         )
@@ -59,8 +59,8 @@ async def _seed_agent_with_narrowing(
                     "odoo": {
                         "enabled": True,
                         "read": True,
-                        "write": True,
-                        "send": True,
+                        "modify": True,
+                        "modify": True,
                         "connection_id": None,
                     }
                 }
@@ -85,8 +85,8 @@ async def test_narrowing_tools_reflects_the_agents_own_stored_narrowing(
             assert body["narrowingTools"]["odoo"] == {
                 "enabled": True,
                 "read": True,
-                "write": True,
-                "send": True,
+                "modify": True,
+                "modify": True,
                 "approvalEur": None,
                 "approvalActions": [],
                 "only": None,

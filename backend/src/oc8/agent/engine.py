@@ -44,7 +44,6 @@ from oc8.authz.pdp import (
     Decision,
     Effect,
     ToolPolicy,
-    agent_tool_rights,
     authorize_tool_call,
     effective_tool_policies,
     required_right,
@@ -399,9 +398,7 @@ async def run_agent(
         ]
         department = await db.get(m.Department, agent.department_id)
         frame: dict[str, Any] = department.frame if department is not None else {}
-        tool_policies = effective_tool_policies(
-            frame, agent.narrowing or {}, role_rights=await agent_tool_rights(db, agent)
-        )
+        tool_policies = effective_tool_policies(frame, agent.narrowing or {})
         if toolset is not None:
             connection_key: str | None = CODING_FRAME_KEY
             tool_scopes: dict[str, Any] | None = {
@@ -411,6 +408,7 @@ async def run_agent(
             value_spec: dict[str, Any] | None = None
             focus_spec: dict[str, Any] | None = None
             outward_tools: list[str] | None = None
+            outward_skip_spec: dict[str, Any] | None = None
         elif mcp_conn is not None:
             connection_key = mcp_conn.name
             _cfg = mcp_conn.config if isinstance(mcp_conn.config, dict) else {}
@@ -437,15 +435,18 @@ async def run_agent(
             _vs = _cfg.get("value_spec")
             _fs = _cfg.get("focus_spec")
             _ot = _cfg.get("outward_tools")
+            _oss = _cfg.get("outward_skip_spec")
             value_spec = _vs if isinstance(_vs, dict) else None
             focus_spec = _fs if isinstance(_fs, dict) else None
             outward_tools = _ot if isinstance(_ot, list) else None
+            outward_skip_spec = _oss if isinstance(_oss, dict) else None
         else:
             connection_key = None
             tool_scopes = None
             value_spec = None
             focus_spec = None
             outward_tools = None
+            outward_skip_spec = None
         # A resume leg continues the task its suspended leg opened; see
         # open_run_task. The run is the only place that link is recorded, so a
         # runtime that gets no run_id (a direct run_agent call in a test) simply
@@ -1096,7 +1097,8 @@ async def run_agent(
                             _tool_call_dispatched = False
                         elif (
                             target := outward_target(
-                                tc.name, tc.arguments, focus_spec, outward_tools
+                                tc.name, tc.arguments, focus_spec, outward_tools,
+                                outward_skip_spec,
                             )
                         ) is not None and await already_delivered(
                             db, tenant_id=tenant_id, task_id=task.id, target=target
