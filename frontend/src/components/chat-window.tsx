@@ -205,7 +205,7 @@ export function ChatWindow({ agentId, agentName }: { agentId: string; agentName:
 // per-row buttons, so this is a dropdown of plain rows instead of
 // DropdownMenuItem: an Item's onSelect closes the whole menu, which would
 // kill an in-progress rename or interrupt a delete confirmation.
-function ChatSessionPicker({
+export function ChatSessionPicker({
   agentId,
   sessions,
   sessionId,
