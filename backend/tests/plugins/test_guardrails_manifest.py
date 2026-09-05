@@ -14,8 +14,7 @@ label = "Approve quotes above an amount"
 summary = "Creates quotes on its own; above the amount a human decides."
 use_case = "sales"
 read = true
-write = false
-send = true
+modify = true
 approval_eur = 3000
 approval_actions = []
 only = []
@@ -45,8 +44,7 @@ def test_parses_a_minimal_valid_file(tmp_path: Path) -> None:
     assert g.label == "Approve quotes above an amount"
     assert g.use_case == "sales"
     assert g.read is True
-    assert g.write is False
-    assert g.send is True
+    assert g.modify is True
     assert g.approval_eur == 3000
     assert g.approval_actions == frozenset()
     assert g.only == ()

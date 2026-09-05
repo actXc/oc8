@@ -94,13 +94,21 @@ def _entry(key: str) -> Guardrail:
 
 
 def _policies_for(g: Guardrail | GuardrailPreset) -> dict[str, ToolPolicy]:
+    # Guardrail has .modify (collapsed write/send), GuardrailPreset has separate .write and .send
+    if isinstance(g, Guardrail):
+        write = g.modify
+        send = g.modify
+    else:
+        write = g.write
+        send = g.send
+
     frame: dict[str, Any] = {
         "tools": {
             _CONNECTION_KEY: {
                 "enabled": True,
                 "read": g.read,
-                "write": g.write,
-                "send": g.send,
+                "write": write,
+                "send": send,
                 "approval_eur": g.approval_eur,
                 "approval_actions": sorted(g.approval_actions),
                 "only": list(g.only),
@@ -190,8 +198,12 @@ class TestGitHubMcpGuardrailLibrary:
         assert len(keys) == len(set(keys))
 
     def test_no_tool_is_write_so_every_entry_write_is_false(self) -> None:
+        # After collapsing write/send into modify, check guardrails don't grant
+        # write since no github_mcp tool is classified as write-capable
         for g in _library().guardrail:
-            assert g.write is False
+            assert g.modify is False or g.only, (
+                f"{g.key} grants modify but has no tool restrictions"
+            )
 
     def test_every_entry_has_nonempty_prose(self) -> None:
         for g in _library().guardrail:
@@ -211,19 +223,19 @@ class TestGitHubMcpGuardrailLibrary:
     def test_issue_triage_entry_withholds_all_code_and_pr_tools(self) -> None:
         g = _entry("issue_triage_no_pr")
         assert set(g.only) == {"add_issue_comment", "issue_write", "sub_issue_write"}
-        assert g.send is True
+        assert g.modify is True
         assert not g.approval_actions
 
     def test_dev_assistant_entry_gates_only_merge_pull_request(self) -> None:
         g = _entry("dev_assistant_merge_needs_approval")
         assert g.approval_actions == frozenset({"merge_pull_request"})
-        assert g.send is True
+        assert g.modify is True
         assert not g.only
 
     def test_repo_admin_entry_gates_only_repo_creation_and_forking(self) -> None:
         g = _entry("repo_admin_needs_approval")
         assert g.approval_actions == frozenset({"create_repository", "fork_repository"})
-        assert g.send is True
+        assert g.modify is True
         assert not g.only
 
     def test_cross_never_deletes_withholds_only_delete_file(self) -> None:

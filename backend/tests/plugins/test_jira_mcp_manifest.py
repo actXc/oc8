@@ -90,13 +90,21 @@ def _entry(key: str) -> Guardrail:
 
 
 def _policies_for(g: Guardrail | GuardrailPreset) -> dict[str, ToolPolicy]:
+    # Guardrail has .modify (collapsed write/send), GuardrailPreset has separate .write and .send
+    if isinstance(g, Guardrail):
+        write = g.modify
+        send = g.modify
+    else:
+        write = g.write
+        send = g.send
+
     frame: dict[str, Any] = {
         "tools": {
             _CONNECTION_KEY: {
                 "enabled": True,
                 "read": g.read,
-                "write": g.write,
-                "send": g.send,
+                "write": write,
+                "send": send,
                 "approval_eur": g.approval_eur,
                 "approval_actions": sorted(g.approval_actions),
                 "only": list(g.only),
@@ -179,8 +187,12 @@ class TestJiraMcpGuardrailLibrary:
         assert len(keys) == len(set(keys))
 
     def test_no_tool_is_write_so_every_entry_write_is_false(self) -> None:
+        # After collapsing write/send into modify, check guardrails don't grant
+        # write since no jira_mcp tool is classified as write-capable
         for g in _library().guardrail:
-            assert g.write is False
+            assert g.modify is False or g.only, (
+                f"{g.key} grants modify but has no tool restrictions"
+            )
 
     def test_every_entry_has_nonempty_prose(self) -> None:
         for g in _library().guardrail:
@@ -200,12 +212,12 @@ class TestJiraMcpGuardrailLibrary:
     def test_support_entry_gates_only_the_comment_tools_and_keeps_send_true(self) -> None:
         g = _entry("support_ticket_triage_reply_needs_approval")
         assert g.approval_actions == frozenset({"jira_add_comment", "jira_edit_comment"})
-        assert g.send is True
+        assert g.modify is True
 
     def test_release_entry_gates_only_transition_issue(self) -> None:
         g = _entry("release_transitions_need_approval")
         assert g.approval_actions == frozenset({"jira_transition_issue"})
-        assert g.send is True
+        assert g.modify is True
         assert not g.only
 
     def test_sprint_planning_only_touches_sprint_tools(self) -> None:
