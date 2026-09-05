@@ -94,21 +94,21 @@ def _entry(key: str) -> Guardrail:
 
 
 def _policies_for(g: Guardrail | GuardrailPreset) -> dict[str, ToolPolicy]:
-    # Guardrail has .modify (collapsed write/send), GuardrailPreset has separate .write and .send
+    # Guardrail has .modify (collapsed write/send); GuardrailPreset still has
+    # separate .write and .send -- either one grants the collapsed `modify`
+    # right, since ToolPolicy.from_json (pdp.py) only ever reads a "modify"
+    # key out of this frame dict.
     if isinstance(g, Guardrail):
-        write = g.modify
-        send = g.modify
+        modify = g.modify
     else:
-        write = g.write
-        send = g.send
+        modify = g.write or g.send
 
     frame: dict[str, Any] = {
         "tools": {
             _CONNECTION_KEY: {
                 "enabled": True,
                 "read": g.read,
-                "write": write,
-                "send": send,
+                "modify": modify,
                 "approval_eur": g.approval_eur,
                 "approval_actions": sorted(g.approval_actions),
                 "only": list(g.only),
