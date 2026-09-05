@@ -64,8 +64,7 @@ class Guardrail(BaseModel):
     #: able to name its own domains.
     use_case: str
     read: bool = False
-    write: bool = False
-    send: bool = False
+    modify: bool = False
     approval_eur: float | None = None
     approval_actions: frozenset[str] = frozenset()
     #: The ONLY tool names this guardrail puts within reach; empty means all

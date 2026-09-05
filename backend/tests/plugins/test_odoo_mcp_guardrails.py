@@ -98,7 +98,7 @@ def test_no_tool_is_write_so_every_guardrail_write_is_false() -> None:
     # confer nothing while implying an entitlement that does not exist.
     lib = _library()
     for g in lib.guardrail:
-        assert g.write is False, f"{g.key} sets modify=True but odoo_mcp has no write tool"
+        assert g.modify is False, f"{g.key} sets modify=True but odoo_mcp has no modify tool"
 
 
 def test_helpdesk_entry_gates_only_post_message_and_keeps_send_true() -> None:
@@ -113,7 +113,7 @@ def test_helpdesk_entry_gates_only_post_message_and_keeps_send_true() -> None:
     ]
     assert matches, "expected a helpdesk entry with approval_actions == {'post_message'}"
     entry = matches[0]
-    assert entry.send is True, "gating post_message must not also gate all of send"
+    assert entry.modify is True, "gating post_message must not also gate all of send"
 
 
 def test_an_entry_demonstrates_the_autonomous_with_limit_lesson() -> None:
@@ -204,8 +204,8 @@ def test_quote_approval_threshold_matches_the_designs_own_example() -> None:
     g = entries["quote_approval_threshold"]
     assert g.use_case == "sales"
     assert g.read is True
-    assert g.write is False
-    assert g.send is True
+    assert g.modify is False
+    assert g.modify is True
     assert g.approval_eur == 3000
     assert g.approval_actions == frozenset()
     assert g.only == ()
@@ -218,7 +218,7 @@ def test_sales_autonomous_with_limit_excludes_delete_record() -> None:
     assert "sales_autonomous_with_limit" in entries
     g = entries["sales_autonomous_with_limit"]
     assert g.use_case == "sales"
-    assert g.send is True
+    assert g.modify is True
     assert g.approval_eur == 1000
     assert "delete_record" not in g.only
     assert set(g.only) == _READ_TOOLS | {"create_record", "update_record", "post_message"}
@@ -231,8 +231,8 @@ def test_helpdesk_reply_needs_approval_exact_values() -> None:
     g = entries["helpdesk_reply_needs_approval"]
     assert g.use_case == "helpdesk"
     assert g.read is True
-    assert g.write is False
-    assert g.send is True
+    assert g.modify is False
+    assert g.modify is True
     assert g.approval_actions == frozenset({"post_message"})
     assert g.approval_eur is None
 
@@ -295,8 +295,8 @@ def _policies(key: str) -> dict[str, ToolPolicy]:
     g = _entry(key)
     return _policies_for(
         read=g.read,
-        write=g.write,
-        send=g.send,
+        write=g.modify,
+        send=g.modify,
         approval_eur=g.approval_eur,
         approval_actions=sorted(g.approval_actions),
         only=list(g.only),
@@ -325,7 +325,7 @@ def _policies_for(
                 "enabled": True,
                 "read": read,
                 "write": write,
-                "send": send,
+                "modify": send,
                 "approval_eur": approval_eur,
                 "approval_actions": approval_actions,
                 "only": only,
@@ -548,8 +548,8 @@ def test_integration_every_plugin_toml_presets_boundary_is_inclusive() -> None:
         checked += 1
         policies = _policies_for(
             read=p.read,
-            write=p.write,
-            send=p.send,
+            write=p.modify,
+            send=p.modify,
             approval_eur=p.approval_eur,
             approval_actions=list(p.approval_actions),
             only=list(p.only),
@@ -620,7 +620,7 @@ def test_integration_the_raw_frame_helper_cannot_see_a_tool_name() -> None:
             _CONNECTION_KEY: {
                 "enabled": True,
                 "read": g.read,
-                "send": g.send,
+                "modify": g.modify,
                 "approval_actions": sorted(g.approval_actions),
             }
         }

@@ -176,8 +176,7 @@ class GuardrailPreset(BaseModel):
     summary: str
     recommended: bool = False
     read: bool = False
-    write: bool = False
-    send: bool = False
+    modify: bool = False
     approval_actions: list[str] = []
     approval_eur: int | None = None
     #: The ONLY tool names this preset puts within reach; empty means all of the
