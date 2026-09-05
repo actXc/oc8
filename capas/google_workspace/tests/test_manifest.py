@@ -110,7 +110,7 @@ def test_scopes_cover_every_tool_and_nothing_else() -> None:
     # `scopes` is `list[str] | dict[str, Any]` in the model -- the flat-list
     # form is the legacy one; this pack uses the read/send mapping.
     assert isinstance(conn.scopes, dict)
-    declared = set(conn.scopes.get("read", [])) | set(conn.scopes.get("send", []))
+    declared = set(conn.scopes.get("read", [])) | set(conn.scopes.get("modify", []))
     actual = {t.name for t in ALL_TOOLS}
     assert declared == actual, f"manifest/tool mismatch: {declared ^ actual}"
 
@@ -195,7 +195,7 @@ def test_read_and_send_scopes_are_disjoint() -> None:
     assert manifest.tool_pack is not None
     conn = manifest.tool_pack.connections[0]
     assert isinstance(conn.scopes, dict)
-    overlap = set(conn.scopes.get("read", [])) & set(conn.scopes.get("send", []))
+    overlap = set(conn.scopes.get("read", [])) & set(conn.scopes.get("modify", []))
     assert not overlap, f"tools classified as both read and send: {sorted(overlap)}"
 
 

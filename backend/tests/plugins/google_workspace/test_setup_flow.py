@@ -149,7 +149,7 @@ async def test_installing_and_enabling_the_plugin_materialises_the_mcp_connectio
             )
         ).scalar_one()
         assert conn.transport == "stdio"
-        assert "gmail_send" in conn.scopes["send"]
+        assert "gmail_send" in conn.scopes["modify"]
 
 
 async def _submit_setup(

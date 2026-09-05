@@ -108,7 +108,7 @@ def test_scopes_cover_every_tool_and_nothing_else() -> None:
     # `scopes` is `list[str] | dict[str, Any]` in the model -- the flat-list
     # form is the legacy one; this pack uses the read/send mapping.
     assert isinstance(conn.scopes, dict)
-    declared = set(conn.scopes.get("read", [])) | set(conn.scopes.get("send", []))
+    declared = set(conn.scopes.get("read", [])) | set(conn.scopes.get("modify", []))
     actual = {t.name for t in ALL_TOOLS}
     assert declared == actual, f"manifest/tool mismatch: {declared ^ actual}"
 

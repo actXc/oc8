@@ -108,7 +108,7 @@ async def test_installing_and_enabling_the_plugin_materialises_the_mcp_connectio
         assert conn.transport == "stdio"
         scopes = conn.scopes
         assert isinstance(scopes, dict)
-        assert "mail_send" in scopes["send"]
+        assert "mail_send" in scopes["modify"]
 
 
 async def test_submitting_the_setup_form_connects_the_tools_and_the_knowledge_base(
@@ -596,7 +596,7 @@ async def test_submitting_the_form_keeps_the_read_send_classification(
             assert conn is not None
             scopes = conn.scopes
             assert isinstance(scopes, dict), f"classification wiped: {scopes!r}"
-            assert "mail_send" in scopes["send"]
+            assert "mail_send" in scopes["modify"]
             assert "mail_search" in scopes["read"]
     finally:
         oauth_http.set_transport_override(None)
