@@ -13,8 +13,7 @@ label = "Financial reporting, read only"
 summary = "Can search, look up and aggregate invoices, but create, change or send nothing. Does not cover reports that combine data from outside Odoo. Also does not cover a domain boundary: read=true applies to any Odoo model the connection reaches, not only financial data."
 use_case = "finance"
 read = true
-write = false
-send = false
+modify = false
 approval_eur = ""
 approval_actions = []
 only = []

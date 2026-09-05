@@ -7,8 +7,7 @@ label = "Internal only"
 summary = "Maintains leads, quotes and contacts on its own, but never writes to customers."
 recommended = false
 read = true
-write = false
-send = true
+modify = true
 approval_actions = []
 approval_eur = ""
 # `post_message` is this connection's only outward tool -- the only one that

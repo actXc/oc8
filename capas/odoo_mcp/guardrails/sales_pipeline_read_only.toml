@@ -13,8 +13,7 @@ label = "Sales pipeline, read only"
 summary = "Can search, look up and aggregate, but change nothing about leads, quotes or contacts. Does not cover a summary that draws on data outside Odoo. Also does not cover a domain boundary: read=true applies to any Odoo model the connection reaches, not only sales data -- the same grant reads finance or HR records just as well, wherever the connection can see them."
 use_case = "sales"
 read = true
-write = false
-send = false
+modify = false
 approval_eur = ""
 approval_actions = []
 only = []

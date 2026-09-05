@@ -13,8 +13,7 @@ label = "Ticket reporting, read only"
 summary = "Can search and aggregate tickets, but change or send nothing. Does not cover trend analysis across periods -- there is no aggregation beyond what the tool itself returns. Also does not cover a domain boundary: read=true applies to any Odoo model the connection reaches, not only tickets."
 use_case = "helpdesk"
 read = true
-write = false
-send = false
+modify = false
 approval_eur = ""
 approval_actions = []
 only = []

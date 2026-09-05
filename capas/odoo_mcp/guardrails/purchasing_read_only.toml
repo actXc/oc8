@@ -13,8 +13,7 @@ label = "Purchasing, read only"
 summary = "Can search purchase orders, requisitions and suppliers, but create or change nothing. Does not cover a price comparison against external catalogues. Also does not cover a domain boundary: read=true applies to any Odoo model the connection reaches, not only purchasing data."
 use_case = "purchasing"
 read = true
-write = false
-send = false
+modify = false
 approval_eur = ""
 approval_actions = []
 only = []

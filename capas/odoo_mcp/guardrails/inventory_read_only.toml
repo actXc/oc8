@@ -13,8 +13,7 @@ label = "Inventory, read only"
 summary = "Can search and aggregate stock and stock moves, but change nothing. Does not cover a physical count -- that stays outside this tool set. Also does not cover a domain boundary: read=true applies to any Odoo model the connection reaches, not only inventory data."
 use_case = "inventory"
 read = true
-write = false
-send = false
+modify = false
 approval_eur = ""
 approval_actions = []
 only = []

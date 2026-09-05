@@ -7,8 +7,7 @@ label = "Autonomous with a limit"
 summary = "Creates and edits on its own; anything worth €1,000 or more needs approval. Deleting is not included."
 recommended = false
 read = true
-write = false
-send = true
+modify = true
 approval_actions = []
 approval_eur = 1000
 # Everything except `delete_record`. A deletion carries no amount, so the

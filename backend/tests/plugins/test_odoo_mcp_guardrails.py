@@ -92,13 +92,23 @@ def test_all_keys_are_unique() -> None:
     assert len(keys) == len(set(keys))
 
 
-def test_no_tool_is_write_so_every_guardrail_write_is_false() -> None:
+def test_no_tool_is_write_so_guardrails_reflect_send_only_capability() -> None:
     # odoo_mcp's connection scopes classify every one of its 9 tools as
-    # read or send, never write (tool_pack.toml). Granting `write` here would
-    # confer nothing while implying an entitlement that does not exist.
+    # read or send, never write (tool_pack.toml). After collapsing write/send
+    # into modify, guardrails that allowed send should now allow modify;
+    # read-only guardrails should have modify=false.
     lib = _library()
     for g in lib.guardrail:
-        assert g.modify is False, f"{g.key} sets modify=True but odoo_mcp has no modify tool"
+        # Most guardrails allow sending (send=true in original TOML), so they
+        # should have modify=true after collapsing. A few read-only guardrails
+        # have send=false, which should map to modify=false.
+        # This test just ensures the conversion was consistent.
+        if g.key in ("read_only", "inventory_read_only", "finance_read_only_reporting",
+                     "helpdesk_read_only_reporting", "sales_pipeline_read_only",
+                     "cross_read_only_everything", "purchasing_read_only"):
+            assert g.modify is False, f"{g.key} read-only should have modify=False"
+        else:
+            assert g.modify is True, f"{g.key} should allow modify (collapsed from send)"
 
 
 def test_helpdesk_entry_gates_only_post_message_and_keeps_send_true() -> None:
@@ -204,7 +214,6 @@ def test_quote_approval_threshold_matches_the_designs_own_example() -> None:
     g = entries["quote_approval_threshold"]
     assert g.use_case == "sales"
     assert g.read is True
-    assert g.modify is False
     assert g.modify is True
     assert g.approval_eur == 3000
     assert g.approval_actions == frozenset()
@@ -231,7 +240,6 @@ def test_helpdesk_reply_needs_approval_exact_values() -> None:
     g = entries["helpdesk_reply_needs_approval"]
     assert g.use_case == "helpdesk"
     assert g.read is True
-    assert g.modify is False
     assert g.modify is True
     assert g.approval_actions == frozenset({"post_message"})
     assert g.approval_eur is None

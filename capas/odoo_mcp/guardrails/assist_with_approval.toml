@@ -7,12 +7,11 @@ label = "Assist with approval"
 summary = "Works alongside you, but nothing goes out without a person approving it."
 recommended = true
 read = true
+modify = true
 # `write` stays false in every preset here on purpose: this connection's
 # `scopes` (tool_pack.toml) classify every tool as `read` or `modify` and NONE as
 # `write`, so granting it would confer nothing while reading, on a permissions
 # screen, as though it did. If a future tool is scoped `write`, these presets
 # deny it until somebody decides otherwise -- the safe direction.
-write = false
-send = true
 approval_actions = ["modify"]
 approval_eur = ""
