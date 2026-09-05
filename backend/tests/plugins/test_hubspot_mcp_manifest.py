@@ -73,21 +73,15 @@ def _entry(key: str) -> Guardrail:
 
 
 def _policies_for(g: Guardrail | GuardrailPreset) -> dict[str, ToolPolicy]:
-    # Guardrail has .modify (collapsed write/send); GuardrailPreset still has
-    # separate .write and .send -- either one grants the collapsed `modify`
-    # right, since ToolPolicy.from_json (pdp.py) only ever reads a "modify"
+    # Both Guardrail and GuardrailPreset expose a single collapsed `modify`
+    # field now -- ToolPolicy.from_json (pdp.py) only ever reads a "modify"
     # key out of this frame dict.
-    if isinstance(g, Guardrail):
-        modify = g.modify
-    else:
-        modify = g.write or g.send
-
     frame: dict[str, Any] = {
         "tools": {
             _CONNECTION_KEY: {
                 "enabled": True,
                 "read": g.read,
-                "modify": modify,
+                "modify": g.modify,
                 "approval_eur": g.approval_eur,
                 "approval_actions": sorted(g.approval_actions),
                 "only": list(g.only),
@@ -137,9 +131,17 @@ class TestHubSpotMcpGuardrailPresets:
         assert p.approval_actions == ["modify"]
 
     def test_no_preset_grants_write_because_no_hubspot_tool_needs_it(self) -> None:
+        # tool_pack.toml's `scopes` classify every tool as `read` or `send`; not
+        # one is `write` -- and after collapsing write/send into the single
+        # `modify` field, `read_only` is the one preset that needs neither, so
+        # it alone should have `modify is False`. Every other preset
+        # legitimately needs `modify` (collapsed from `send`) for the tools it
+        # grants.
         for preset in _connection().guardrail_presets:
-            # Just verify the preset loaded correctly (field exists)
-            assert hasattr(preset, "modify"), f"{preset.key} should have modify field"
+            if preset.key == "read_only":
+                assert preset.modify is False, f"{preset.key} should not need modify"
+            else:
+                assert preset.modify is True, f"{preset.key} should need modify (collapsed from send)"
 
     def test_autonomous_with_limit_excludes_schema_tools_and_sets_threshold(self) -> None:
         p = next(p for p in _connection().guardrail_presets if p.key == "autonomous_with_limit")
@@ -179,14 +181,19 @@ class TestHubSpotMcpGuardrailLibrary:
         keys = [g.key for g in _library().guardrail]
         assert len(keys) == len(set(keys))
 
-    def test_no_tool_is_write_so_every_entry_write_is_false(self) -> None:
-        # After collapsing write/send into modify, verify guardrails load correctly.
-        # Original test checked that no guardrail grants write since no hubspot_mcp tool
-        # is write-capable. With modify now representing both send and write contexts,
-        # we just verify that guardrails were successfully migrated to use modify.
+    def test_a_modify_grant_always_narrows_the_reachable_tools(self) -> None:
+        # Pre-collapse, this asserted `g.write is False` -- no hubspot_mcp tool
+        # was ever classified as the (real) write right. Post-collapse, `modify`
+        # also covers every send-capable tool, so that exact invariant no longer
+        # holds; what survives it is that granting the coarser `modify` right
+        # must come with SOME narrowing -- either an `only` allowlist
+        # restricting which tools it reaches, or `approval_actions` gating the
+        # specific ones a human must see -- an unconditional, ungated modify
+        # grant would be broader than any entry in this library intends.
         for g in _library().guardrail:
-            assert hasattr(g, "modify"), f"{g.key} should have modify field"
-            assert isinstance(g.modify, bool), f"{g.key}.modify should be a bool"
+            assert g.modify is False or g.only or g.approval_actions, (
+                f"{g.key} grants modify but has no tool restrictions and no approval gate"
+            )
 
     def test_every_entry_has_nonempty_prose(self) -> None:
         for g in _library().guardrail:
