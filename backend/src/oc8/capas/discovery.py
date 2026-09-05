@@ -801,12 +801,14 @@ def resolve_tool_pack_connection(
 
 
 def connection_supports_value_spec(conn: ToolPackConnection | None) -> bool:
-    """Whether a manifest connection declares a value_spec -- the single gate
-    behind BOTH `only` and `approval_eur` on a submitted tool policy (design
-    spec: "gated the same way the €-threshold field is ... same 'don't show a
-    field that means nothing for this tool' rule already applied to
-    approval_eur"). None (no manifest, plugin removed from disk, or the
-    connection key no longer exists) fails closed to False -- neither field
-    is supported without a resolvable manifest to prove otherwise.
+    """Whether a manifest connection declares a value_spec -- the gate behind
+    `approval_eur` on a submitted tool policy (a monetary threshold needs to
+    know where a record's amount lives). NOT a gate for `only`: that's a
+    plain tool-name allowlist, meaningful for any connection regardless of
+    value_spec -- github_mcp/jira_mcp/microsoft365/google_workspace all ship
+    real `only`-based guardrail presets with no value_spec at all. None (no
+    manifest, plugin removed from disk, or the connection key no longer
+    exists) fails closed to False -- `approval_eur` is not supported without
+    a resolvable manifest to prove otherwise.
     """
     return conn is not None and "value_spec" in conn.config

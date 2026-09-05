@@ -806,6 +806,13 @@ export function DepartmentGuardrailsPanel({ departmentId }: { departmentId: stri
     const merged = {
       ...tools,
       [key]: {
+        // Spread the tool's own previous entry first -- fields this panel
+        // doesn't model (default_connection_id, the department's own default
+        // login for agents with no pin of their own) must survive an edit
+        // here, not silently disappear. A fixed literal deletes any field
+        // it forgets, the same class of bug `toDepartmentFrame`'s own doc
+        // comment used to warn about before this panel replaced it.
+        ...((tools[key] ?? {}) as Record<string, unknown>),
         enabled: true,
         read: next.read,
         modify: next.modify,

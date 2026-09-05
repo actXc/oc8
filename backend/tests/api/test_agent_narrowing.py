@@ -127,6 +127,80 @@ async def test_resaving_a_tool_with_a_changed_value_does_mark_it_as_overridden(
         assert refreshed.narrowing_overridden_keys == ["github"]
 
 
+async def test_a_realistic_frontend_shaped_resave_with_unchanged_values_is_not_marked_overridden(
+    app_session: AppSessionFactory,
+) -> None:
+    """Regression: the department frame stores `only: None` (never set) and
+    has no `connection_id` key at all (only `default_connection_id`, a
+    different field with a different meaning); the frontend's `GuardrailValue`
+    always sends `only: []` and a `connection_id` key (`null` when unset).
+    A raw dict compare between the two never matches on shape alone, so
+    EVERY save marked EVERY submitted key overridden regardless of whether
+    its actual rights/approval/only VALUE differed from the frame -- this
+    silently broke the "N of M agents deviate" aggregate and the agent
+    Guardrails tab's own status badge for every real save from the current
+    UI, which always resends every currently-relevant key this shape."""
+    tenant = uuid.UUID(str(ACME_TENANT_ID))
+    async with app_session(tenant) as db:
+        department = m.Department(
+            tenant_id=tenant,
+            name=f"D-{uuid.uuid4().hex}",
+            frame={
+                "tools": {
+                    "github": {
+                        "enabled": True,
+                        "read": True,
+                        "modify": True,
+                        "approval_eur": None,
+                        "approval_actions": [],
+                        "only": None,
+                        "default_connection_id": None,
+                    }
+                }
+            },
+        )
+        db.add(department)
+        await db.flush()
+        agent = m.Agent(tenant_id=tenant, department_id=department.id, name="Probe")
+        db.add(agent)
+        await db.flush()
+        agent_id = agent.id
+
+    app = create_app()
+    async with LifespanManager(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            headers = {"Authorization": f"Bearer {_token(tenant)}"}
+            r = await client.put(
+                f"/api/v1/agents/{agent_id}/narrowing",
+                json={
+                    "narrowing": {
+                        "tools": {
+                            "github": {
+                                "enabled": True,
+                                "read": True,
+                                "modify": True,
+                                "approval_eur": None,
+                                "approval_actions": [],
+                                "only": [],
+                                "connection_id": None,
+                            }
+                        }
+                    }
+                },
+                headers=headers,
+            )
+            assert r.status_code == 200, r.text
+
+    async with app_session(tenant) as db:
+        refreshed = await db.get(m.Agent, agent_id)
+        assert refreshed.narrowing_overridden_keys == [], (
+            "the submitted rights/approval/only values are identical to the frame's own -- "
+            "only the unrelated connection_id/default_connection_id key names and the "
+            "only=[]-vs-None shape differ -- so this must not count as a deliberate override"
+        )
+
+
 async def test_setting_only_for_a_connection_with_no_value_spec_is_accepted(
     app_session: AppSessionFactory,
 ) -> None:

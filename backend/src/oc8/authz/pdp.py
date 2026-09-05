@@ -29,7 +29,7 @@ Frame / narrowing JSON shape (stored on ``department.frame`` / ``agent.narrowing
         }
       },
       "kbs": ["<kb_id>", ...],
-      "memory": {"department": ["read","modify"], "company": ["read"]}
+      "memory": {"department": ["read","write"], "company": ["read"]}
     }
 """
 

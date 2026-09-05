@@ -115,8 +115,7 @@ def _to_dto(c: m.McpConnection) -> McpConnectionDTO:
                 summary_translations=translations_for(i18n, p.summary),
                 recommended=p.recommended,
                 read=p.read,
-                write=p.modify,
-                send=p.modify,
+                modify=p.modify,
                 approval_actions=p.approval_actions,
                 approval_eur=p.approval_eur,
                 only=p.only,
@@ -136,8 +135,7 @@ def _to_dto(c: m.McpConnection) -> McpConnectionDTO:
                 summary_translations=translations_for(i18n, g.summary),
                 use_case=g.use_case,
                 read=g.read,
-                write=g.modify,
-                send=g.modify,
+                modify=g.modify,
                 approval_eur=g.approval_eur,
                 approval_actions=sorted(g.approval_actions),
                 only=list(g.only),
@@ -204,8 +202,19 @@ async def list_connections(db: DbSession) -> list[McpConnectionDTO]:
     dependencies=[Depends(require_permission(perm(INTEGRATION, VIEW)))],
 )
 async def get_connection_tool_names(name: str, db: DbSession) -> ConnectionToolNamesDTO:
+    # `credential_id.is_(None)` picks the manifest row, never another login
+    # sharing this same tenant-global name -- `POST /mcp/logins` creates a
+    # SECOND `McpConnection` row with the same `name` (see its own docstring),
+    # and a bare `.where(name == ...)` here would raise `MultipleResultsFound`
+    # for any tenant that has pinned a login. Same pattern as `mcp_logins.py`'s
+    # own `source_conn` lookup.
     conn = (
-        await db.execute(select(m.McpConnection).where(m.McpConnection.name == name))
+        await db.execute(
+            select(m.McpConnection)
+            .where(m.McpConnection.name == name, m.McpConnection.credential_id.is_(None))
+            .order_by(m.McpConnection.created_at)
+            .limit(1)
+        )
     ).scalar_one_or_none()
     if conn is None:
         return ConnectionToolNamesDTO(names=[])

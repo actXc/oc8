@@ -409,7 +409,11 @@ async def get_department_tools(
     )
     tools = dict((dept.frame or {}).get("tools", {}))
     agents = (
-        await db.execute(select(m.Agent).where(m.Agent.department_id == dept_id))
+        await db.execute(
+            select(m.Agent).where(
+                m.Agent.department_id == dept_id, m.Agent.deleted_at.is_(None)
+            )
+        )
     ).scalars().all()
     return DepartmentToolsDTO(
         tools=tools,
@@ -455,12 +459,22 @@ async def set_department_tools(
         wants_eur = policy.approval_eur is not None
         if not wants_eur:
             continue
+        # `credential_id.is_(None)` picks the manifest row, never another
+        # login sharing this same tenant-global name -- `POST /mcp/logins`
+        # creates a SECOND `McpConnection` row with the same `name` (see its
+        # own docstring), and a bare `.where(name == ...)` here would raise
+        # `MultipleResultsFound` for any tenant that has pinned a login on
+        # exactly the connections that have a value_spec.
         mcp_conn = (
             await db.execute(
-                select(m.McpConnection).where(
+                select(m.McpConnection)
+                .where(
                     m.McpConnection.tenant_id == _p.tenant_id,
                     m.McpConnection.name == key,
+                    m.McpConnection.credential_id.is_(None),
                 )
+                .order_by(m.McpConnection.created_at)
+                .limit(1)
             )
         ).scalar_one_or_none()
         _cfg = mcp_conn.config if mcp_conn is not None and isinstance(mcp_conn.config, dict) else {}
@@ -522,7 +536,11 @@ async def set_department_tools(
         != bool(old_tools.get(key, {}).get("enabled", False))
     ]
     agents = (
-        await db.execute(select(m.Agent).where(m.Agent.department_id == dept_id))
+        await db.execute(
+            select(m.Agent).where(
+                m.Agent.department_id == dept_id, m.Agent.deleted_at.is_(None)
+            )
+        )
     ).scalars().all()
     if changed_keys:
         for key in changed_keys:

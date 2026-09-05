@@ -139,7 +139,18 @@ async def _enforce_narrowing_logins(
         frame_tools = frame.get("tools", {}) if isinstance(frame, dict) else {}
         overridden = set(agent.narrowing_overridden_keys or [])
         for key, raw in raw_tools.items():
-            if raw != frame_tools.get(key):
+            # A raw dict compare never matches: the frame stores
+            # `default_connection_id`/`only: None`, the frontend's narrowing
+            # payload stores `connection_id`/`only: []` for the same "unset"
+            # meaning -- so every save marked every submitted key overridden,
+            # regardless of whether its value actually diverged from the
+            # frame. `ToolPolicy.from_json` is the same normalization
+            # `effective_tool_policies`/`narrowing_within_frame` already
+            # apply to these two dicts; comparing through it is what makes
+            # this an actual value comparison instead of a shape comparison.
+            submitted = ToolPolicy.from_json(raw if isinstance(raw, dict) else None)
+            current_frame = ToolPolicy.from_json(frame_tools.get(key))
+            if submitted != current_frame:
                 overridden.add(key)
         agent.narrowing_overridden_keys = sorted(overridden)
 
@@ -339,12 +350,22 @@ async def set_narrowing(
             wants_eur = raw.get("approval_eur") is not None
             if not wants_eur:
                 continue
+            # `credential_id.is_(None)` picks the manifest row, never another
+            # login sharing this same tenant-global name -- `POST /mcp/logins`
+            # creates a SECOND `McpConnection` row with the same `name` (see
+            # its own docstring), and a bare `.where(name == ...)` here would
+            # raise `MultipleResultsFound` for any tenant that has pinned a
+            # login on exactly the connections that have a value_spec.
             mcp_conn = (
                 await db.execute(
-                    select(m.McpConnection).where(
+                    select(m.McpConnection)
+                    .where(
                         m.McpConnection.tenant_id == principal.tenant_id,
                         m.McpConnection.name == key,
+                        m.McpConnection.credential_id.is_(None),
                     )
+                    .order_by(m.McpConnection.created_at)
+                    .limit(1)
                 )
             ).scalar_one_or_none()
             _cfg: dict[str, Any] = {}

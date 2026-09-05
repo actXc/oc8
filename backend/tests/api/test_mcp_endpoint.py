@@ -148,7 +148,7 @@ async def test_odoo_connection_carries_its_guardrail_library(
             quote = entries["quote_approval_threshold"]
             assert quote["useCase"] == "sales"
             assert quote["read"] is True
-            assert quote["send"] is True
+            assert quote["modify"] is True
             assert quote["approvalEur"] == 3000
             adjustable = {a["field"] for a in quote["adjustable"]}
             assert "approval_eur" in adjustable
