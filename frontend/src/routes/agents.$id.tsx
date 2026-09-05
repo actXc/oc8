@@ -68,7 +68,8 @@ import {
 } from "@/lib/hooks";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { CredentialPicker } from "@/components/credential-picker";
-import { GuardrailPresetPicker, type GuardrailValue } from "@/components/guardrail-preset-picker";
+import type { GuardrailValue } from "@/components/guardrail-preset-picker";
+import { ToolGuardrailTable } from "@/components/tool-guardrail-table";
 import { SUBSCRIPTION_PROVIDER, SubscriptionRiskBadge, supportsRawParams } from "@/routes/models";
 import {
   extraToPairs,
@@ -104,7 +105,6 @@ import { formatMs } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import { useMayManageAgent } from "@/lib/governance-hooks";
-import { useConfirm } from "@/hooks/use-confirm";
 
 // Mirrors mapAgentStatus in src/lib/live/apply-event.ts (not exported there).
 // Handles BOTH vocabularies: the WS "agent.status" event carries the raw
@@ -417,9 +417,6 @@ function AgentDetail() {
           <div className="md:col-span-2">
             <SupervisorPanel agent={agent} />
           </div>
-          <div className="md:col-span-2">
-            <AgentToolAccessPanel agent={agent} mayManage={mayManage} />
-          </div>
           <Panel className="p-5">
             <ConfigSectionHeader
               hint={t("agent identity", "Agenten-Identität")}
@@ -472,7 +469,7 @@ function AgentDetail() {
       )}
 
       {tab === "guardrails" && agent.departmentId && (
-        <NarrowingEditor agent={agent} mayManage={mayManage} />
+        <AgentGuardrailsPanel agent={agent} mayManage={mayManage} />
       )}
       {tab === "guardrails" && !agent.departmentId && (
         <Panel className="p-5 text-sm text-muted-foreground">
@@ -507,7 +504,7 @@ function AgentDetail() {
 // Overview tab: real KPI cards (Task 6's useAgentKpis) plus a 30-day run-count
 // trend line. Its own component (rather than inline in AgentDetail) so it's
 // reachable from a test without standing up the whole routed page -- same
-// shape as AssignedModelPanel/NarrowingEditor/SupervisorPanel below.
+// shape as AssignedModelPanel/AgentGuardrailsPanel/SupervisorPanel below.
 //
 // The trend graph calls useTenantKpis({ agentId, groupBy: "day" }) rather than
 // extending useAgentKpis with a groupBy param: Task 6's agent-scoped hook
@@ -1011,400 +1008,11 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void 
   );
 }
 
-// ---------- Configuration tab: tool access ----------
-
-// Which of the department's frame tools this agent may use, plus its login
-// pin -- the enable/disable half of the old combined NarrowingEditor,
-// pulled into its own panel in the Configuration tab so it's discoverable
-// where a user actually looks for "which tools can this agent use" (mirrors
-// the Department page's Integrations tab: same tile grid, same "MCP
-// interfaces active" copy). Fine-grained permissions (read/modify/
-// approval-€/presets) stay on the Guardrails tab -- see NarrowingEditor
-// below, which now only edits those for tools already enabled here.
-// Every toggle/credential change persists immediately via
-// PUT /agents/{id}/narrowing (full REPLACE), rebuilding the payload from
-// agent.effectiveTools so a field this panel doesn't own (read/modify/
-// approval_eur/approval_actions/only) survives untouched.
-export function AgentToolAccessPanel({
-  agent,
-  mayManage,
-}: {
-  agent: AgentDetailData;
-  mayManage: boolean;
-}) {
-  const t = useT();
-  const update = useUpdateNarrowing(agent.id);
-  const logins = useMcpLogins();
-  const { data: connections = [] } = useMcpConnections();
-  const createLogin = useCreateMcpLogin();
-  const { confirm, ConfirmDialog } = useConfirm();
-  const frame = agent.departmentFrameTools;
-  const effective = agent.effectiveTools;
-  // The agent's own stored narrowing, used (never `effective`) as the
-  // resave source for fields this panel doesn't itself edit -- `effective`
-  // is role_rights ∩ frame ∩ narrowing, so a role dip (bad/missing role
-  // reference) zeroes read/modify there without touching the agent's
-  // actual narrowing row. Reading `effective` as that source bakes the dip
-  // into narrowing permanently on the next save, since every save rewrites
-  // the full tools payload including fields it isn't changing.
-  const narrowing = agent.narrowingTools;
-  const frameKeys = Object.keys(frame).filter((k) => frame[k]?.enabled);
-  // Agent-exclusive grants: tools this agent has directly, that the
-  // department never put in its frame -- backend/src/oc8/authz/pdp.py's
-  // second loop in effective_tool_policies. Derived from `effective` (not
-  // `agent.narrowing`, which isn't on this DTO) since that function now
-  // includes every such key regardless of its enabled state, so a toggled-
-  // off agent-only tool still keeps its tile instead of vanishing.
-  const agentOnlyKeys = Object.keys(effective).filter((k) => !(k in frame));
-  const allKeys = [...frameKeys, ...agentOnlyKeys];
-  const connectionByName = new Map(connections.map((c) => [c.name, c] as const));
-  const loginsByKey: Record<string, McpLoginDTO[]> = {};
-  for (const login of logins.data ?? []) {
-    (loginsByKey[login.name] ??= []).push(login);
-  }
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [toolSearch, setToolSearch] = useState("");
-  // Every tenant connection not already a tile here, deduped by name (same
-  // convention as `connectionByName`) -- AND not a key the department frame
-  // already mentions at all, even disabled. backend/src/oc8/authz/pdp.py's
-  // narrowing_within_frame keys off presence in frame_tools, not its enabled
-  // flag: a tool the department explicitly turned off is still governed by
-  // it and stays narrow-only, never agent-exclusive -- offering it here
-  // would just 422 on save.
-  const frameToolKeys = Object.keys(frame);
-  const addableNames = Array.from(new Set(connections.map((c) => c.name))).filter(
-    (name) => !allKeys.includes(name) && !frameToolKeys.includes(name),
-  );
-
-  function persist(
-    patch: Record<
-      string,
-      Partial<{
-        enabled: boolean;
-        connectionId: string | null;
-        read: boolean;
-        modify: boolean;
-      }>
-    >,
-  ) {
-    const keys = new Set([...allKeys, ...Object.keys(patch)]);
-    const tools: Record<string, unknown> = {};
-    for (const k of keys) {
-      const src = narrowing[k] ?? frame[k];
-      const p = patch[k];
-      tools[k] = {
-        enabled: p?.enabled ?? !!src?.enabled,
-        read: p?.read ?? !!src?.read,
-        modify: p?.modify ?? !!src?.modify,
-        approval_eur: src?.approvalEur ?? null,
-        approval_actions: src?.approvalActions ?? [],
-        only: src?.only ?? [],
-        connection_id: p && "connectionId" in p ? p.connectionId : (src?.connectionId ?? null),
-      };
-    }
-    update.mutate(
-      { narrowing: { tools } },
-      {
-        onSuccess: () =>
-          toast.success(t("Tool access updated", "Tool-Zugriff aktualisiert"), {
-            description: agent.name,
-          }),
-        onError: () =>
-          toast.error(
-            t("Couldn't update tool access", "Tool-Zugriff konnte nicht aktualisiert werden"),
-          ),
-      },
-    );
-  }
-
-  // Only ever called on an agent-only key: a frame-inherited tile isn't
-  // stored in this agent's own narrowing at all (persist's `tools` payload
-  // only ever carries keys from `allKeys`, which is frame keys + agent-only
-  // keys derived from `effective` -- see the comment above `agentOnlyKeys`),
-  // so there is nothing here for the agent to remove; disabling it via the
-  // existing Toggle is the department-governed equivalent.
-  async function removeTool(key: string) {
-    const ok = await confirm({
-      title: t("Remove this tool?", "Dieses Tool entfernen?"),
-      description: t(
-        `Remove "${key}" from this agent? It can be added again later.`,
-        `„${key}" von diesem Agenten entfernen? Kann später wieder hinzugefügt werden.`,
-      ),
-      confirmLabel: t("Remove", "Entfernen"),
-      cancelLabel: t("Cancel", "Abbrechen"),
-    });
-    if (!ok) return;
-    const keys = new Set(allKeys);
-    keys.delete(key);
-    const tools: Record<string, unknown> = {};
-    for (const k of keys) {
-      const src = narrowing[k] ?? frame[k];
-      tools[k] = {
-        enabled: !!src?.enabled,
-        read: !!src?.read,
-        modify: !!src?.modify,
-        approval_eur: src?.approvalEur ?? null,
-        approval_actions: src?.approvalActions ?? [],
-        only: src?.only ?? [],
-        connection_id: src?.connectionId ?? null,
-      };
-    }
-    update.mutate(
-      { narrowing: { tools } },
-      {
-        onSuccess: () => toast.success(t("Tool removed", "Tool entfernt"), { description: key }),
-        onError: () => toast.error(t("Couldn't remove tool", "Tool konnte nicht entfernt werden")),
-      },
-    );
-  }
-
-  async function pinCredential(toolKey: string, credentialType: string, credentialId: string) {
-    if (!credentialId) {
-      persist({ [toolKey]: { connectionId: null } });
-      return;
-    }
-    const existing = (loginsByKey[toolKey] ?? []).find((l) => l.credentialId === credentialId);
-    if (existing) {
-      persist({ [toolKey]: { connectionId: existing.id } });
-      return;
-    }
-    try {
-      const login = await createLogin.mutateAsync({
-        name: toolKey,
-        credentialType,
-        credentialId,
-        scopes: [],
-      });
-      persist({ [toolKey]: { connectionId: login.id } });
-    } catch (err) {
-      toast.error(
-        t("Could not link this credential", "Anmeldedaten konnten nicht verknüpft werden"),
-        { description: err instanceof Error ? err.message : String(err) },
-      );
-    }
-  }
-
-  const activeCount = allKeys.filter((k) => effective[k]?.enabled).length;
-
-  function addTool(name: string) {
-    persist({ [name]: { enabled: true, read: true, modify: false } });
-    setPickerOpen(false);
-  }
-
-  return (
-    <Panel className="p-5">
-      {ConfirmDialog}
-      <div className="mb-4 flex items-start justify-between gap-2">
-        <ConfigSectionHeader
-          hint={t(
-            "inherited from the department — on/off for the agent only",
-            "vom Department geerbt — nur an/aus für diesen Agenten",
-          )}
-          title={t("Available interfaces", "Verfügbare Schnittstellen")}
-        />
-        <div className="flex shrink-0 items-center gap-2">
-          {allKeys.length > 0 && (
-            <span className="rounded-full border border-border bg-background/40 px-2 py-1 text-[11px] text-muted-foreground">
-              {t(
-                `${activeCount} of ${allKeys.length} MCP interfaces active`,
-                `${activeCount} von ${allKeys.length} MCP-Schnittstellen aktiv`,
-              )}
-            </span>
-          )}
-          <button
-            type="button"
-            onClick={() => {
-              setToolSearch("");
-              setPickerOpen(true);
-            }}
-            disabled={!mayManage || addableNames.length === 0}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition hover:bg-background/70 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Plus className="h-3.5 w-3.5" /> {t("Add tool", "Tool hinzufügen")}
-          </button>
-        </div>
-      </div>
-      {allKeys.length === 0 ? (
-        <p className="rounded-md border border-dashed border-border/70 bg-background/30 p-3 text-center text-xs text-muted-foreground">
-          {t(
-            "No tools yet — add one directly for this agent, or grant it to the whole department first.",
-            "Noch keine Tools — direkt für diesen Agenten hinzufügen oder zuerst der ganzen Abteilung gewähren.",
-          )}
-        </p>
-      ) : (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {allKeys.map((key) => {
-            const isAgentOnly = agentOnlyKeys.includes(key);
-            const connection = connectionByName.get(key);
-            const connected = !!connection?.connected;
-            const isOn = !!effective[key]?.enabled;
-            const credentialType = connection?.credentialType;
-            const pickedCredentialId =
-              (loginsByKey[key] ?? []).find((l) => l.id === effective[key]?.connectionId)
-                ?.credentialId ?? "";
-            return (
-              <div
-                key={key}
-                className={cn(
-                  "flex flex-col items-start gap-2 rounded-lg border p-3 text-left transition",
-                  !connected
-                    ? "border-dashed border-border/60 bg-background/20 text-muted-foreground/70"
-                    : isOn
-                      ? "border-primary/50 bg-primary/[0.06]"
-                      : "border-border bg-background/40",
-                )}
-              >
-                <div className="flex w-full items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div
-                      className={cn(
-                        "grid h-8 w-8 place-items-center rounded-md",
-                        isOn && connected
-                          ? "bg-primary/15 text-primary"
-                          : "bg-background/60 text-muted-foreground",
-                      )}
-                    >
-                      <Wrench className="h-4 w-4" />
-                    </div>
-                    <div className="font-medium text-foreground">{key}</div>
-                  </div>
-                  {!connected ? (
-                    <Lock
-                      className="h-3.5 w-3.5 text-muted-foreground"
-                      aria-label={t("Not connected yet", "Noch nicht verbunden")}
-                    />
-                  ) : (
-                    <Toggle
-                      on={isOn}
-                      onChange={(next) => mayManage && persist({ [key]: { enabled: next } })}
-                    />
-                  )}
-                </div>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {isAgentOnly && (
-                    <span className="rounded-full border border-primary/40 bg-primary/10 px-1.5 py-0.5 text-[9px] uppercase tracking-widest text-primary">
-                      {t("Agent only", "Nur dieser Agent")}
-                    </span>
-                  )}
-                  {isAgentOnly && mayManage && (
-                    <button
-                      type="button"
-                      onClick={() => removeTool(key)}
-                      title={t("Remove tool", "Tool entfernen")}
-                      className="ml-auto inline-flex items-center rounded-md p-1 text-muted-foreground transition hover:text-destructive"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </button>
-                  )}
-                  {!connected && (
-                    <span className="rounded-full border border-border bg-background/40 px-1.5 py-0.5 text-[9px] text-muted-foreground">
-                      {t(
-                        "not connected yet — connect under Capas",
-                        "noch nicht verbunden — unter Capas verbinden",
-                      )}
-                    </span>
-                  )}
-                </div>
-                {connected && isOn && credentialType && mayManage && (
-                  <div className="w-full min-w-0 border-t border-border/60 pt-2">
-                    <div className="mb-1 text-[10px] uppercase tracking-widest text-muted-foreground">
-                      {t("Login", "Login")}
-                    </div>
-                    <CredentialPicker
-                      credentialType={credentialType}
-                      value={pickedCredentialId}
-                      onChange={(credentialId) => pinCredential(key, credentialType, credentialId)}
-                    />
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-      <p className="mt-3 text-[11px] text-muted-foreground">
-        {t(
-          "Fine-grained permissions (read/modify, approval threshold) live on the Guardrails tab. “Agent only” tools are exclusive to this agent — sibling agents in the same department never get them.",
-          "Feinabstufung der Berechtigungen (Lesen/Verändern, Freigabe-Schwelle) findest du im Guardrails-Tab. „Nur dieser Agent“-Tools sind exklusiv für diesen Agenten — andere Agenten derselben Abteilung bekommen sie nie.",
-        )}
-      </p>
-
-      {pickerOpen &&
-        (() => {
-          const searchTerm = toolSearch.trim().toLowerCase();
-          const filtered = searchTerm
-            ? addableNames.filter((name) => name.toLowerCase().includes(searchTerm))
-            : addableNames;
-          return (
-            <div
-              className="fixed inset-0 z-40 grid place-items-center bg-black/60 p-4 backdrop-blur-sm"
-              onClick={() => setPickerOpen(false)}
-            >
-              <div
-                className="w-full max-w-lg overflow-hidden rounded-xl border border-border bg-panel shadow-2xl"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="flex items-center justify-between border-b border-border px-5 py-4">
-                  <div>
-                    <div className="text-[11px] uppercase tracking-widest text-muted-foreground">
-                      {t("Tenant connections", "Tenant-Verbindungen")}
-                    </div>
-                    <h2 className="font-serif text-xl">{t("Add tool", "Tool hinzufügen")}</h2>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setPickerOpen(false)}
-                    className="grid h-8 w-8 place-items-center rounded-md border border-border text-muted-foreground transition hover:text-foreground"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-                <div className="relative border-b border-border px-5 py-3">
-                  <Search className="pointer-events-none absolute left-8 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                  <input
-                    value={toolSearch}
-                    onChange={(e) => setToolSearch(e.target.value)}
-                    placeholder={t("Search tools…", "Tools durchsuchen…")}
-                    className="w-full rounded-md border border-border bg-background/40 py-2 pl-8 pr-3 text-sm outline-none focus:border-primary/50"
-                  />
-                </div>
-                <div className="max-h-[60vh] divide-y divide-border overflow-y-auto">
-                  {filtered.length === 0 && (
-                    <div className="p-6 text-center text-sm text-muted-foreground">
-                      {addableNames.length === 0
-                        ? t(
-                            "Every tenant connection already has a tile here.",
-                            "Jede Tenant-Verbindung hat hier bereits eine Kachel.",
-                          )
-                        : t("No tools match your search.", "Keine Tools passen zur Suche.")}
-                    </div>
-                  )}
-                  {filtered.map((name) => (
-                    <button
-                      key={name}
-                      type="button"
-                      onClick={() => addTool(name)}
-                      className="flex w-full items-center gap-3 px-5 py-3 text-left transition hover:bg-primary/5"
-                    >
-                      <Wrench className="h-4 w-4 shrink-0 text-primary" />
-                      <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
-                      <Plus className="h-4 w-4 text-muted-foreground" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          );
-        })()}
-    </Panel>
-  );
-}
-
 // ---------- Guardrails / tool narrowing ----------
 
 // The agent's Assigned-LLM panel. Its own component (rather than inline in
 // AgentDetail) so the subscription risk badge below is reachable from a test
-// without standing up the whole routed page -- same shape as NarrowingEditor
+// without standing up the whole routed page -- same shape as AgentGuardrailsPanel
 // and AgentRuntimePanel next door.
 export function AssignedModelPanel({
   agent,
@@ -1613,14 +1221,16 @@ export function AssignedModelPanel({
   );
 }
 
-// Permission editor for tools already enabled on the Configuration tab's
-// AgentToolAccessPanel above. That panel owns enable/disable and the login
-// pin; this one only tightens read/modify/approval-€/presets for tools
-// that panel has switched on -- an agent may narrow permissions below the
-// department frame, never widen them. Persists via PUT /agents/{id}/narrowing
-// (useUpdateNarrowing) as { narrowing: { tools: { <key>: {...} } } },
-// preserving each tool's enabled state and connection_id untouched.
-export function NarrowingEditor({
+// The agent's tool-access + guardrails panel, merged into one table on
+// Task 12: enable/disable, login pin, and fine-grained permissions
+// (read/modify/approval-€/presets) all live here now, one row per tool,
+// via the shared ToolGuardrailTable (Task 11). Persists via PUT
+// /agents/{id}/narrowing (useUpdateNarrowing) as
+// { narrowing: { tools: { <key>: {...} } } }, rebuilding the full tools
+// payload from agent.effectiveTools/narrowingTools so a field a given save
+// doesn't itself edit survives untouched -- same REPLACE semantics the two
+// deleted panels (AgentToolAccessPanel/NarrowingEditor) relied on.
+export function AgentGuardrailsPanel({
   agent,
   mayManage,
 }: {
@@ -1631,36 +1241,25 @@ export function NarrowingEditor({
   const update = useUpdateNarrowing(agent.id);
   const logins = useMcpLogins();
   const { data: connections = [] } = useMcpConnections();
+  const createLogin = useCreateMcpLogin();
   const frame = agent.departmentFrameTools;
-  const effective = agent.effectiveTools;
-  // See the matching comment in AgentToolAccessPanel above: the agent's own
-  // stored narrowing, not `effective` (role_rights ∩ frame ∩ narrowing), is
-  // the correct resave source for whatever this save doesn't itself edit --
-  // otherwise a role_rights dip gets baked into narrowing permanently.
   const narrowing = agent.narrowingTools;
+  const effective = agent.effectiveTools;
   const frameKeys = Object.keys(frame).filter((k) => frame[k]?.enabled);
-  const enabledKeys = frameKeys.filter((k) => effective[k]?.enabled);
-  // Per-tool-key policy edits (read/modify/approvalEur/approvalActions/
-  // only) -- not fed back from `effective` on every render, same reason
-  // DepartmentToolsPanel's `edited` state isn't either: a click on a preset
-  // or a free-text chip must not get clobbered by a refetch mid-edit.
-  const [edited, setEdited] = useState<Record<string, GuardrailValue>>({});
-  // Read-only display of which login is pinned -- editing that pin lives on
-  // the Configuration tab's AgentToolAccessPanel now.
+  const agentOnlyKeys = Object.keys(effective).filter((k) => !(k in frame));
+  const allKeys = [...frameKeys, ...agentOnlyKeys];
+  const connectionByName = new Map(connections.map((c) => [c.name, c] as const));
   const loginsByKey: Record<string, McpLoginDTO[]> = {};
   for (const login of logins.data ?? []) {
     (loginsByKey[login.name] ??= []).push(login);
   }
+  const frameToolKeys = Object.keys(frame);
+  const addableNames = Array.from(new Set(connections.map((c) => c.name))).filter(
+    (name) => !allKeys.includes(name) && !frameToolKeys.includes(name),
+  );
 
-  // What the picker for tool `k` starts from: any local edit, else the
-  // agent's own stored narrowing (not `effective` -- see the comment above
-  // `narrowing`), else the frame's own policy. Deliberately NOT `frame[k]`
-  // alone -- that would silently reset
-  // an already-narrowed approvalActions/only back to the department's wider
-  // default the moment the picker first renders.
-  function valueFor(k: string): GuardrailValue {
-    if (edited[k]) return edited[k];
-    const src = narrowing[k] ?? frame[k];
+  function toGuardrailValue(key: string): GuardrailValue {
+    const src = narrowing[key] ?? frame[key];
     return {
       read: !!src?.read,
       modify: !!src?.modify,
@@ -1670,110 +1269,131 @@ export function NarrowingEditor({
     };
   }
 
-  function save() {
+  // `connectionIdOverride` lets the login-picker onChange below (which
+  // sets a NEW connection_id, not a GuardrailValue field) share this same
+  // save path instead of needing a second, parallel save function --
+  // `undefined` means "leave whatever connection_id this tool already
+  // has," `null` means "clear it," a string means "set it to this."
+  function persistOne(key: string, next: GuardrailValue, connectionIdOverride?: string | null) {
+    const keys = new Set(allKeys);
+    keys.add(key);
     const tools: Record<string, unknown> = {};
-    for (const k of frameKeys) {
-      const val = valueFor(k);
+    for (const k of keys) {
+      const isEdited = k === key;
+      const src = narrowing[k] ?? frame[k];
+      const val = isEdited ? next : toGuardrailValue(k);
       tools[k] = {
-        enabled: !!(narrowing[k] ?? frame[k])?.enabled,
+        enabled: isEdited ? true : !!src?.enabled,
         read: val.read,
         modify: val.modify,
-        // Backend narrowing dict reads snake_case keys throughout -- an
-        // untyped dict on the backend, so nothing auto-converts these.
-        approval_eur: val.approvalEur ?? null,
+        approval_eur: val.approvalEur,
         approval_actions: val.approvalActions,
         only: val.only,
-        connection_id: (narrowing[k] ?? frame[k])?.connectionId ?? null,
+        connection_id:
+          isEdited && connectionIdOverride !== undefined
+            ? connectionIdOverride
+            : (src?.connectionId ?? null),
       };
     }
     update.mutate(
       { narrowing: { tools } },
       {
-        onSuccess: () =>
-          toast.success(t("Guardrails saved", "Guardrails gespeichert"), {
-            description: agent.name,
-          }),
+        onSuccess: () => toast.success(t("Guardrails saved", "Guardrails gespeichert"), { description: agent.name }),
         onError: () =>
-          toast.error(
-            t("Couldn't save guardrails", "Guardrails konnten nicht gespeichert werden"),
-            {
-              description: t(
-                "Narrowing must stay within the department frame.",
-                "Einschränkung muss innerhalb des Abteilungsrahmens bleiben.",
-              ),
-            },
-          ),
+          toast.error(t("Couldn't save guardrails", "Guardrails konnten nicht gespeichert werden")),
       },
     );
   }
 
+  function addTool(name: string, policy: GuardrailValue | null) {
+    persistOne(name, policy ?? { read: true, modify: false, approvalActions: [], approvalEur: null, only: [] });
+  }
+
+  const rows = allKeys.map((key) => {
+    const isAgentOnly = agentOnlyKeys.includes(key);
+    const own = toGuardrailValue(key);
+    const ceiling: GuardrailValue | null = isAgentOnly
+      ? null
+      : {
+          read: !!frame[key]?.read,
+          modify: !!frame[key]?.modify,
+          approvalActions: frame[key]?.approvalActions ?? [],
+          approvalEur: frame[key]?.approvalEur ?? null,
+          only: frame[key]?.only ?? [],
+        };
+    const hasNarrowingEntry = key in narrowing;
+    const status: "inherited" | "narrowed" | "agent-only" = isAgentOnly
+      ? "agent-only"
+      : hasNarrowingEntry
+        ? "narrowed"
+        : "inherited";
+    const connection = connectionByName.get(key);
+    const pickedCredentialId =
+      (loginsByKey[key] ?? []).find((l) => l.id === effective[key]?.connectionId)?.credentialId ?? "";
+    return {
+      toolKey: key,
+      connection,
+      ceilingPolicy: ceiling,
+      ownValue: own,
+      status,
+      loginPicker:
+        connection?.credentialType && mayManage ? (
+          <CredentialPicker
+            credentialType={connection.credentialType}
+            value={pickedCredentialId}
+            onChange={async (credentialId) => {
+              if (!credentialId) {
+                persistOne(key, own, null);
+                return;
+              }
+              const existing = (loginsByKey[key] ?? []).find((l) => l.credentialId === credentialId);
+              if (existing) {
+                persistOne(key, own, existing.id);
+                return;
+              }
+              try {
+                const login = await createLogin.mutateAsync({
+                  name: key,
+                  credentialType: connection.credentialType!,
+                  credentialId,
+                  scopes: [],
+                });
+                persistOne(key, own, login.id);
+              } catch (err) {
+                toast.error(
+                  t("Could not link this credential", "Anmeldedaten konnten nicht verknüpft werden"),
+                  { description: err instanceof Error ? err.message : String(err) },
+                );
+              }
+            }}
+          />
+        ) : undefined,
+    };
+  });
+
   return (
     <Panel className="p-5">
-      <div className="mb-4 flex items-start justify-between gap-2">
-        <ConfigSectionHeader
-          hint={t("fine-grained permissions", "Feinabstufung der Berechtigungen")}
-          title={t("Guardrails", "Guardrails")}
-        />
-      </div>
-      {enabledKeys.length === 0 ? (
-        <p className="rounded-md border border-dashed border-border/70 bg-background/30 p-3 text-center text-xs text-muted-foreground">
+      <ConfigSectionHeader hint={t("access and guardrails", "Zugriff und Guardrails")} title={t("Guardrails", "Guardrails")} />
+      {allKeys.length === 0 ? (
+        <p className="mt-3 rounded-md border border-dashed border-border/70 bg-background/30 p-3 text-center text-xs text-muted-foreground">
           {t(
-            "No tools enabled yet. Turn one on under Configuration → Available interfaces first.",
-            "Noch keine Tools aktiviert. Zuerst unter Konfiguration → Verfügbare Schnittstellen eines einschalten.",
+            "No tools yet — add one directly for this agent, or grant it to the whole department first.",
+            "Noch keine Tools — direkt für diesen Agenten hinzufügen oder zuerst der ganzen Abteilung gewähren.",
           )}
         </p>
       ) : (
-        <ul className="space-y-3">
-          {enabledKeys.map((k) => {
-            const connection = connections.find((c) => c.name === k);
-            const pinnedName = (loginsByKey[k] ?? []).find(
-              (l) => l.id === effective[k]?.connectionId,
-            )?.name;
-            return (
-              <li key={k} className="rounded-md border border-border bg-background/30 p-3">
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                  <div className="flex min-w-0 flex-1 items-center gap-2">
-                    <Shield className="h-3.5 w-3.5 shrink-0 text-primary" />
-                    <span className="min-w-0 flex-1 truncate text-sm">{k}</span>
-                  </div>
-                  {pinnedName && (
-                    <span className="shrink-0 text-[11px] text-muted-foreground">{pinnedName}</span>
-                  )}
-                </div>
-                {mayManage && connection && (
-                  <div className="mt-3 border-t border-border/70 pt-3">
-                    <GuardrailPresetPicker
-                      presets={connection.guardrailPresets}
-                      guardrailLibrary={connection.guardrailLibrary}
-                      hasValueSpec={connection.hasValueSpec}
-                      value={valueFor(k)}
-                      onChange={(next) => setEdited((prev) => ({ ...prev, [k]: next }))}
-                    />
-                  </div>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      {enabledKeys.length > 0 && (
-        <div className="mt-4 flex justify-end">
-          <button
-            type="button"
-            onClick={save}
-            disabled={!mayManage || update.isPending}
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
-          >
-            <Save className="h-3.5 w-3.5" /> {t("Save", "Speichern")}
-          </button>
+        <div className="mt-3">
+          <ToolGuardrailTable
+            level="agent"
+            rows={rows}
+            addableNames={addableNames}
+            connections={connections}
+            onSave={persistOne}
+            onAdd={addTool}
+            saving={update.isPending}
+          />
         </div>
       )}
-      <p className="mt-3 text-[11px] text-muted-foreground">
-        {t(
-          "Permissions here can only tighten what's enabled under Configuration, never widen it.",
-          "Berechtigungen hier können das unter Konfiguration Aktivierte nur einschränken, nie erweitern.",
-        )}
-      </p>
     </Panel>
   );
 }
