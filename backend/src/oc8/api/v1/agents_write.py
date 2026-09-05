@@ -88,10 +88,11 @@ async def _enforce_narrowing_logins(
     silent fallback (agent tool login selection design's global constraint).
     A key with no such row -- every existing, non-login tool -- is untouched.
 
-    Also records provenance in `narrowing_overridden_keys`: every tool key
-    the caller explicitly submitted in THIS request is a deliberate choice,
-    by construction -- append-only union, never removed here. This is the
-    ONLY writer of `narrowing_overridden_keys` anywhere in the codebase;
+    Also records provenance in `narrowing_overridden_keys`: a tool key is
+    recorded only when its submitted value actually differs from what was
+    already stored in `agent.narrowing`, not merely because it appears in
+    the payload. Append-only union, never removed here. This is the ONLY
+    writer of `narrowing_overridden_keys` anywhere in the codebase;
     `set_department_tools`'s cascade (departments.py) reads it but must
     never add to it -- that asymmetry is what makes "has this agent
     explicitly overridden this tool" unambiguous, instead of having to infer
@@ -120,8 +121,15 @@ async def _enforce_narrowing_logins(
                     f"tool {key!r} needs a login: set connection_id before enabling it",
                 )
     if isinstance(raw_tools, dict) and raw_tools:
+        previous_tools = (
+            agent.narrowing.get("tools", {})
+            if isinstance(agent.narrowing, dict)
+            else {}
+        )
         overridden = set(agent.narrowing_overridden_keys or [])
-        overridden.update(raw_tools.keys())
+        for key, raw in raw_tools.items():
+            if raw != previous_tools.get(key):
+                overridden.add(key)
         agent.narrowing_overridden_keys = sorted(overridden)
 
 
@@ -173,7 +181,7 @@ async def create_agent(
         role_title=body.role_title,
         mission=body.mission,
         model_config_id=body.model_config_id,
-        narrowing=body.narrowing,
+        narrowing={},
         is_team_lead=body.is_team_lead,
         status="pending_approval" if gated else "stopped",
         trust_level="first_party",
@@ -184,6 +192,7 @@ async def create_agent(
         await _enforce_narrowing_logins(
             db, tenant_id=principal.tenant_id, agent=agent, narrowing=body.narrowing
         )
+        agent.narrowing = body.narrowing
     db.add(agent)
     db.add(m.MemoryStore(tenant_id=principal.tenant_id, tier="agent", owner_id=agent.id))
     await db.flush()
