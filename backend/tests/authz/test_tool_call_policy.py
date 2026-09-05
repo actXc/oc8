@@ -206,7 +206,7 @@ def test_approval_actions_right_requires_approval_with_no_threshold_at_all() -> 
     # `approval_actions`.
     d = authorize_tool_call(
         policies=_policies(
-            odoo=ToolPolicy(enabled=True, modify=True, approval_actions=frozenset({"send"}))
+            odoo=ToolPolicy(enabled=True, modify=True, approval_actions=frozenset({"modify"}))
         ),
         connection_key="odoo",
         right="modify",
@@ -214,12 +214,12 @@ def test_approval_actions_right_requires_approval_with_no_threshold_at_all() -> 
         value=None,
     )
     assert d.effect is Effect.REQUIRE_APPROVAL
-    assert "send" in d.reason
+    assert "modify" in d.reason
 
 
 def test_approval_actions_tool_name_gates_only_that_tool() -> None:
     # "post_message" is listed by TOOL NAME, not by right. It must require
-    # approval; "create_record", which shares the same "send" right on the
+    # approval; "create_record", which shares the same "modify" right on the
     # same connection, must not.
     policy = ToolPolicy(enabled=True, modify=True, approval_actions=frozenset({"post_message"}))
     gated = authorize_tool_call(
@@ -251,7 +251,7 @@ def test_approval_actions_wins_over_a_high_euro_threshold() -> None:
                 enabled=True,
                 modify=True,
                 approval_eur=100_000,
-                approval_actions=frozenset({"send"}),
+                approval_actions=frozenset({"modify"}),
             )
         ),
         connection_key="odoo",
@@ -260,7 +260,7 @@ def test_approval_actions_wins_over_a_high_euro_threshold() -> None:
         value=1.0,
     )
     assert d.effect is Effect.REQUIRE_APPROVAL
-    assert "send" in d.reason
+    assert "modify" in d.reason
 
 
 def test_a_denied_right_stays_denied_even_if_listed_in_approval_actions() -> None:
