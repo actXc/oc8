@@ -45,9 +45,14 @@ vi.mock("@/lib/hooks", async (importOriginal) => {
 });
 
 vi.mock("@/lib/hooks-chat", () => ({
-  useChatSessions: () => sessionsMock(),
+  // Forwarding the real args (instead of ignoring them) lets a test give
+  // different tabs -- now genuinely distinct CopilotChatTab instances, each
+  // with its own sessionId -- different mocked data via mockImplementation;
+  // every existing test still works unchanged since they configure these
+  // with mockReturnValue, which answers the same value regardless of args.
+  useChatSessions: (agentId?: string) => sessionsMock(agentId),
   useCreateChatSession: () => ({ mutate: createSessionMock, isPending: false }),
-  useChatMessages: () => messagesMock(),
+  useChatMessages: (sessionId: string | null) => messagesMock(sessionId),
   useSendChatMessage: () => ({ mutate: sendMessageMock, isPending: false }),
   useRenameChatSession: () => ({ mutate: renameSessionMock, isPending: false }),
   useDeleteChatSession: () => ({ mutate: deleteSessionMock, isPending: false }),
@@ -71,6 +76,11 @@ function openDock() {
 
 describe("CopilotDock", () => {
   beforeEach(() => {
+    // Tabs are now persisted to localStorage (scoped by member id) -- clear
+    // it so one test's open tabs can't leak into the next test's initial
+    // render (every test here resolves the same "anon" member id, since none
+    // of them mock useAuth to return a signed-in member).
+    localStorage.clear();
     canMock.mockReset();
     canMock.mockImplementation(() => true);
     assistantMock.mockReset();
@@ -450,8 +460,20 @@ describe("CopilotDock", () => {
   it("shows the session picker once more than one session exists, and switches on selection", () => {
     sessionsMock.mockReturnValue({
       data: [
-        { id: "s1", agentId: "assistant-1", title: "Erste Frage", createdAt: "2026-01-01T00:00:00Z", lastMessageAt: null },
-        { id: "s2", agentId: "assistant-1", title: "Zweite Frage", createdAt: "2026-01-02T00:00:00Z", lastMessageAt: null },
+        {
+          id: "s1",
+          agentId: "assistant-1",
+          title: "Erste Frage",
+          createdAt: "2026-01-01T00:00:00Z",
+          lastMessageAt: null,
+        },
+        {
+          id: "s2",
+          agentId: "assistant-1",
+          title: "Zweite Frage",
+          createdAt: "2026-01-02T00:00:00Z",
+          lastMessageAt: null,
+        },
       ],
     });
     renderDock();
@@ -466,7 +488,9 @@ describe("CopilotDock", () => {
     fireEvent.click(screen.getByText("Zweite Frage"));
     // The picker's trigger now shows the newly-selected session's title.
     expect(screen.getByText("Zweite Frage", { selector: "span.truncate" })).toBeInTheDocument();
-    expect(screen.queryByText("Erste Frage", { selector: "span.truncate" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Erste Frage", { selector: "span.truncate" }),
+    ).not.toBeInTheDocument();
   });
 
   it("a new chat button resets to the lazy-creation state even when other sessions exist", () => {
@@ -474,7 +498,15 @@ describe("CopilotDock", () => {
     // without this button, there was previously no way back to a blank,
     // not-yet-created session at all.
     sessionsMock.mockReturnValue({
-      data: [{ id: "s1", agentId: "assistant-1", title: "Erste Frage", createdAt: "t", lastMessageAt: null }],
+      data: [
+        {
+          id: "s1",
+          agentId: "assistant-1",
+          title: "Erste Frage",
+          createdAt: "t",
+          lastMessageAt: null,
+        },
+      ],
     });
     createSessionMock.mockImplementation(
       (agentId: string, opts?: { onSuccess?: (s: unknown) => void }) => {
@@ -521,7 +553,13 @@ describe("CopilotDock", () => {
     sessionsMock.mockImplementation(() => ({ data: sessions }));
     createSessionMock.mockImplementation(
       (agentId: string, opts?: { onSuccess?: (s: unknown) => void }) => {
-        const created = { id: "new-session", agentId, title: "", createdAt: "t", lastMessageAt: null };
+        const created = {
+          id: "new-session",
+          agentId,
+          title: "",
+          createdAt: "t",
+          lastMessageAt: null,
+        };
         sessions = [created];
         opts?.onSuccess?.(created);
       },
@@ -545,5 +583,184 @@ describe("CopilotDock", () => {
     // would silently re-select the just-created session on this click,
     // making this a plain send instead of a new lazy creation.
     expect(createSessionMock).toHaveBeenCalledTimes(2);
+  });
+
+  // --- Task 16: a persisted tab bar, replacing the single-session dock -----
+
+  it("opens a new blank tab without disturbing the currently active tab's session", () => {
+    sessionsMock.mockReturnValue({
+      data: [
+        {
+          id: "s1",
+          agentId: "assistant-1",
+          title: "Erste Frage",
+          createdAt: "t",
+          lastMessageAt: null,
+        },
+      ],
+    });
+    // The two tabs will have distinct sessionId props (s1 vs null) -- key
+    // the mock off that (like the real hook would key its query off it)
+    // instead of a single mockReturnValue, or both tabs would show the same
+    // transcript regardless of which session they're actually on.
+    messagesMock.mockImplementation((sessionId: string | null) =>
+      sessionId === "s1"
+        ? {
+            data: [
+              {
+                id: "m1",
+                sessionId: "s1",
+                role: "user",
+                content: "Hallo",
+                runId: null,
+                renderedComponents: [],
+                createdAt: "t",
+              },
+              {
+                id: "m2",
+                sessionId: "s1",
+                role: "assistant",
+                content: "Hi, wie kann ich helfen?",
+                runId: "r1",
+                renderedComponents: [],
+                createdAt: "t",
+              },
+            ],
+          }
+        : { data: undefined },
+    );
+    renderDock();
+    openDock();
+    expect(screen.getByText("Hallo")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^new tab$/i }));
+
+    // The new tab is blank and active -- the first tab's transcript is not
+    // rendered while it isn't the active one.
+    expect(screen.queryByText("Hallo")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/configure or ask oc8/i)).toBeInTheDocument();
+
+    // Switching back to the first tab shows its session is untouched.
+    fireEvent.click(screen.getByRole("button", { name: /erste frage tab/i }));
+    expect(screen.getByText("Hallo")).toBeInTheDocument();
+  });
+
+  it("switching tabs preserves each tab's own composer draft text", () => {
+    renderDock();
+    openDock();
+    fireEvent.change(screen.getByPlaceholderText(/configure or ask oc8/i), {
+      target: { value: "Draft in tab one" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /^new tab$/i }));
+    fireEvent.change(screen.getByPlaceholderText(/configure or ask oc8/i), {
+      target: { value: "Draft in tab two" },
+    });
+
+    // Both tabs are still session-less, so both pills fall back to the same
+    // "untitled" label -- index into DOM order (tab creation order) rather
+    // than by name to tell them apart.
+    const tabButtons = screen.getAllByRole("button", { name: /untitled chat tab/i });
+    expect(tabButtons).toHaveLength(2);
+
+    fireEvent.click(tabButtons[0]);
+    expect(screen.getByPlaceholderText(/configure or ask oc8/i)).toHaveValue("Draft in tab one");
+
+    fireEvent.click(tabButtons[1]);
+    expect(screen.getByPlaceholderText(/configure or ask oc8/i)).toHaveValue("Draft in tab two");
+  });
+
+  it("selecting a session via ChatSessionPicker focuses its existing tab instead of duplicating it", () => {
+    sessionsMock.mockReturnValue({
+      data: [
+        {
+          id: "s1",
+          agentId: "assistant-1",
+          title: "Erste Frage",
+          createdAt: "2026-01-01T00:00:00Z",
+          lastMessageAt: null,
+        },
+        {
+          id: "s2",
+          agentId: "assistant-1",
+          title: "Zweite Frage",
+          createdAt: "2026-01-02T00:00:00Z",
+          lastMessageAt: null,
+        },
+      ],
+    });
+    renderDock();
+    openDock();
+    // Bootstrap opens a first tab on the most recent session, s1.
+    expect(screen.getByText("Erste Frage", { selector: "span.truncate" })).toBeInTheDocument();
+    // Counted via the DOM structure (not getByRole) since the tab pills sit
+    // outside the still-open dropdown's content and Radix marks the rest of
+    // the page aria-hidden while it's open -- getByRole would incorrectly
+    // see zero tabs whenever the picker's dropdown is open.
+    expect(document.querySelectorAll("[data-copilot-tab]")).toHaveLength(1);
+
+    // Pick s2 via the picker -- opens it into a second tab.
+    fireEvent.pointerDown(screen.getByText("Erste Frage", { selector: "span.truncate" }), {
+      button: 0,
+    });
+    fireEvent.click(screen.getByText("Zweite Frage"));
+    expect(screen.getByText("Zweite Frage", { selector: "span.truncate" })).toBeInTheDocument();
+    expect(document.querySelectorAll("[data-copilot-tab]")).toHaveLength(2);
+
+    // Pick s1 again via the picker -- must focus the FIRST tab, not open a
+    // third one.
+    fireEvent.pointerDown(screen.getByText("Zweite Frage", { selector: "span.truncate" }), {
+      button: 0,
+    });
+    fireEvent.click(screen.getByText("Erste Frage", { selector: "button" }));
+
+    expect(screen.getByText("Erste Frage", { selector: "span.truncate" })).toBeInTheDocument();
+    expect(document.querySelectorAll("[data-copilot-tab]")).toHaveLength(2);
+  });
+
+  it("closing a tab removes it and activates the previous tab", () => {
+    renderDock();
+    openDock();
+    // Tab 1 (bootstrapped, blank). Open two more.
+    fireEvent.click(screen.getByRole("button", { name: /^new tab$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^new tab$/i }));
+    let tabButtons = screen.getAllByRole("button", { name: /untitled chat tab/i });
+    expect(tabButtons).toHaveLength(3);
+
+    // Tab 3 is active; close it via its own "close" button.
+    const closeButtons = screen.getAllByRole("button", { name: /^close untitled chat$/i });
+    fireEvent.click(closeButtons[closeButtons.length - 1]);
+
+    tabButtons = screen.getAllByRole("button", { name: /untitled chat tab/i });
+    expect(tabButtons).toHaveLength(2);
+    // The previous tab (tab 2) is now the active one -- its composer is the
+    // one rendered.
+    expect(screen.getByPlaceholderText(/configure or ask oc8/i)).toBeInTheDocument();
+  });
+
+  it("persists open tabs across a remount, scoped to the current member", () => {
+    sessionsMock.mockReturnValue({
+      data: [
+        {
+          id: "s1",
+          agentId: "assistant-1",
+          title: "Erste Frage",
+          createdAt: "t",
+          lastMessageAt: null,
+        },
+      ],
+    });
+    const { unmount } = renderDock();
+    openDock();
+    fireEvent.click(screen.getByRole("button", { name: /^new tab$/i }));
+    expect(screen.getAllByRole("button", { name: /frage tab|untitled chat tab/i })).toHaveLength(2);
+
+    unmount();
+
+    expect(localStorage.getItem("oc8-copilot-tabs-anon")).not.toBeNull();
+
+    renderDock();
+    openDock();
+    expect(screen.getAllByRole("button", { name: /frage tab|untitled chat tab/i })).toHaveLength(2);
   });
 });

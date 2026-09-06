@@ -9,6 +9,7 @@ import type { CopilotProposal } from "@/lib/hooks";
 import {
   useApplyCopilotProposal,
   useAssistant,
+  useAuth,
   useCopilotProposals,
   useRejectCopilotProposal,
 } from "@/lib/hooks";
@@ -41,6 +42,16 @@ function proposalFailedText(de: boolean): string {
   return de
     ? "Der Vorschlag konnte nicht bearbeitet werden — vielleicht hat ihn jemand anderes schon beantwortet. Lade die Seite neu oder versuch es noch einmal."
     : "That proposal could not be answered — somebody else may have answered it already. Reload or try again.";
+}
+
+// The tab bar's fallback label for a tab whose session doesn't exist yet
+// (a brand new blank tab) or whose session exists but has no title yet (the
+// same "no title" state ChatSessionPicker itself falls back on, worded the
+// same way, deliberately NOT "New chat" -- that copy is reserved for the
+// header's own "reset to a blank tab" button, and re-using it here would
+// make a tab pill and that button indistinguishable by accessible name).
+function untitledChatText(de: boolean): string {
+  return de ? "Unbenannter Chat" : "Untitled chat";
 }
 
 // A proposal the Assistant drafted, with the two buttons that answer it.
@@ -155,6 +166,33 @@ function PendingProposals({ de }: { de: boolean }) {
   );
 }
 
+// One open conversation in the dock's tab bar. `sessionId` is `null` for a
+// tab that hasn't lazily created its session yet (a brand new tab, same
+// "blank until you send" state the single-session dock always started in).
+export interface CopilotTab {
+  uiId: string;
+  sessionId: string | null;
+}
+
+function tabsStorageKey(memberId: string): string {
+  return `oc8-copilot-tabs-${memberId}`;
+}
+
+function loadTabs(memberId: string): CopilotTab[] {
+  try {
+    const raw = localStorage.getItem(tabsStorageKey(memberId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (t): t is CopilotTab =>
+        typeof t === "object" && t !== null && typeof (t as CopilotTab).uiId === "string",
+    );
+  } catch {
+    return [];
+  }
+}
+
 // `CopilotDock` is mounted unconditionally, once, for the whole app session
 // (app-shell.tsx) -- so the permission check has to happen here, BEFORE
 // `CopilotDockPanel` (and its chat-pipeline query hooks) ever mounts, not
@@ -177,61 +215,269 @@ export function CopilotDock() {
 // standing Assistant agent (GET /assistant), rendered as a compact overlay
 // instead of a full page like ChatWindow/chat-window.tsx. Reuses the exact
 // same session/message hooks and session-bootstrap logic as ChatWindow (see
-// its own doc comment) rather than a separate mechanism -- the only real
-// difference is that this dock has no "Start chat" button: the first message
-// typed here lazily creates the session itself (`pendingSend` below), so
-// typing-and-sending stays a single action the way the old single-shot
-// /copilot/chat POST used to feel, even though a session now exists
-// underneath it.
+// its own doc comment) rather than a separate mechanism.
+//
+// This panel owns the tab bar: which sessions are open (`tabs`, persisted to
+// localStorage per member), which one is active, and the header/proposals
+// that are shared across every tab. Each tab's own single-session lifecycle
+// (composer draft, send-in-flight state, the lazy-create-on-send flow) lives
+// in `CopilotChatTab` below, unchanged from what this file used to do with
+// one session at a time.
 function CopilotDockPanel() {
   const t = useT();
   const de = t("en", "de") === "de";
   const [open, setOpen] = useState(false);
+
+  const { data: assistant } = useAssistant();
+  const assistantAgentId = assistant?.agentId;
+  const { data: sessions } = useChatSessions(assistantAgentId);
+
+  const { data: me } = useAuth();
+  const memberId = me?.memberId ?? "anon";
+
+  const [tabs, setTabs] = useState<CopilotTab[]>(() => loadTabs(memberId));
+  const [activeUiId, setActiveUiId] = useState<string | null>(() => tabs[0]?.uiId ?? null);
+
+  useEffect(() => {
+    localStorage.setItem(tabsStorageKey(memberId), JSON.stringify(tabs));
+  }, [tabs, memberId]);
+
+  // Today's own bootstrap-to-most-recent-session behaviour, now scoped to
+  // "no tabs at all yet" instead of "no session yet" -- a returning user with
+  // persisted tabs skips this and reopens exactly where they left off. Gated
+  // on `sessions` having actually resolved (not merely falsy, which is also
+  // the loading state) so a returning-with-zero-tabs caller doesn't get
+  // locked into a blank tab a moment before the real most-recent session
+  // lands: when it resolves empty, a single blank tab is exactly today's own
+  // starting state (a composer ready for lazy session creation), so this
+  // always leaves at least one tab open, matching the old single-session dock
+  // never having a "nothing to show" state.
+  useEffect(() => {
+    if (tabs.length > 0) return;
+    if (!sessions) return;
+    const uiId = crypto.randomUUID();
+    setTabs([{ uiId, sessionId: sessions[0]?.id ?? null }]);
+    setActiveUiId(uiId);
+  }, [tabs.length, sessions]);
+
+  function openNewTab() {
+    const uiId = crypto.randomUUID();
+    setTabs((prev) => [...prev, { uiId, sessionId: null }]);
+    setActiveUiId(uiId);
+  }
+
+  function focusOrOpenSessionTab(sessionId: string) {
+    const existing = tabs.find((tab) => tab.sessionId === sessionId);
+    if (existing) {
+      setActiveUiId(existing.uiId);
+      return;
+    }
+    const uiId = crypto.randomUUID();
+    setTabs((prev) => [...prev, { uiId, sessionId }]);
+    setActiveUiId(uiId);
+  }
+
+  function closeTab(uiId: string) {
+    setTabs((prev) => {
+      const next = prev.filter((tab) => tab.uiId !== uiId);
+      if (activeUiId === uiId) {
+        setActiveUiId(next[next.length - 1]?.uiId ?? null);
+      }
+      return next;
+    });
+  }
+
+  function setTabSession(uiId: string, sessionId: string | null) {
+    setTabs((prev) => prev.map((tab) => (tab.uiId === uiId ? { ...tab, sessionId } : tab)));
+  }
+
+  useEffect(() => {
+    if (window.sessionStorage.getItem(COPILOT_AUTO_OPEN_KEY) === "1") {
+      window.sessionStorage.removeItem(COPILOT_AUTO_OPEN_KEY);
+      setOpen(true);
+    }
+  }, []);
+
+  const activeTab = tabs.find((tab) => tab.uiId === activeUiId);
+
+  return (
+    <>
+      {open && (
+        <div className="fixed bottom-24 right-5 z-50 flex h-[min(72vh,600px)] w-[min(94vw,400px)] flex-col overflow-hidden rounded-2xl border border-border bg-panel shadow-[0_30px_80px_-30px_oklch(0_0_0/80%)]">
+          <header className="flex items-center gap-2.5 border-b border-border px-4 py-3">
+            <img
+              src="/octopus_oc8.svg"
+              alt=""
+              className="h-8 w-8 shrink-0 select-none"
+              draggable={false}
+            />
+            <div className="min-w-0 flex-1 leading-tight">
+              <div className="font-serif text-base lowercase">oc8 copilot</div>
+              <div className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--status-running)] shadow-[0_0_8px_var(--status-running)]" />
+                {de ? "bereit" : "ready"}
+              </div>
+            </div>
+            {assistantAgentId && (
+              <button
+                type="button"
+                onClick={() => {
+                  // Resets the ACTIVE tab back to a blank, not-yet-created
+                  // session -- same affordance as the old single-session
+                  // dock's "New chat" button, just aimed at whichever tab is
+                  // currently focused instead of the dock's only session.
+                  if (activeUiId) setTabSession(activeUiId, null);
+                }}
+                aria-label={de ? "Neuer Chat" : "New chat"}
+                title={de ? "Neuer Chat" : "New chat"}
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:bg-muted/40 hover:text-foreground"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              aria-label={de ? "Copilot schließen" : "Close copilot"}
+              className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition hover:bg-muted/40 hover:text-foreground"
+            >
+              <ChevronDown className="h-4 w-4" />
+            </button>
+          </header>
+
+          <div className="flex items-center gap-1 overflow-x-auto border-b border-border px-2 py-1">
+            {tabs.map((tab) => {
+              const title =
+                sessions?.find((s) => s.id === tab.sessionId)?.title || untitledChatText(de);
+              return (
+                <div
+                  key={tab.uiId}
+                  data-copilot-tab={tab.uiId}
+                  className={cn(
+                    "flex shrink-0 items-center gap-0.5 rounded-md px-1 text-xs",
+                    tab.uiId === activeUiId ? "bg-muted" : "hover:bg-muted/50",
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setActiveUiId(tab.uiId)}
+                    aria-label={de ? `${title} – Tab` : `${title} tab`}
+                    className="max-w-[120px] overflow-hidden text-ellipsis whitespace-nowrap px-1 py-1"
+                  >
+                    {title}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => closeTab(tab.uiId)}
+                    aria-label={de ? `${title} schließen` : `Close ${title}`}
+                    className="grid h-4 w-4 shrink-0 place-items-center opacity-60 hover:opacity-100"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              );
+            })}
+            <button
+              type="button"
+              onClick={openNewTab}
+              aria-label={t("New tab", "Neuer Tab")}
+              className="grid h-6 w-6 shrink-0 place-items-center rounded-md hover:bg-muted/50"
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+            {assistantAgentId && sessions && sessions.length > 0 && (
+              <ChatSessionPicker
+                agentId={assistantAgentId}
+                sessions={sessions}
+                sessionId={activeTab?.sessionId ?? null}
+                onSelect={(sid) => {
+                  if (sid === null) {
+                    // ChatSessionPicker calls onSelect(null) after deleting
+                    // the ACTIVE session -- reset that tab to blank, same as
+                    // the header's own "New chat" button, rather than opening
+                    // a new tab.
+                    if (activeUiId) setTabSession(activeUiId, null);
+                    return;
+                  }
+                  focusOrOpenSessionTab(sid);
+                }}
+              />
+            )}
+          </div>
+
+          <PendingProposals de={de} />
+
+          {tabs.map((tab) => (
+            <CopilotChatTab
+              key={tab.uiId}
+              active={tab.uiId === activeUiId}
+              sessionId={tab.sessionId}
+              onSessionChange={(sid) => setTabSession(tab.uiId, sid)}
+              assistantAgentId={assistantAgentId}
+            />
+          ))}
+          {tabs.length === 0 && (
+            <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
+              {greeting(de)}
+            </div>
+          )}
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-label={de ? "oc8 Copilot" : "oc8 copilot"}
+        className="group fixed bottom-5 right-5 z-50 grid h-14 w-14 place-items-center rounded-full border border-primary/30 bg-panel shadow-[0_16px_40px_-16px_oklch(0_0_0/90%)] transition hover:scale-105"
+      >
+        {open ? (
+          <X className="h-5 w-5 text-muted-foreground" />
+        ) : (
+          <>
+            <img src="/octopus_oc8.svg" alt="" className="h-9 w-9 select-none" draggable={false} />
+            <span className="absolute -right-0.5 -top-0.5 grid h-4 w-4 place-items-center rounded-full bg-primary text-primary-foreground">
+              <Sparkles className="h-2.5 w-2.5" />
+            </span>
+          </>
+        )}
+      </button>
+    </>
+  );
+}
+
+// One tab's entire single-session state machine -- the dock's whole body
+// before Task 16, extracted unchanged: `input`, `sendError`, `pendingSend`,
+// the lazy-create-on-send flow, and the full message-list/composer render
+// tree. `sessionId`/`onSessionChange` replace what used to be this
+// component's own `useState`, so the session lives in the parent's `tabs`
+// array instead -- everything else behaves exactly as it did as a single
+// dock instance.
+//
+// `active` doesn't gate any of the hooks above -- only the JSX this returns.
+// An inactive tab keeps its own `useChatMessages` poll running (so a
+// background tab's transcript doesn't go stale while unfocused, the same way
+// a real multi-tab chat client behaves) and keeps its component instance
+// (and therefore its `input` draft) alive across a tab switch; it just
+// renders nothing while another tab is focused, which is what keeps two
+// tabs' composers/messages from both landing in the DOM at once.
+function CopilotChatTab({
+  sessionId,
+  onSessionChange,
+  assistantAgentId,
+  active,
+}: {
+  sessionId: string | null;
+  onSessionChange: (sessionId: string | null) => void;
+  assistantAgentId: string | undefined;
+  active: boolean;
+}) {
+  const t = useT();
+  const de = t("en", "de") === "de";
   const [input, setInput] = useState("");
   const scroller = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const { data: assistant } = useAssistant();
-  const assistantAgentId = assistant?.agentId;
-
-  const { data: sessions } = useChatSessions(assistantAgentId);
   const createSession = useCreateChatSession();
-  const [sessionId, setSessionId] = useState<string | null>(null);
-
-  // Default to the most recent existing session once both the Assistant's id
-  // and its sessions have loaded -- same shape as ChatWindow's own bootstrap
-  // effect, except this one only ever fires ONCE (the ref), not merely
-  // "while sessionId is null": the "new chat" button below deliberately sets
-  // `sessionId` back to null to re-enter the lazy-creation flow, and a plain
-  // `sessionId !== null` guard would immediately re-select the same existing
-  // session on the very next render, silently undoing that click whenever
-  // other sessions exist -- exactly the case the button exists for. Gated on
-  // `assistantAgentId` too: until it resolves, `sessions` (queried with an
-  // undefined agentId) would answer for every agent's chat, not just the
-  // Assistant's, and must never be picked from.
-  const bootstrappedSession = useRef(false);
-  useEffect(() => {
-    if (!assistantAgentId) return;
-    if (bootstrappedSession.current) return;
-    if (sessionId !== null) return;
-    if (sessions && sessions.length > 0) {
-      bootstrappedSession.current = true;
-      setSessionId(sessions[0].id);
-    }
-  }, [assistantAgentId, sessions, sessionId]);
-
-  // Any selection that lands `sessionId` on a real session -- whether the
-  // bootstrap effect above, a lazily-created first session (send() below),
-  // or a manual pick from ChatSessionPicker -- must arm the ref too:
-  // otherwise a tenant's very first session (created via the lazy path,
-  // which never runs the bootstrap effect since it sets `sessionId`
-  // directly) leaves the ref unarmed, and the *first* "new chat" click
-  // afterwards gets silently undone by the bootstrap effect re-selecting
-  // `sessions[0]` the moment `sessions` catches up via its own refetch.
-  function selectSession(id: string | null) {
-    bootstrappedSession.current = true;
-    setSessionId(id);
-  }
 
   const { data: messages } = useChatMessages(sessionId);
   const sendMessage = useSendChatMessage(sessionId ?? "");
@@ -265,22 +511,20 @@ function CopilotDockPanel() {
   }, [sessionId, pendingSend]);
 
   useEffect(() => {
-    if (window.sessionStorage.getItem(COPILOT_AUTO_OPEN_KEY) === "1") {
-      window.sessionStorage.removeItem(COPILOT_AUTO_OPEN_KEY);
-      setOpen(true);
-    }
-  }, []);
-
-  useEffect(() => {
     const el = scroller.current;
     if (el && typeof el.scrollTo === "function") {
       el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     }
-  }, [messages, open, sendError]);
+  }, [messages, sendError]);
 
+  // Focus once, on mount -- a tab only ever mounts while the dock itself is
+  // open (the parent nests every `CopilotChatTab` inside `{open && (...)}`),
+  // so "just mounted" already means "the dock/tab just became visible", the
+  // same moment the old single-session dock used to focus on `open` flipping
+  // true.
   useEffect(() => {
-    if (open) inputRef.current?.focus();
-  }, [open]);
+    inputRef.current?.focus();
+  }, []);
 
   // Same "is the agent still typing" signal as ChatWindow: the transcript's
   // own last turn.
@@ -296,7 +540,7 @@ function CopilotDockPanel() {
     if (!sessionId) {
       createSession.mutate(assistantAgentId, {
         onSuccess: (session) => {
-          selectSession(session.id);
+          onSessionChange(session.id);
           setPendingSend(text);
         },
         onError: () => fail(text),
@@ -311,61 +555,31 @@ function CopilotDockPanel() {
     : ["What needs approval?", "Cost this month?", "Create a new agent"];
   const hasMessages = !!messages && messages.length > 0;
 
+  if (!active) return null;
+
   return (
     <>
-      {open && (
-        <div className="fixed bottom-24 right-5 z-50 flex h-[min(72vh,600px)] w-[min(94vw,400px)] flex-col overflow-hidden rounded-2xl border border-border bg-panel shadow-[0_30px_80px_-30px_oklch(0_0_0/80%)]">
-          <header className="flex items-center gap-2.5 border-b border-border px-4 py-3">
+      <div ref={scroller} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+        {!hasMessages && (
+          <div className="flex gap-2">
             <img
               src="/octopus_oc8.svg"
               alt=""
-              className="h-8 w-8 shrink-0 select-none"
+              className="mt-0.5 h-6 w-6 shrink-0"
               draggable={false}
             />
-            <div className="min-w-0 flex-1 leading-tight">
-              <div className="font-serif text-base lowercase">oc8 copilot</div>
-              <div className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--status-running)] shadow-[0_0_8px_var(--status-running)]" />
-                {de ? "bereit" : "ready"}
+            <ChatMarkdown text={greeting(de)} className="max-w-[88%]" />
+          </div>
+        )}
+        {messages?.map((m) =>
+          m.role === "user" ? (
+            <div key={m.id} className="flex justify-end">
+              <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-sm text-primary-foreground">
+                {m.content}
               </div>
             </div>
-            {assistantAgentId && sessions && sessions.length > 0 && (
-              <ChatSessionPicker
-                agentId={assistantAgentId}
-                sessions={sessions}
-                sessionId={sessionId}
-                onSelect={selectSession}
-              />
-            )}
-            {assistantAgentId && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSessionId(null);
-                  setInput("");
-                  setSendError(false);
-                }}
-                aria-label={de ? "Neuer Chat" : "New chat"}
-                title={de ? "Neuer Chat" : "New chat"}
-                className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:bg-muted/40 hover:text-foreground"
-              >
-                <Plus className="h-4 w-4" />
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
-              aria-label={de ? "Copilot schließen" : "Close copilot"}
-              className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition hover:bg-muted/40 hover:text-foreground"
-            >
-              <ChevronDown className="h-4 w-4" />
-            </button>
-          </header>
-
-          <PendingProposals de={de} />
-
-          <div ref={scroller} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
-            {!hasMessages && (
+          ) : (
+            <div key={m.id} className="flex flex-col gap-1">
               <div className="flex gap-2">
                 <img
                   src="/octopus_oc8.svg"
@@ -373,142 +587,103 @@ function CopilotDockPanel() {
                   className="mt-0.5 h-6 w-6 shrink-0"
                   draggable={false}
                 />
-                <ChatMarkdown text={greeting(de)} className="max-w-[88%]" />
+                <ChatMarkdown text={m.content} className="max-w-[88%]" />
               </div>
-            )}
-            {messages?.map((m) =>
-              m.role === "user" ? (
-                <div key={m.id} className="flex justify-end">
-                  <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-sm text-primary-foreground">
-                    {m.content}
-                  </div>
+              {m.renderedComponents.length > 0 && (
+                <div className="ml-8 space-y-2">
+                  {m.renderedComponents.map((c, i) => {
+                    const Renderer = Object.prototype.hasOwnProperty.call(
+                      RUN_COMPONENT_REGISTRY,
+                      c.componentKey,
+                    )
+                      ? RUN_COMPONENT_REGISTRY[c.componentKey]
+                      : undefined;
+                    return Renderer ? <Renderer key={i} props={c.props} /> : null;
+                  })}
                 </div>
-              ) : (
-                <div key={m.id} className="flex flex-col gap-1">
-                  <div className="flex gap-2">
-                    <img
-                      src="/octopus_oc8.svg"
-                      alt=""
-                      className="mt-0.5 h-6 w-6 shrink-0"
-                      draggable={false}
-                    />
-                    <ChatMarkdown text={m.content} className="max-w-[88%]" />
-                  </div>
-                  {m.renderedComponents.length > 0 && (
-                    <div className="ml-8 space-y-2">
-                      {m.renderedComponents.map((c, i) => {
-                        const Renderer = Object.prototype.hasOwnProperty.call(
-                          RUN_COMPONENT_REGISTRY,
-                          c.componentKey,
-                        )
-                          ? RUN_COMPONENT_REGISTRY[c.componentKey]
-                          : undefined;
-                        return Renderer ? <Renderer key={i} props={c.props} /> : null;
-                      })}
-                    </div>
-                  )}
-                </div>
-              ),
-            )}
-            {waitingOnAgent && (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <img src="/octopus_oc8.svg" alt="" className="h-6 w-6 shrink-0" draggable={false} />
-                <span className="inline-flex gap-1">
-                  {[0, 1, 2].map((i) => (
-                    <span
-                      key={i}
-                      className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary"
-                      style={{ animationDelay: `${i * 150}ms` }}
-                    />
-                  ))}
-                </span>
-              </div>
-            )}
-            {sendError && (
-              <div className="flex gap-2">
-                <img
-                  src="/octopus_oc8.svg"
-                  alt=""
-                  className="mt-0.5 h-6 w-6 shrink-0"
-                  draggable={false}
+              )}
+            </div>
+          ),
+        )}
+        {waitingOnAgent && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <img src="/octopus_oc8.svg" alt="" className="h-6 w-6 shrink-0" draggable={false} />
+            <span className="inline-flex gap-1">
+              {[0, 1, 2].map((i) => (
+                <span
+                  key={i}
+                  className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary"
+                  style={{ animationDelay: `${i * 150}ms` }}
                 />
-                <div className="max-w-[88%] rounded-xl border border-border bg-background/40 px-3 py-2 text-sm text-muted-foreground">
-                  {unavailableText(de)}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {!hasMessages && (
-            <div className="flex flex-wrap gap-1.5 px-4 pb-2">
-              {suggestions.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => {
-                    setInput(s);
-                    inputRef.current?.focus();
-                  }}
-                  className="rounded-full border border-border bg-background/40 px-2.5 py-1 text-[11px] text-muted-foreground transition hover:text-foreground"
-                >
-                  {s}
-                </button>
               ))}
-            </div>
-          )}
-
-          <div className="border-t border-border p-3">
-            <div className="flex items-end gap-2 rounded-xl border border-border bg-background/40 px-3 py-2 focus-within:border-primary/50">
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    send();
-                  }
-                }}
-                rows={1}
-                placeholder={de ? "oc8 konfigurieren oder fragen…" : "Configure or ask oc8…"}
-                className="max-h-28 min-h-[24px] flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-              />
-              <button
-                type="button"
-                onClick={send}
-                disabled={!input.trim() || busy || !assistantAgentId}
-                aria-label={de ? "Senden" : "Send"}
-                className={cn(
-                  "grid h-8 w-8 shrink-0 place-items-center rounded-lg transition",
-                  input.trim() && !busy && assistantAgentId
-                    ? "bg-primary text-primary-foreground hover:brightness-110"
-                    : "bg-muted/40 text-muted-foreground",
-                )}
-              >
-                <Send className="h-3.5 w-3.5" />
-              </button>
+            </span>
+          </div>
+        )}
+        {sendError && (
+          <div className="flex gap-2">
+            <img
+              src="/octopus_oc8.svg"
+              alt=""
+              className="mt-0.5 h-6 w-6 shrink-0"
+              draggable={false}
+            />
+            <div className="max-w-[88%] rounded-xl border border-border bg-background/40 px-3 py-2 text-sm text-muted-foreground">
+              {unavailableText(de)}
             </div>
           </div>
+        )}
+      </div>
+
+      {!hasMessages && (
+        <div className="flex flex-wrap gap-1.5 px-4 pb-2">
+          {suggestions.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => {
+                setInput(s);
+                inputRef.current?.focus();
+              }}
+              className="rounded-full border border-border bg-background/40 px-2.5 py-1 text-[11px] text-muted-foreground transition hover:text-foreground"
+            >
+              {s}
+            </button>
+          ))}
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-label={de ? "oc8 Copilot" : "oc8 copilot"}
-        className="group fixed bottom-5 right-5 z-50 grid h-14 w-14 place-items-center rounded-full border border-primary/30 bg-panel shadow-[0_16px_40px_-16px_oklch(0_0_0/90%)] transition hover:scale-105"
-      >
-        {open ? (
-          <X className="h-5 w-5 text-muted-foreground" />
-        ) : (
-          <>
-            <img src="/octopus_oc8.svg" alt="" className="h-9 w-9 select-none" draggable={false} />
-            <span className="absolute -right-0.5 -top-0.5 grid h-4 w-4 place-items-center rounded-full bg-primary text-primary-foreground">
-              <Sparkles className="h-2.5 w-2.5" />
-            </span>
-          </>
-        )}
-      </button>
+      <div className="border-t border-border p-3">
+        <div className="flex items-end gap-2 rounded-xl border border-border bg-background/40 px-3 py-2 focus-within:border-primary/50">
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                send();
+              }
+            }}
+            rows={1}
+            placeholder={de ? "oc8 konfigurieren oder fragen…" : "Configure or ask oc8…"}
+            className="max-h-28 min-h-[24px] flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          />
+          <button
+            type="button"
+            onClick={send}
+            disabled={!input.trim() || busy || !assistantAgentId}
+            aria-label={de ? "Senden" : "Send"}
+            className={cn(
+              "grid h-8 w-8 shrink-0 place-items-center rounded-lg transition",
+              input.trim() && !busy && assistantAgentId
+                ? "bg-primary text-primary-foreground hover:brightness-110"
+                : "bg-muted/40 text-muted-foreground",
+            )}
+          >
+            <Send className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
     </>
   );
 }
