@@ -2384,7 +2384,11 @@ async def test_budget_overview_reports_the_tenant_wide_budget(app_session: Any) 
         member = await _human_behind(db, tenant, task)
         member.role_id = role.id
         await db.flush()
-        db.add(m.Budget(tenant_id=tenant, department_id=None, soft_limit_tokens=1000, hard_limit_tokens=2000))
+        db.add(
+            m.Budget(
+                tenant_id=tenant, department_id=None, soft_limit_tokens=1000, hard_limit_tokens=2000
+            )
+        )
         await db.flush()
 
         outcome = await _budget_overview(db, tenant, assistant, task, {})
@@ -2406,7 +2410,9 @@ async def test_budget_overview_refuses_a_department_seat_alone(app_session: Any)
 
 
 @pytest.mark.asyncio
-async def test_budget_overview_dispatch_is_refused_for_a_non_assistant_agent(app_session: Any) -> None:
+async def test_budget_overview_dispatch_is_refused_for_a_non_assistant_agent(
+    app_session: Any,
+) -> None:
     tenant = uuid.uuid4()
     async with app_session(tenant) as db:
         agent, task = await _dept_agent_task(db, tenant, is_team_lead=True)

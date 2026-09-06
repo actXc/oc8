@@ -1542,7 +1542,9 @@ async def execute_control_tool(
         used = await current_month_tokens(db, tenant_id=tenant_id, department_id=department_id)
         scope_label = f"department {department_id}" if department_id else "the whole tenant"
         if budget is None:
-            return ControlOutcome(output=f"No budget configured for {scope_label}. Used this month: {used} tokens.")
+            return ControlOutcome(
+                output=f"No budget configured for {scope_label}. Used this month: {used} tokens."
+            )
         return ControlOutcome(
             output=(
                 f"Budget for {scope_label}: soft limit {budget.soft_limit_tokens}, "
