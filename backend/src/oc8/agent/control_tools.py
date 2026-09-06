@@ -12,6 +12,7 @@ connection's tools stay entirely the connection's business.
 
 from __future__ import annotations
 
+import datetime as dt
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -43,6 +44,7 @@ from oc8.authz.scope import AgentActor, scope_for_member
 from oc8.capas.discovery import find_plugin
 from oc8.departments.repo import visible_department, visible_departments
 from oc8.knowledge.retrieval import retrieve_kb_context
+from oc8.kpis.aggregate import compute_kpis
 from oc8.memory.router import retrieve_context, write_memory
 from oc8.metering.budget import current_month_tokens, get_budget
 from oc8.modelrouter import NeutralTool, ToolCall
@@ -912,6 +914,19 @@ async def _has_component_grant(db: AsyncSession, *, agent: m.Agent, component_ke
     return result.scalar_one_or_none() is not None
 
 
+def _parse_iso(value: object) -> dt.datetime | None:
+    """A tool argument's date string, tolerantly. `kpis.py`'s own
+    `_parse_bound` raises `HTTPException` on a bad value, which has no
+    meaning inside a tool dispatch -- an unparseable date here is simply
+    ignored (treated as "no bound"), since the model can always ask again."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return dt.datetime.fromisoformat(value.strip())
+    except ValueError:
+        return None
+
+
 async def execute_control_tool(
     db: AsyncSession,
     *,
@@ -1549,6 +1564,113 @@ async def execute_control_tool(
             output=(
                 f"Budget for {scope_label}: soft limit {budget.soft_limit_tokens}, "
                 f"hard limit {budget.hard_limit_tokens}. Used this month: {used} tokens."
+            )
+        )
+
+    if tc.name == KPI_OVERVIEW.name:
+        if not agent.is_tenant_assistant:
+            return ControlOutcome(output="ERROR: only the oc8 Assistant can read KPIs")
+        agent_id_raw = tc.arguments.get("agent_id")
+        department_id_raw = tc.arguments.get("department_id")
+        if agent_id_raw and department_id_raw:
+            return ControlOutcome(
+                output="ERROR: pass at most one of agent_id/department_id"
+            )
+        agent_actor = await _resolve_agent_actor(
+            db, tenant_id=tenant_id, task=task, run_id=run_id
+        )
+        if agent_actor is None:
+            return ControlOutcome(output="ERROR: could not resolve who you are acting for")
+        authority = await authority_for_member(
+            db,
+            agent_actor.member,
+            token_role=await _acting_token_role(
+                db, tenant_id=tenant_id, run_id=run_id
+            ),
+        )
+        date_from = _parse_iso(tc.arguments.get("date_from"))
+        date_to = _parse_iso(tc.arguments.get("date_to"))
+        target_agent_id: uuid.UUID | None = None
+        target_department_id: uuid.UUID | None = None
+        scope_label = "the whole tenant"
+        if agent_id_raw:
+            view_perm = perm(AGENT, VIEW)
+            admitted = (
+                view_perm in authority.tenant_wide
+                or agent_actor.scope.holds_anywhere(view_perm)
+            )
+            if not admitted:
+                return ControlOutcome(
+                    output="ERROR: you don't have permission to view this agent"
+                )
+            try:
+                target_agent_id = uuid.UUID(str(agent_id_raw))
+            except ValueError:
+                return ControlOutcome(output="ERROR: agent_id is not a valid id")
+            tenant_wide = tenant_wide_read(
+                authority, view_perm
+            ) or agent_actor.scope.is_unrestricted
+            target = await visible_agent(
+                db,
+                scope=agent_actor.scope,
+                tenant_wide=tenant_wide,
+                agent_id=target_agent_id,
+                include_tenant_assistant=True,
+            )
+            if target is None:
+                return ControlOutcome(output="ERROR: agent not found")
+            scope_label = f"agent {target.name}"
+        elif department_id_raw:
+            view_perm = perm(DEPARTMENT, VIEW)
+            admitted = (
+                view_perm in authority.tenant_wide
+                or agent_actor.scope.holds_anywhere(view_perm)
+            )
+            if not admitted:
+                return ControlOutcome(
+                    output=(
+                        "ERROR: you don't have permission to view this department"
+                    )
+                )
+            try:
+                target_department_id = uuid.UUID(str(department_id_raw))
+            except ValueError:
+                return ControlOutcome(output="ERROR: department_id is not a valid id")
+            tenant_wide = tenant_wide_read(
+                authority, view_perm
+            ) or agent_actor.scope.is_unrestricted
+            dept = await visible_department(
+                db,
+                scope=agent_actor.scope,
+                tenant_wide=tenant_wide,
+                department_id=target_department_id,
+            )
+            if dept is None:
+                return ControlOutcome(output="ERROR: department not found")
+            scope_label = f"department {dept.name}"
+        else:
+            # Tenant-wide figures: STATISTICS_VIEW is not in SEAT_PERMISSIONS,
+            # same reasoning as budget_overview -- no seat fallback.
+            if perm(STATISTICS, VIEW) not in authority.tenant_wide:
+                return ControlOutcome(
+                    output=(
+                        "ERROR: you don't have permission to view "
+                        "tenant-wide statistics"
+                    )
+                )
+        result = await compute_kpis(
+            db,
+            tenant_id=tenant_id,
+            agent_id=target_agent_id,
+            department_id=target_department_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        return ControlOutcome(
+            output=(
+                f"KPIs for {scope_label}: {result.run_count} runs, "
+                f"avg response time {result.response_time_ms} ms, "
+                f"avg approval wait {result.approval_wait_ms} ms."
             )
         )
 
