@@ -341,6 +341,44 @@ async def resolve_authority(db: AsyncSession, principal: Principal) -> Authority
     )
 
 
+async def authority_for_member(
+    db: AsyncSession, member: OrgMember, *, token_role: str | None = None
+) -> Authority:
+    """`resolve_authority`'s tail, for a caller that already has the row.
+
+    The Copilot's write-capable tools (`agent/control_tools.py`'s
+    `AgentActor` seam) resolve the human behind a chat turn from a run, not
+    from a live request -- there is no `Principal` or `Request` to memoise
+    against. This is that resolver's off-request twin: same two-case
+    doctrine (an assigned role replaces the token floor; its absence falls
+    back to the token, never to nothing), same seat independence (a seat
+    grant is read from `DepartmentScope.holds_anywhere`, never from here),
+    no memoisation (nothing here runs more than once per tool call), no
+    `Principal`-kind guard (an `AgentActor.member` is already known-human --
+    `_resolve_agent_actor` only ever produces one from a real `OrgMember`
+    row).
+    """
+    if member.role_id is None:
+        granted = permissions_for(token_role) if token_role is not None else frozenset()
+        source: AuthoritySource = "token"
+        role = None
+    else:
+        role, granted = await _role_and_permissions(db, member.role_id)
+        source = "assigned"
+
+    decides_everywhere = APPROVAL_DECIDE_ANY in granted or member.all_departments
+    unrestricted = APPROVAL_VIEW_ANY in granted or decides_everywhere
+
+    return Authority(
+        tenant_wide=granted,
+        unrestricted=unrestricted,
+        decides_everywhere=decides_everywhere,
+        member=member,
+        source=source,
+        role=role,
+    )
+
+
 async def authority_for_principal(
     request: Request, db: AsyncSession, principal: Principal
 ) -> Authority:
