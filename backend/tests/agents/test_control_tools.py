@@ -2151,3 +2151,82 @@ async def test_list_pending_approvals_dispatch_is_refused_for_a_non_assistant_ag
         agent, task = await _dept_agent_task(db, tenant, is_team_lead=True)
         outcome = await _list_approvals(db, tenant, agent, task, {})
         assert outcome.output.startswith("ERROR")
+
+
+# --------------------------------------------------------- department_status
+
+
+async def _department_status(
+    db: Any, tenant: uuid.UUID, assistant: m.Agent, task: m.Task, arguments: dict[str, Any]
+) -> ControlOutcome:
+    outcome = await execute_control_tool(
+        db,
+        tenant_id=tenant,
+        agent=assistant,
+        task=task,
+        tc=ToolCall(id="c1", name="department_status", arguments=arguments),
+        decision=Decision(Effect.ALLOW),
+        assigned_skills=[],
+        active_skills=[],
+        mcp_conn=None,
+        originating_operator=None,
+    )
+    assert outcome is not None
+    return outcome
+
+
+@pytest.mark.asyncio
+async def test_department_status_lists_only_visible_departments(app_session: Any) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        await _human_behind(db, tenant, task, all_departments=True)
+        outcome = await _department_status(db, tenant, assistant, task, {})
+        assert "Vertrieb" in outcome.output
+
+
+@pytest.mark.asyncio
+async def test_department_status_by_id_404s_for_a_foreign_department(app_session: Any) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        other = m.Department(tenant_id=tenant, name="Buchhaltung", frame={})
+        db.add(other)
+        await db.flush()
+        await _human_behind(db, tenant, task, seat_in=task.department_id)
+        outcome = await _department_status(
+            db, tenant, assistant, task, {"department_id": str(other.id)}
+        )
+        assert outcome.output.startswith("ERROR")
+        assert "not found" in outcome.output.lower()
+
+
+@pytest.mark.asyncio
+async def test_department_status_refuses_without_department_view(app_session: Any) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        await _human_behind(db, tenant, task)
+        outcome = await _department_status(db, tenant, assistant, task, {})
+        assert outcome.output.startswith("ERROR")
+
+
+@pytest.mark.asyncio
+async def test_department_status_is_visible_to_a_seat_only_member(app_session: Any) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        await _human_behind(db, tenant, task, seat_in=task.department_id)
+        outcome = await _department_status(db, tenant, assistant, task, {})
+        assert "Vertrieb" in outcome.output
+
+
+@pytest.mark.asyncio
+async def test_department_status_dispatch_is_refused_for_a_non_assistant_agent(
+    app_session: Any,
+) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        agent, task = await _dept_agent_task(db, tenant, is_team_lead=True)
+        outcome = await _department_status(db, tenant, agent, task, {})
+        assert outcome.output.startswith("ERROR")

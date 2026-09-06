@@ -35,7 +35,7 @@ from oc8.approvals import (
 )
 from oc8.approvals.repo import load_for_actor, visible_approvals
 from oc8.audit import append_event
-from oc8.authz.authority import authority_for_member
+from oc8.authz.authority import authority_for_member, tenant_wide_read
 from oc8.authz.pdp import Decision, Effect
 from oc8.authz.permissions import AGENT, APPROVAL, BUDGET, DEPARTMENT, STATISTICS, VIEW, perm
 from oc8.authz.scope import AgentActor, scope_for_member
@@ -1422,6 +1422,51 @@ async def execute_control_tool(
             for r in rows
         ]
         return ControlOutcome(output="\n".join(lines))
+
+    if tc.name == DEPARTMENT_STATUS.name:
+        if not agent.is_tenant_assistant:
+            return ControlOutcome(output="ERROR: only the oc8 Assistant can read department status")
+        agent_actor = await _resolve_agent_actor(db, tenant_id=tenant_id, task=task, run_id=run_id)
+        if agent_actor is None:
+            return ControlOutcome(output="ERROR: could not resolve who you are acting for")
+        authority = await authority_for_member(
+            db,
+            agent_actor.member,
+            token_role=await _acting_token_role(db, tenant_id=tenant_id, run_id=run_id),
+        )
+        view_perm = perm(DEPARTMENT, VIEW)
+        admitted = view_perm in authority.tenant_wide or agent_actor.scope.holds_anywhere(view_perm)
+        if not admitted:
+            return ControlOutcome(output="ERROR: you don't have permission to view departments")
+        tenant_wide = tenant_wide_read(authority, view_perm)
+        # Deferred import: oc8.departments.repo reaches oc8.api.v1, which imports
+        # this module's own importer (oc8.agent.engine) at module level, so
+        # importing it at the top would be a cycle. Resolved once, at first call.
+        from oc8.departments.repo import visible_department, visible_departments
+
+        department_id_raw = tc.arguments.get("department_id")
+        if department_id_raw:
+            try:
+                department_id = uuid.UUID(str(department_id_raw))
+            except ValueError:
+                return ControlOutcome(output="ERROR: department_id is not a valid id")
+            dept = await visible_department(
+                db, scope=agent_actor.scope, tenant_wide=tenant_wide, department_id=department_id
+            )
+            if dept is None:
+                return ControlOutcome(output="ERROR: department not found")
+            goal = dept.goal or "(none)"
+            return ControlOutcome(
+                output=f"{dept.name} | id {dept.id} | goal: {goal}"
+            )
+        search = tc.arguments.get("search")
+        search_str = str(search) if search else None
+        rows, _total = await visible_departments(
+            db, scope=agent_actor.scope, tenant_wide=tenant_wide, search=search_str
+        )
+        if not rows:
+            return ControlOutcome(output="No departments visible.")
+        return ControlOutcome(output="\n".join(f"- {d.name} | id {d.id}" for d in rows))
 
     if tc.name == RENDER_COMPONENT.name:
         component_key = str(tc.arguments.get("component_key", "")).strip()
