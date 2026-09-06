@@ -2071,3 +2071,83 @@ async def test_status_tools_are_offered_only_to_the_assistant_and_only_with_the_
     assert "agent_status" not in names
     assert "budget_overview" not in names
     assert "kpi_overview" not in names
+
+
+# ------------------------------------------------------ list_pending_approvals
+
+
+async def _list_approvals(
+    db: Any, tenant: uuid.UUID, assistant: m.Agent, task: m.Task, arguments: dict[str, Any]
+) -> ControlOutcome:
+    outcome = await execute_control_tool(
+        db,
+        tenant_id=tenant,
+        agent=assistant,
+        task=task,
+        tc=ToolCall(id="c1", name="list_pending_approvals", arguments=arguments),
+        decision=Decision(Effect.ALLOW),
+        assigned_skills=[],
+        active_skills=[],
+        mcp_conn=None,
+        originating_operator=None,
+    )
+    assert outcome is not None
+    return outcome
+
+
+@pytest.mark.asyncio
+async def test_list_pending_approvals_returns_only_what_the_human_could_see(
+    app_session: Any,
+) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        await _human_behind(db, tenant, task, all_departments=True)
+        approval = await _pending_approval(db, tenant, department_id=task.department_id)
+
+        outcome = await _list_approvals(db, tenant, assistant, task, {})
+        assert str(approval.id) in outcome.output
+
+
+@pytest.mark.asyncio
+async def test_list_pending_approvals_refuses_without_approval_view(app_session: Any) -> None:
+    """Parity with `GET /approvals`'s `require_departmental(APPROVAL_VIEW)`
+    403: a member with neither a tenant-wide grant nor a departmental seat
+    gets an explicit refusal, not a silently empty list."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        await _human_behind(db, tenant, task)  # no seat, no all_departments
+        await _pending_approval(db, tenant, department_id=task.department_id)
+
+        outcome = await _list_approvals(db, tenant, assistant, task, {})
+        assert outcome.output.startswith("ERROR")
+
+
+@pytest.mark.asyncio
+async def test_list_pending_approvals_is_visible_to_a_seat_only_member(
+    app_session: Any,
+) -> None:
+    """The corrected gating formula's whole point: a member with ONLY a
+    departmental seat grant (no tenant role at all) still sees their
+    department's approvals -- `holds_anywhere` reads the seat directly,
+    `authority.tenant_wide` alone would have refused this."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        await _human_behind(db, tenant, task, seat_in=task.department_id)
+        approval = await _pending_approval(db, tenant, department_id=task.department_id)
+
+        outcome = await _list_approvals(db, tenant, assistant, task, {})
+        assert str(approval.id) in outcome.output
+
+
+@pytest.mark.asyncio
+async def test_list_pending_approvals_dispatch_is_refused_for_a_non_assistant_agent(
+    app_session: Any,
+) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        agent, task = await _dept_agent_task(db, tenant, is_team_lead=True)
+        outcome = await _list_approvals(db, tenant, agent, task, {})
+        assert outcome.output.startswith("ERROR")

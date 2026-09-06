@@ -33,11 +33,12 @@ from oc8.approvals import (
     decide_approval,
     raise_approval,
 )
-from oc8.approvals.repo import load_for_actor
+from oc8.approvals.repo import DEFAULT_LIMIT, load_for_actor, visible_approvals
 from oc8.audit import append_event
 from oc8.authz.pdp import Decision, Effect
 from oc8.authz.permissions import AGENT, APPROVAL, BUDGET, DEPARTMENT, STATISTICS, VIEW, perm
 from oc8.authz.scope import AgentActor, scope_for_member
+from oc8.authz.authority import authority_for_member
 from oc8.capas.discovery import find_plugin
 from oc8.knowledge.retrieval import retrieve_kb_context
 from oc8.memory.router import retrieve_context, write_memory
@@ -1385,6 +1386,39 @@ async def execute_control_tool(
             output=f"Approval {approval_row.id} {result.approval.status}.",
             pending_run=result.resumed_run_id,
         )
+
+    if tc.name == LIST_PENDING_APPROVALS.name:
+        if not agent.is_tenant_assistant:
+            return ControlOutcome(output="ERROR: only the oc8 Assistant can list approvals")
+        agent_actor = await _resolve_agent_actor(db, tenant_id=tenant_id, task=task, run_id=run_id)
+        if agent_actor is None:
+            return ControlOutcome(output="ERROR: could not resolve who you are acting for")
+        authority = await authority_for_member(
+            db,
+            agent_actor.member,
+            token_role=await _acting_token_role(db, tenant_id=tenant_id, run_id=run_id),
+        )
+        view_perm = perm(APPROVAL, VIEW)
+        admitted = view_perm in authority.tenant_wide or agent_actor.scope.holds_anywhere(view_perm)
+        if not admitted:
+            return ControlOutcome(output="ERROR: you don't have permission to view approvals")
+        status = str(tc.arguments.get("status") or "pending").strip()
+        department_id: uuid.UUID | None = None
+        department_id_raw = tc.arguments.get("department_id")
+        if department_id_raw:
+            try:
+                department_id = uuid.UUID(str(department_id_raw))
+            except ValueError:
+                return ControlOutcome(output="ERROR: department_id is not a valid id")
+        limit_raw = tc.arguments.get("limit")
+        limit = min(int(limit_raw), 50) if isinstance(limit_raw, int) else 20
+        rows = await visible_approvals(
+            db, actor=agent_actor, status=status, department_id=department_id, limit=limit
+        )
+        if not rows:
+            return ControlOutcome(output=f"No {status} approvals.")
+        lines = [f"- {r.id} | {r.title} | {r.action_type} | department {r.department_id}" for r in rows]
+        return ControlOutcome(output="\n".join(lines))
 
     if tc.name == RENDER_COMPONENT.name:
         component_key = str(tc.arguments.get("component_key", "")).strip()
