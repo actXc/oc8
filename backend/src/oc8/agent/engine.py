@@ -495,12 +495,15 @@ async def run_agent(
             task_text=task_text,
             frame=frame,
             model_locality=model_locality,
+            task=task,
+            run_id=run_id,
         )
         messages: list[NeutralMessage] = list(preamble.messages)
         assigned_skills = preamble.assigned_skills
         skill_tool_names = preamble.skill_tool_names
         contains_restricted = preamble.contains_restricted
         has_knowledge = preamble.has_knowledge
+        copilot_permissions = preamble.copilot_permissions
         tool_trace: list[dict[str, Any]] = []
         # Sub-runs created by delegate_task. run_agent must not publish them (see
         # _delegate); every return below hands them to execute_run instead.
@@ -557,6 +560,7 @@ async def run_agent(
                     active_skills=active_skills,
                     mcp_tools=tools,
                     has_knowledge=has_knowledge,
+                    copilot_permissions=copilot_permissions,
                 )
 
             steps = 0

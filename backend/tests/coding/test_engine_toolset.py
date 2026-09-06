@@ -82,3 +82,74 @@ async def test_run_agent_codes_in_sandbox(
             assert result.status == "done"
             # The tool call actually wrote the file inside the sandbox.
             assert await ts.call("fs_read", {"path": "/workspace/out.txt"}) == "generated"
+
+
+async def test_run_agent_offers_list_pending_approvals_to_the_assistant_with_approval_view(
+    app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end: a real chat-driven Assistant run offers the status tool
+    once the human behind it holds APPROVAL_VIEW -- proving preamble.py's
+    copilot_permissions actually reaches offered_tools through run_agent,
+    not just through build_run_preamble in isolation (Task 8's own test)."""
+    from oc8.authz.permissions import ORG_ADMIN
+
+    captured: list[list[str]] = []
+
+    class _CapturingRouter:
+        async def complete(self, req: Any) -> CompletionResult:
+            captured.append([t.name for t in req.tools])
+            return CompletionResult(
+                text="done", tool_calls=[], usage=Usage(tokens_in=1, tokens_out=1),
+                stop_reason="stop", provider="fake", model="fake",
+            )
+
+        async def stream(self, req: Any) -> Any:
+            yield chunk_from_result(await self.complete(req))
+
+    tenant = uuid.uuid4()
+    monkeypatch.setattr("oc8.agent.engine.get_model_router", lambda: _CapturingRouter())
+
+    async with app_session(tenant) as db:
+        dept = m.Department(tenant_id=tenant, name="oc8 Assistant", frame={})
+        db.add(dept)
+        await db.flush()
+        assistant = m.Agent(
+            tenant_id=tenant, department_id=dept.id, name="Assistant", status="running",
+            definition={}, presentation={}, is_team_lead=True, is_tenant_assistant=True,
+        )
+        db.add(assistant)
+        await db.flush()
+
+        task = m.Task(
+            tenant_id=tenant, department_id=dept.id, assigned_agent_id=assistant.id,
+            title="Chat", state="in_progress",
+        )
+        db.add(task)
+        await db.flush()
+
+        run = m.AgentRun(
+            tenant_id=tenant, agent_id=assistant.id, task_id=task.id, state="queued"
+        )
+        db.add(run)
+        await db.flush()
+
+        role = m.Role(tenant_id=tenant, name=ORG_ADMIN, builtin=True, kind="human")
+        db.add(role)
+        await db.flush()
+        member = m.OrgMember(
+            tenant_id=tenant, subject=f"anna-{uuid.uuid4()}",
+            subject_uuid=uuid.uuid4(), role_id=role.id,
+        )
+        db.add(member)
+        await db.flush()
+        db.add(
+            m.ChatSession(
+                tenant_id=tenant, agent_id=assistant.id, member_id=member.id, task_id=task.id
+            )
+        )
+        await db.flush()
+
+        await run_agent(db, agent=assistant, task_text="Hallo", tenant_id=tenant, run_id=run.id)
+
+    assert captured, "the scripted router must have been called at least once"
+    assert "list_pending_approvals" in captured[0]
