@@ -15,7 +15,8 @@ from typing import Any
 import pytest
 
 from oc8 import models as m
-from oc8.agent.preamble import build_run_preamble
+from oc8.agent.preamble import build_run_preamble, system_prompt
+from oc8.authz.permissions import AGENT, APPROVAL, VIEW, perm
 from tests.conftest import AppSessionFactory
 
 pytestmark = pytest.mark.asyncio
@@ -251,3 +252,110 @@ async def test_the_provenance_rule_precedes_anything_a_stranger_wrote(
         )
     systems = [msg.content for msg in pre.messages if msg.role == "system"]
     assert RULE in systems
+
+
+async def _assistant_dept_task(db, tenant: uuid.UUID) -> tuple[m.Agent, m.Task]:
+    dept = m.Department(tenant_id=tenant, name="Vertrieb", frame={})
+    db.add(dept)
+    await db.flush()
+    assistant = m.Agent(
+        tenant_id=tenant,
+        department_id=dept.id,
+        name="Assistant",
+        status="running",
+        definition={},
+        presentation={},
+        is_team_lead=True,
+        is_tenant_assistant=True,
+    )
+    db.add(assistant)
+    await db.flush()
+    task = m.Task(
+        tenant_id=tenant,
+        department_id=dept.id,
+        assigned_agent_id=assistant.id,
+        title="Chat",
+        state="in_progress",
+    )
+    db.add(task)
+    await db.flush()
+    return assistant, task
+
+
+async def test_build_run_preamble_grants_no_copilot_permissions_without_a_task(
+    app_session: AppSessionFactory,
+) -> None:
+    """delegated/scheduled runs (task=None) get nothing, same fail-closed
+    direction as _resolve_agent_actor itself."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, _task = await _assistant_dept_task(db, tenant)
+        preamble = await build_run_preamble(
+            db,
+            agent=assistant,
+            tenant_id=tenant,
+            task_text="hi",
+            frame={},
+            model_locality="cloud",
+        )
+    assert preamble.copilot_permissions == frozenset()
+
+
+async def test_build_run_preamble_grants_permissions_the_human_behind_the_chat_holds(
+    app_session: AppSessionFactory,
+) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_dept_task(db, tenant)
+        member = m.OrgMember(
+            tenant_id=tenant,
+            subject=f"anna-{uuid.uuid4()}",
+            subject_uuid=uuid.uuid4(),
+            all_departments=True,
+        )
+        db.add(member)
+        await db.flush()
+        db.add(
+            m.ChatSession(
+                tenant_id=tenant,
+                agent_id=assistant.id,
+                member_id=member.id,
+                task_id=task.id,
+            )
+        )
+        await db.flush()
+
+        preamble = await build_run_preamble(
+            db,
+            agent=assistant,
+            tenant_id=tenant,
+            task_text="hi",
+            frame={},
+            model_locality="cloud",
+            task=task,
+        )
+    assert perm(APPROVAL, VIEW) in preamble.copilot_permissions
+    assert perm(AGENT, VIEW) in preamble.copilot_permissions
+
+
+def test_system_prompt_tells_the_assistant_to_open_with_status() -> None:
+    assistant = m.Agent(
+        tenant_id=uuid.uuid4(),
+        department_id=uuid.uuid4(),
+        name="Assistant",
+        status="running",
+        definition={},
+        presentation={},
+        is_tenant_assistant=True,
+    )
+    ordinary = m.Agent(
+        tenant_id=uuid.uuid4(),
+        department_id=uuid.uuid4(),
+        name="Nora",
+        status="running",
+        definition={},
+        presentation={},
+        is_tenant_assistant=False,
+    )
+    assert "list_pending_approvals" in system_prompt(assistant)
+    assert "list_pending_approvals" not in system_prompt(ordinary)

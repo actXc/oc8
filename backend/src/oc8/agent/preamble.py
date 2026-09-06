@@ -21,7 +21,18 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from oc8 import models as m
+from oc8.agent.control_tools import _acting_token_role, _resolve_agent_actor
 from oc8.agent.provenance import RULE as PROVENANCE_RULE
+from oc8.authz.authority import authority_for_member
+from oc8.authz.permissions import (
+    AGENT,
+    APPROVAL,
+    BUDGET,
+    DEPARTMENT,
+    STATISTICS,
+    VIEW,
+    perm,
+)
 from oc8.knowledge.retrieval import granted_kb_ids, retrieve_kb_context
 from oc8.memory.router import retrieve_context
 from oc8.modelrouter import NeutralMessage
@@ -42,6 +53,15 @@ def system_prompt(agent: m.Agent) -> str:
         "your reply. Call one tool at a time and wait for its result. When the task "
         "is fully done, reply with a short plain-text summary and call no further tools."
     )
+    if agent.is_tenant_assistant:
+        parts.append(
+            "At the start of a new conversation, before waiting for the human to "
+            "ask anything, proactively call list_pending_approvals and "
+            "department_status (whichever of these you have been offered) and "
+            "open with a short status summary -- what is waiting for a "
+            "decision, and how the departments you can see are doing. Skip this "
+            "if the conversation already has prior turns."
+        )
     return "\n\n".join(parts)
 
 
@@ -66,6 +86,7 @@ class RunPreamble:
     #: precisely because a scheduled or blank-instruction run only learns its
     #: real topic mid-run, once it has read the record it was triggered for.
     has_knowledge: bool = False
+    copilot_permissions: frozenset[str] = frozenset()
 
 
 async def roster_block(db: AsyncSession, *, agent: m.Agent) -> str | None:
@@ -138,6 +159,51 @@ async def roster_block(db: AsyncSession, *, agent: m.Agent) -> str | None:
     return f"Your department's agents:\n{roster}"
 
 
+async def _gated_copilot_permissions(
+    db: AsyncSession,
+    *,
+    agent: m.Agent,
+    tenant_id: uuid.UUID,
+    task: m.Task | None,
+    run_id: uuid.UUID | None,
+) -> frozenset[str]:
+    """Which of the 5 status tools' permissions this run's Assistant may
+    offer, mirroring `require_departmental`'s admission formula
+    (`api/deps.py:282-359`) off-request, for the human behind this chat.
+
+    Only ever non-empty for the tenant Assistant with a real chat-driven
+    task behind it -- every other agent, and every non-chat origin
+    (delegated/scheduled runs have no chat session), gets the empty set,
+    which is exactly what `offered_tools` needs to withhold all 5 tools.
+    """
+    if not agent.is_tenant_assistant or task is None:
+        return frozenset()
+    agent_actor = await _resolve_agent_actor(
+        db, tenant_id=tenant_id, task=task, run_id=run_id
+    )
+    if agent_actor is None:
+        return frozenset()
+    authority = await authority_for_member(
+        db,
+        agent_actor.member,
+        token_role=await _acting_token_role(db, tenant_id=tenant_id, run_id=run_id),
+    )
+    granted = set()
+    # Seat-grantable: a departmental seat alone is enough (SEAT_PERMISSIONS
+    # includes all three of these for both SEAT_VIEWER and SEAT_APPROVER).
+    for permission in (perm(APPROVAL, VIEW), perm(DEPARTMENT, VIEW), perm(AGENT, VIEW)):
+        if permission in authority.tenant_wide or agent_actor.scope.holds_anywhere(
+            permission
+        ):
+            granted.add(permission)
+    # Tenant-wide only: not in SEAT_PERMISSIONS, so no seat can ever grant
+    # these -- checked against authority.tenant_wide alone.
+    for permission in (perm(BUDGET, VIEW), perm(STATISTICS, VIEW)):
+        if permission in authority.tenant_wide:
+            granted.add(permission)
+    return frozenset(granted)
+
+
 async def build_run_preamble(
     db: AsyncSession,
     *,
@@ -146,6 +212,8 @@ async def build_run_preamble(
     task_text: str,
     frame: dict[str, Any],
     model_locality: str,
+    task: m.Task | None = None,
+    run_id: uuid.UUID | None = None,
 ) -> RunPreamble:
     """Seed a run's conversation: system context first, the task last.
 
@@ -194,6 +262,9 @@ async def build_run_preamble(
 
     messages.append(NeutralMessage(role="user", content=task_text))
 
+    copilot_permissions = await _gated_copilot_permissions(
+        db, agent=agent, tenant_id=tenant_id, task=task, run_id=run_id
+    )
     return RunPreamble(
         messages=messages,
         assigned_skills=list(assigned_skills),
@@ -203,4 +274,5 @@ async def build_run_preamble(
         skill_tool_names=frozenset(s.tool_name for s in assigned_skills),
         contains_restricted=contains_restricted,
         has_knowledge=has_knowledge,
+        copilot_permissions=copilot_permissions,
     )
