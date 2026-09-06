@@ -106,3 +106,34 @@ export function useSendChatMessage(sessionId: string) {
     },
   });
 }
+
+export interface RunActivityDTO {
+  id: string;
+  agentId: string;
+  state: string;
+  phase: string | null;
+  output: string | null;
+  steps: number;
+  toolCalls: Record<string, unknown>[];
+  taskId: string | null;
+  question: string | null;
+  renderedComponents: RunComponentDTO[];
+}
+
+// Seeds the exact ["run", runId] cache entry the WS patchers in
+// live/apply-event.ts already write to (run.status/output_delta/
+// component_rendered/token_delta) -- those patchers only ever UPDATE an
+// existing entry (`prev ? {...} : prev`), they never create one, so this
+// hook's own fetch is what makes a freshly opened tab's live-activity strip
+// receive those patches at all instead of silently discarding them.
+export function useCopilotRunActivity(sessionId: string | null, runId: string | null) {
+  return useQuery({
+    queryKey: ["run", runId ?? ""],
+    queryFn: () => api.get<RunActivityDTO>(`/chat/sessions/${sessionId}/runs/${runId}`),
+    enabled: !!sessionId && !!runId,
+    // A terminal run's state does not change again; a poll interval would
+    // just be wasted requests once the WS has already delivered every event
+    // an open tab will ever see for this run.
+    staleTime: Infinity,
+  });
+}
