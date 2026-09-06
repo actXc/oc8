@@ -36,6 +36,7 @@ from oc8.approvals import (
 from oc8.approvals.repo import load_for_actor
 from oc8.audit import append_event
 from oc8.authz.pdp import Decision, Effect
+from oc8.authz.permissions import AGENT, APPROVAL, BUDGET, DEPARTMENT, STATISTICS, VIEW, perm
 from oc8.authz.scope import AgentActor, scope_for_member
 from oc8.capas.discovery import find_plugin
 from oc8.knowledge.retrieval import retrieve_kb_context
@@ -371,6 +372,138 @@ DECIDE_APPROVAL = NeutralTool(
     },
 )
 
+LIST_PENDING_APPROVALS = NeutralTool(
+    name="list_pending_approvals",
+    description=(
+        "List approval requests waiting for a decision, scoped to what the "
+        "human you are talking to could see themselves -- this is checked "
+        "the same way their own Approvals tab is, so a department outside "
+        "their reach is refused, not silently narrowed."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "status": {
+                "type": "string",
+                "enum": ["pending", "approved", "rejected"],
+                "description": "Which status to list. Defaults to 'pending'.",
+            },
+            "department_id": {
+                "type": "string",
+                "description": "Optional: the uuid of one department, as seen in context, to narrow the list to.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Optional: how many to return (default 20, max 50).",
+            },
+        },
+        "required": [],
+    },
+)
+
+DEPARTMENT_STATUS = NeutralTool(
+    name="department_status",
+    description=(
+        "Look up one department by id, or list the departments visible to "
+        "the human you are talking to -- the same departments their own "
+        "Departments page would show, never more."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "department_id": {
+                "type": "string",
+                "description": "Optional: the uuid of one department, as seen in context. Omit to list every visible department.",
+            },
+            "search": {
+                "type": "string",
+                "description": "Optional: filter the list by name.",
+            },
+        },
+        "required": [],
+    },
+)
+
+AGENT_STATUS = NeutralTool(
+    name="agent_status",
+    description=(
+        "Look up one agent by id, or list the agents visible to the human "
+        "you are talking to -- the same agents their own Agents page would "
+        "show, never more."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "agent_id": {
+                "type": "string",
+                "description": "Optional: the uuid of one agent, as seen in context.",
+            },
+            "department_id": {
+                "type": "string",
+                "description": "Optional: narrow the list to one department.",
+            },
+            "status": {
+                "type": "string",
+                "description": "Optional: filter the list by status.",
+            },
+        },
+        "required": [],
+    },
+)
+
+BUDGET_OVERVIEW = NeutralTool(
+    name="budget_overview",
+    description=(
+        "Read the tenant's (or one department's) token budget limits and how "
+        "many tokens it has used this calendar month. Requires tenant-wide "
+        "budget visibility -- unlike approvals/agents/departments, this is "
+        "never granted by a department seat alone."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "department_id": {
+                "type": "string",
+                "description": "Optional: one department's budget instead of the whole tenant.",
+            },
+        },
+        "required": [],
+    },
+)
+
+KPI_OVERVIEW = NeutralTool(
+    name="kpi_overview",
+    description=(
+        "Read run-count and timing KPIs (duration, approval wait time, "
+        "response time) for one agent, one department, or the whole tenant. "
+        "Pass at most one of agent_id/department_id; passing neither reads "
+        "the tenant-wide figures, which require tenant-wide statistics "
+        "visibility."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "agent_id": {
+                "type": "string",
+                "description": "Optional: one agent's KPIs. Mutually exclusive with department_id.",
+            },
+            "department_id": {
+                "type": "string",
+                "description": "Optional: one department's KPIs. Mutually exclusive with agent_id.",
+            },
+            "date_from": {
+                "type": "string",
+                "description": "Optional: ISO 8601 start of the window.",
+            },
+            "date_to": {
+                "type": "string",
+                "description": "Optional: ISO 8601 end of the window.",
+            },
+        },
+        "required": [],
+    },
+)
+
 CONTROL_TOOL_SCHEMAS: dict[str, NeutralTool] = {
     MEMORY_WRITE.name: MEMORY_WRITE,
     ASK_USER.name: ASK_USER,
@@ -382,6 +515,11 @@ CONTROL_TOOL_SCHEMAS: dict[str, NeutralTool] = {
     PROPOSE_CHANGE.name: PROPOSE_CHANGE,
     DECIDE_APPROVAL.name: DECIDE_APPROVAL,
     READ_REFERENCE_FILE.name: READ_REFERENCE_FILE,
+    LIST_PENDING_APPROVALS.name: LIST_PENDING_APPROVALS,
+    DEPARTMENT_STATUS.name: DEPARTMENT_STATUS,
+    AGENT_STATUS.name: AGENT_STATUS,
+    BUDGET_OVERVIEW.name: BUDGET_OVERVIEW,
+    KPI_OVERVIEW.name: KPI_OVERVIEW,
 }
 CONTROL_TOOL_NAMES: frozenset[str] = frozenset(CONTROL_TOOL_SCHEMAS)
 
@@ -403,6 +541,7 @@ def offered_tools(
     active_skills: Sequence[LoadedSkill],
     mcp_tools: Sequence[NeutralTool],
     has_knowledge: bool = False,
+    copilot_permissions: frozenset[str] = frozenset(),
 ) -> list[NeutralTool]:
     """The full tool list to offer the model this step.
 
@@ -449,6 +588,21 @@ def offered_tools(
         # Same reasoning: only the Assistant sits in a 1:1 chat with a human
         # who might be looking at their own pending approvals right now.
         offered.append(DECIDE_APPROVAL)
+        # The read-mostly status tools: gated a second time, per-permission,
+        # on top of the is_tenant_assistant gate above -- a member whose
+        # assigned role or department seat does not grant the underlying
+        # permission must not even see the tool, or the model reaches for
+        # it and gets an ERROR string it cannot act on.
+        if perm(APPROVAL, VIEW) in copilot_permissions:
+            offered.append(LIST_PENDING_APPROVALS)
+        if perm(DEPARTMENT, VIEW) in copilot_permissions:
+            offered.append(DEPARTMENT_STATUS)
+        if perm(AGENT, VIEW) in copilot_permissions:
+            offered.append(AGENT_STATUS)
+        if perm(BUDGET, VIEW) in copilot_permissions:
+            offered.append(BUDGET_OVERVIEW)
+        if perm(STATISTICS, VIEW) in copilot_permissions:
+            offered.append(KPI_OVERVIEW)
     if has_knowledge:
         offered.append(SEARCH_KNOWLEDGE)
     # Same reasoning as has_knowledge above: offering read_reference_file to

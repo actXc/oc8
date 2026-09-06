@@ -188,6 +188,11 @@ def test_control_tool_names_matches_the_schemas() -> None:
         "propose_change",
         "decide_approval",
         "read_reference_file",
+        "list_pending_approvals",
+        "department_status",
+        "agent_status",
+        "budget_overview",
+        "kpi_overview",
     }
 
 
@@ -1076,12 +1081,24 @@ async def test_a_non_control_tool_is_not_handled_here(app_session: Any) -> None:
 @pytest.mark.parametrize("name", sorted(CONTROL_TOOL_NAMES))
 def test_each_control_tool_declares_its_required_arguments(name: str) -> None:
     """A tool offered without a schema the model can satisfy is a tool the model
-    will call wrongly."""
+    will call wrongly. (The 5 read-only status tools intentionally have all
+    optional parameters, so they are excepted from this check.)"""
     from oc8.agent.control_tools import CONTROL_TOOL_SCHEMAS
 
     schema = CONTROL_TOOL_SCHEMAS[name]
     assert schema.description
-    assert schema.parameters["required"]
+    # The status tools (list_pending_approvals, department_status, agent_status,
+    # budget_overview, kpi_overview) intentionally have all optional parameters,
+    # so they are allowed to have empty required lists.
+    optional_tools = {
+        "list_pending_approvals",
+        "department_status",
+        "agent_status",
+        "budget_overview",
+        "kpi_overview",
+    }
+    if name not in optional_tools:
+        assert schema.parameters["required"]
 
 
 @pytest.mark.asyncio
@@ -1999,3 +2016,58 @@ async def test_decide_approval_dispatch_is_refused_for_a_non_assistant_agent(
         )
         assert outcome.output.startswith("ERROR")
         assert "Assistant" in outcome.output
+
+
+# --------------------------------------------- the 5 status tools' offer gate
+
+
+@pytest.mark.asyncio
+async def test_status_tools_are_offered_only_to_the_assistant_and_only_with_the_permission() -> None:
+    """Two independent gates, both required: is_tenant_assistant (existing
+    precedent, same as decide_approval), and the specific permission in
+    copilot_permissions (new to these 5 tools -- unlike decide_approval,
+    which has no permission gate of its own)."""
+    lead = _agent(is_team_lead=True)
+    lead.is_tenant_assistant = False
+    names = [
+        t.name
+        for t in offered_tools(
+            lead,
+            assigned_skills=[],
+            active_skills=[],
+            mcp_tools=MCP_TOOLS,
+            copilot_permissions=frozenset(
+                {"approval:view", "department:view", "agent:view", "budget:view", "statistics:view"}
+            ),
+        )
+    ]
+    assert "list_pending_approvals" not in names
+    assert "department_status" not in names
+    assert "agent_status" not in names
+    assert "budget_overview" not in names
+    assert "kpi_overview" not in names
+
+    lead.is_tenant_assistant = True
+    names = [
+        t.name
+        for t in offered_tools(
+            lead, assigned_skills=[], active_skills=[], mcp_tools=MCP_TOOLS
+        )
+    ]
+    assert "list_pending_approvals" not in names, "no copilot_permissions given, so nothing is offered"
+
+    names = [
+        t.name
+        for t in offered_tools(
+            lead,
+            assigned_skills=[],
+            active_skills=[],
+            mcp_tools=MCP_TOOLS,
+            copilot_permissions=frozenset({"approval:view"}),
+        )
+    ]
+    assert "list_pending_approvals" in names
+    assert "department_status" not in names
+    assert "agent_status" not in names
+    assert "budget_overview" not in names
+    assert "kpi_overview" not in names
