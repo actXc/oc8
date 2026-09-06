@@ -1072,6 +1072,96 @@ async def test_restricted_content_reaches_the_model_call_on_every_step(
 
 
 @pytest.mark.asyncio
+async def test_step_persists_and_reoffers_copilot_permissions_across_calls(
+    app_session: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The isolated-container runtime cannot close over a local variable
+    across HTTP calls the way engine.py's in-process loop can -- this proves
+    the round-trip through ctx survives a second /step call."""
+    from asgi_lifespan import LifespanManager
+    from httpx import ASGITransport, AsyncClient
+
+    from oc8 import models as m
+    from oc8.main import create_app
+    from oc8.modelrouter.types import CompletionResult, Usage
+    from oc8.runtime.states import RunState
+
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:  # type: ignore[operator]
+        dept = m.Department(tenant_id=tenant, name="oc8 Assistant", frame={})
+        db.add(dept)
+        await db.flush()
+        assistant = m.Agent(
+            tenant_id=tenant, department_id=dept.id, name="Assistant", status="running",
+            narrowing={}, definition={}, presentation={}, is_team_lead=True,
+            is_tenant_assistant=True,
+        )
+        db.add(assistant)
+        await db.flush()
+        task = m.Task(
+            tenant_id=tenant, department_id=dept.id, assigned_agent_id=assistant.id,
+            title="Chat", state="in_progress",
+        )
+        db.add(task)
+        await db.flush()
+        run = m.AgentRun(
+            tenant_id=tenant, agent_id=assistant.id, task_id=task.id,
+            state=RunState.RUNNING.value, context={"task": "Hallo"},
+        )
+        db.add(run)
+        await db.flush()
+        # `all_departments=True` alone (no role, no seat) is enough here:
+        # `_gated_copilot_permissions` only ever calls
+        # `agent_actor.scope.holds_anywhere(permission)`, and `scope_for_member`
+        # makes `all_departments` set `_unrestricted`, which is exactly what
+        # `holds_anywhere(perm(APPROVAL, VIEW))` reads.
+        member = m.OrgMember(
+            tenant_id=tenant, subject=f"anna-{uuid.uuid4()}", subject_uuid=uuid.uuid4(),
+            all_departments=True,
+        )
+        db.add(member)
+        await db.flush()
+        db.add(
+            m.ChatSession(
+                tenant_id=tenant, agent_id=assistant.id, member_id=member.id, task_id=task.id
+            )
+        )
+        await db.flush()
+        agent_id, run_id = assistant.id, run.id
+
+    seen: list[list[str]] = []
+
+    async def fake_complete(*args: object, **kw: object) -> CompletionResult:
+        seen.append([t.name for t in kw["tools"]])
+        return CompletionResult(
+            text="ok", tool_calls=[], usage=Usage(tokens_in=1, tokens_out=1),
+            stop_reason="stop", provider="ollama", model="m",
+        )
+
+    monkeypatch.setattr(
+        "oc8.api.v1.internal_agent.stream_completion_with_fallback", _as_stream(fake_complete)
+    )
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            headers = {"Authorization": f"Bearer {_agent_token(tenant, agent_id, run_id)}"}
+            for _ in range(2):
+                r = await c.post(f"/api/v1/internal/agent/{run_id}/step", headers=headers)
+                assert r.status_code == 200, r.text
+
+    assert len(seen) == 2
+    assert "list_pending_approvals" in seen[0], (
+        "copilot_permissions computed by the preamble on the FIRST step must "
+        "reach offered_tools immediately"
+    )
+    assert "list_pending_approvals" in seen[1], (
+        "and it must still be offered on the SECOND step, which only works "
+        "because it is persisted into ctx -- the isolated runtime has no "
+        "Python closure to hold it across separate HTTP calls"
+    )
+
+
+@pytest.mark.asyncio
 async def test_the_internal_endpoint_publishes_a_rendered_component(
     app_session: object, monkeypatch: pytest.MonkeyPatch
 ) -> None:

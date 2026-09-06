@@ -238,6 +238,7 @@ async def step(
         # skills catalog -- via the shared preamble. Seeding only the system prompt
         # (as this endpoint used to) left an isolated agent unable to name a
         # colleague to delegate to or a skill to invoke.
+        task_row = await db.get(m.Task, run.task_id) if run.task_id is not None else None
         preamble = await build_run_preamble(
             db,
             agent=agent,
@@ -245,6 +246,8 @@ async def step(
             task_text=str(ctx.get("task", "")),
             frame=frame,
             model_locality=model_locality,
+            task=task_row,
+            run_id=run_id,
         )
         transcript = [_from_message(msg) for msg in preamble.messages]
         assigned_skills = preamble.assigned_skills
@@ -254,6 +257,7 @@ async def step(
         # run to a local model and keeps it out of the department cache.
         ctx["contains_restricted"] = preamble.contains_restricted
         ctx["has_knowledge"] = preamble.has_knowledge
+        ctx["copilot_permissions"] = sorted(preamble.copilot_permissions)
         if conn is not None and not tool_schemas_raw:
             cfg = _mcp_params(conn)
             env = await _mcp_env(conn, db, run.tenant_id)
@@ -281,6 +285,7 @@ async def step(
     # False keeps a run already in flight (whose ctx predates this) working.
     contains_restricted = bool(ctx.get("contains_restricted", False))
     has_knowledge = bool(ctx.get("has_knowledge", False))
+    copilot_permissions = frozenset(ctx.get("copilot_permissions", []))
 
     tools = offered_tools(
         agent,
@@ -288,6 +293,7 @@ async def step(
         active_skills=active_skills,
         mcp_tools=mcp_tools,
         has_knowledge=has_knowledge,
+        copilot_permissions=copilot_permissions,
     )
 
     resolved_messages = _to_messages(transcript)
