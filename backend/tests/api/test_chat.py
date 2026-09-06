@@ -854,3 +854,149 @@ async def test_a_second_turn_reuses_the_task_the_first_one_opened(
             (await db.execute(select(m.Task).where(m.Task.tenant_id == tenant))).scalars().all()
         )
         assert len(tasks) == 1
+
+
+# --- Task 12: GET /chat/sessions/{session_id}/runs/{run_id} ---
+
+
+async def test_get_session_run_returns_the_owners_own_run(
+    app_session: AppSessionFactory, redis_url: str
+) -> None:
+    """The owner reads their own run."""
+    tenant = uuid.uuid4()
+    agent_id = await _seed_agent(app_session, tenant)
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            create_r = await c.post(
+                "/api/v1/chat/sessions",
+                json={"agentId": str(agent_id)},
+                headers=_headers(tenant),
+            )
+            session_id = create_r.json()["id"]
+
+            send_r = await c.post(
+                f"/api/v1/chat/sessions/{session_id}/messages",
+                json={"message": "Hallo!"},
+                headers=_headers(tenant),
+            )
+            assert send_r.status_code == 201, send_r.text
+
+    async with app_session(tenant) as db:
+        run = (
+            await db.execute(
+                select(m.AgentRun).where(
+                    m.AgentRun.agent_id == agent_id, m.AgentRun.source == "chat"
+                )
+            )
+        ).scalar_one()
+
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            get_r = await c.get(
+                f"/api/v1/chat/sessions/{session_id}/runs/{run.id}",
+                headers=_headers(tenant),
+            )
+            assert get_r.status_code == 200, get_r.text
+            assert get_r.json()["id"] == str(run.id)
+
+
+async def test_get_session_run_lets_an_oversight_admin_read_a_colleagues_assistant_run(
+    app_session: AppSessionFactory, redis_url: str
+) -> None:
+    """copilot:manage oversight carve-out, same as get_messages."""
+    tenant = uuid.uuid4()
+    app = create_app()
+    other_token = get_identity_provider().mint(
+        tenant_id=tenant, subject="other-operator", role="org_admin"
+    )
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            assistant_r = await c.get("/api/v1/assistant", headers=_headers(tenant))
+            assistant_agent_id = assistant_r.json()["agentId"]
+
+            create_r = await c.post(
+                "/api/v1/chat/sessions",
+                json={"agentId": assistant_agent_id},
+                headers=_headers(tenant),
+            )
+            session_id = create_r.json()["id"]
+
+            send_r = await c.post(
+                f"/api/v1/chat/sessions/{session_id}/messages",
+                json={"message": "Hallo!"},
+                headers=_headers(tenant),
+            )
+            assert send_r.status_code == 201, send_r.text
+            run_id = send_r.json()["runId"]
+
+            get_r = await c.get(
+                f"/api/v1/chat/sessions/{session_id}/runs/{run_id}",
+                headers={"Authorization": f"Bearer {other_token}"},
+            )
+            assert get_r.status_code == 200, get_r.text
+            assert get_r.json()["id"] == run_id
+
+
+async def test_get_session_run_404s_for_a_run_belonging_to_a_different_session(
+    app_session: AppSessionFactory, redis_url: str
+) -> None:
+    """Even a session the caller DOES own does not unlock a run belonging to
+    a different session -- proving the context["chat_session_id"] check,
+    not just the ownership check, is load-bearing."""
+    tenant = uuid.uuid4()
+    agent_id = await _seed_agent(app_session, tenant)
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            session_a_id = (
+                await c.post(
+                    "/api/v1/chat/sessions",
+                    json={"agentId": str(agent_id)},
+                    headers=_headers(tenant),
+                )
+            ).json()["id"]
+            session_b_id = (
+                await c.post(
+                    "/api/v1/chat/sessions",
+                    json={"agentId": str(agent_id)},
+                    headers=_headers(tenant),
+                )
+            ).json()["id"]
+
+            send_r = await c.post(
+                f"/api/v1/chat/sessions/{session_a_id}/messages",
+                json={"message": "Hallo!"},
+                headers=_headers(tenant),
+            )
+            assert send_r.status_code == 201, send_r.text
+            run_a_id = send_r.json()["runId"]
+
+            get_r = await c.get(
+                f"/api/v1/chat/sessions/{session_b_id}/runs/{run_a_id}",
+                headers=_headers(tenant),
+            )
+            assert get_r.status_code == 404, get_r.text
+
+
+async def test_get_session_run_404s_for_a_nonexistent_run_id(
+    app_session: AppSessionFactory,
+) -> None:
+    tenant = uuid.uuid4()
+    agent_id = await _seed_agent(app_session, tenant)
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            session_id = (
+                await c.post(
+                    "/api/v1/chat/sessions",
+                    json={"agentId": str(agent_id)},
+                    headers=_headers(tenant),
+                )
+            ).json()["id"]
+
+            get_r = await c.get(
+                f"/api/v1/chat/sessions/{session_id}/runs/{uuid.uuid4()}",
+                headers=_headers(tenant),
+            )
+            assert get_r.status_code == 404, get_r.text

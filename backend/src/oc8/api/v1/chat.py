@@ -13,6 +13,7 @@ from oc8 import models as m
 from oc8.agent.assistant import get_or_create_assistant
 from oc8.agents.repo import visible_agent
 from oc8.api.deps import CurrentPrincipal, DbSession, require_departmental, require_permission
+from oc8.api.v1.run import run_to_dto
 from oc8.authz.authority import Authority, authority_for_principal, tenant_wide_read
 from oc8.authz.permissions import AGENT, COPILOT, COPILOT_USE, MANAGE, RUN_START, VIEW, perm
 from oc8.authz.scope import HumanActor
@@ -26,7 +27,7 @@ from oc8.chat.service import (
     send_message,
 )
 from oc8.schemas.base import CamelModel
-from oc8.schemas.dto import ChatMessageDTO, ChatSessionDTO
+from oc8.schemas.dto import ChatMessageDTO, ChatSessionDTO, RunDTO
 from oc8.schemas.requests import (
     CreateChatSessionRequest,
     RenameChatSessionRequest,
@@ -282,3 +283,31 @@ async def post_message(
         # runId matches, regardless of what else lands in between.
         dto = dto.model_copy(update={"run_id": str(run.id)})
     return dto
+
+
+@router.get("/chat/sessions/{session_id}/runs/{run_id}", response_model=RunDTO)
+async def get_session_run(
+    request: Request,
+    session_id: uuid.UUID,
+    run_id: uuid.UUID,
+    db: DbSession,
+    actor: Annotated[
+        HumanActor,
+        Depends(require_departmental(perm(AGENT, VIEW), or_tenant_wide=COPILOT_USE)),
+    ],
+) -> RunDTO:
+    """One run's live state, for the frontend's `useCopilotRunActivity` poll.
+
+    Ownership-scoped through `_owned_session`, exactly as `get_messages` is:
+    the caller must own the chat session (or hold `copilot:manage` and be
+    reading a colleague's Assistant session, per that function's oversight
+    carve-out). The run itself must additionally belong to THIS session --
+    checked via the run's own `context["chat_session_id"]`, written when the
+    run is enqueued (`chat/service.send_message`) -- so a caller who owns
+    some OTHER session cannot read a run by guessing its id.
+    """
+    await _owned_session(request, session_id, db, actor)
+    run_row = await db.get(m.AgentRun, run_id)
+    if run_row is None or (run_row.context or {}).get("chat_session_id") != str(session_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "run not found")
+    return run_to_dto(run_row)
