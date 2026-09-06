@@ -33,12 +33,12 @@ from oc8.approvals import (
     decide_approval,
     raise_approval,
 )
-from oc8.approvals.repo import DEFAULT_LIMIT, load_for_actor, visible_approvals
+from oc8.approvals.repo import load_for_actor, visible_approvals
 from oc8.audit import append_event
+from oc8.authz.authority import authority_for_member
 from oc8.authz.pdp import Decision, Effect
 from oc8.authz.permissions import AGENT, APPROVAL, BUDGET, DEPARTMENT, STATISTICS, VIEW, perm
 from oc8.authz.scope import AgentActor, scope_for_member
-from oc8.authz.authority import authority_for_member
 from oc8.capas.discovery import find_plugin
 from oc8.knowledge.retrieval import retrieve_kb_context
 from oc8.memory.router import retrieve_context, write_memory
@@ -1417,7 +1417,10 @@ async def execute_control_tool(
         )
         if not rows:
             return ControlOutcome(output=f"No {status} approvals.")
-        lines = [f"- {r.id} | {r.title} | {r.action_type} | department {r.department_id}" for r in rows]
+        lines = [
+            f"- {r.id} | {r.title} | {r.action_type} | department {r.department_id}"
+            for r in rows
+        ]
         return ControlOutcome(output="\n".join(lines))
 
     if tc.name == RENDER_COMPONENT.name:
