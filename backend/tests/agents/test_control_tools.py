@@ -2177,10 +2177,19 @@ async def _department_status(
 
 @pytest.mark.asyncio
 async def test_department_status_lists_only_visible_departments(app_session: Any) -> None:
+    """`all_departments` alone does not carry `perm(DEPARTMENT, VIEW)`
+    tenant-wide (that flag's only effect is `DepartmentScope.is_unrestricted`,
+    which `visible_departments` deliberately does not read -- see that
+    module's docstring and `agents.repo.visible_agents`'s identical note).
+    A real tenant-wide view needs an assigned role that actually grants it."""
+    from oc8.authz.permissions import ORG_ADMIN
+
     tenant = uuid.uuid4()
     async with app_session(tenant) as db:
         assistant, task = await _assistant_and_task(db, tenant)
-        await _human_behind(db, tenant, task, all_departments=True)
+        member = await _human_behind(db, tenant, task)
+        member.role_id = (await _builtin_role(db, tenant, ORG_ADMIN)).id
+        await db.flush()
         outcome = await _department_status(db, tenant, assistant, task, {})
         assert "Vertrieb" in outcome.output
 

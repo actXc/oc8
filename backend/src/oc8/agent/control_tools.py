@@ -40,6 +40,7 @@ from oc8.authz.pdp import Decision, Effect
 from oc8.authz.permissions import AGENT, APPROVAL, BUDGET, DEPARTMENT, STATISTICS, VIEW, perm
 from oc8.authz.scope import AgentActor, scope_for_member
 from oc8.capas.discovery import find_plugin
+from oc8.departments.repo import visible_department, visible_departments
 from oc8.knowledge.retrieval import retrieve_kb_context
 from oc8.memory.router import retrieve_context, write_memory
 from oc8.modelrouter import NeutralTool, ToolCall
@@ -1439,11 +1440,6 @@ async def execute_control_tool(
         if not admitted:
             return ControlOutcome(output="ERROR: you don't have permission to view departments")
         tenant_wide = tenant_wide_read(authority, view_perm)
-        # Deferred import: oc8.departments.repo reaches oc8.api.v1, which imports
-        # this module's own importer (oc8.agent.engine) at module level, so
-        # importing it at the top would be a cycle. Resolved once, at first call.
-        from oc8.departments.repo import visible_department, visible_departments
-
         department_id_raw = tc.arguments.get("department_id")
         if department_id_raw:
             try:
