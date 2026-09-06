@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { ToolGuardrailEditorDrawer } from "@/components/tool-guardrail-editor-drawer";
+import { ToolGuardrailEditorPanel } from "@/components/tool-guardrail-editor-panel";
 
 vi.mock("@/lib/hooks", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/hooks")>();
@@ -10,10 +10,10 @@ vi.mock("@/lib/hooks", async (importOriginal) => {
   };
 });
 
-describe("ToolGuardrailEditorDrawer", () => {
+describe("ToolGuardrailEditorPanel", () => {
   it("shows the department ceiling as read-only context on the agent view", () => {
     render(
-      <ToolGuardrailEditorDrawer
+      <ToolGuardrailEditorPanel
         toolKey="github"
         connection={undefined}
         ceiling={{
@@ -25,7 +25,7 @@ describe("ToolGuardrailEditorDrawer", () => {
         }}
         value={{ read: true, modify: false, approvalActions: [], approvalEur: null, only: [] }}
         onChange={vi.fn()}
-        onClose={vi.fn()}
+        onCancel={vi.fn()}
         onSave={vi.fn()}
         saving={false}
       />,
@@ -35,13 +35,13 @@ describe("ToolGuardrailEditorDrawer", () => {
 
   it("shows no department-ceiling section on the department view (ceiling=null)", () => {
     render(
-      <ToolGuardrailEditorDrawer
+      <ToolGuardrailEditorPanel
         toolKey="github"
         connection={undefined}
         ceiling={null}
         value={{ read: true, modify: true, approvalActions: [], approvalEur: null, only: [] }}
         onChange={vi.fn()}
-        onClose={vi.fn()}
+        onCancel={vi.fn()}
         onSave={vi.fn()}
         saving={false}
       />,
@@ -51,13 +51,13 @@ describe("ToolGuardrailEditorDrawer", () => {
 
   it("offers autocomplete suggestions from the connection's real tool names", () => {
     render(
-      <ToolGuardrailEditorDrawer
+      <ToolGuardrailEditorPanel
         toolKey="github"
         connection={undefined}
         ceiling={null}
         value={{ read: true, modify: true, approvalActions: [], approvalEur: null, only: [] }}
         onChange={vi.fn()}
-        onClose={vi.fn()}
+        onCancel={vi.fn()}
         onSave={vi.fn()}
         saving={false}
       />,
@@ -66,5 +66,23 @@ describe("ToolGuardrailEditorDrawer", () => {
     expect(input.getAttribute("list")).toBeTruthy();
     const listId = input.getAttribute("list") as string;
     expect(document.getElementById(listId)?.innerHTML).toContain("merge_pr");
+  });
+
+  it("has a Cancel action that isn't the Save button", () => {
+    const onCancel = vi.fn();
+    render(
+      <ToolGuardrailEditorPanel
+        toolKey="github"
+        connection={undefined}
+        ceiling={null}
+        value={{ read: true, modify: true, approvalActions: [], approvalEur: null, only: [] }}
+        onChange={vi.fn()}
+        onCancel={onCancel}
+        onSave={vi.fn()}
+        saving={false}
+      />,
+    );
+    screen.getByRole("button", { name: /abbrechen|cancel/i }).click();
+    expect(onCancel).toHaveBeenCalled();
   });
 });

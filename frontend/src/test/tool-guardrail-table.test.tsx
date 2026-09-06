@@ -107,7 +107,7 @@ describe("ToolGuardrailTable", () => {
     expect(screen.getByText(/3.*12|3 von 12|3 of 12/i)).toBeInTheDocument();
   });
 
-  it("opens the drawer and calls onSave with the edited value", () => {
+  it("expands the row into an inline editor and calls onSave with the edited value", () => {
     const onSave = vi.fn();
     render(
       <ToolGuardrailTable
@@ -131,5 +131,48 @@ describe("ToolGuardrailTable", () => {
     fireEvent.click(screen.getByRole("button", { name: /bearbeiten|edit/i }));
     fireEvent.click(screen.getByRole("button", { name: /speichern|save/i }));
     expect(onSave).toHaveBeenCalledWith("github", expect.any(Object));
+  });
+
+  it("collapses the inline editor again on Cancel, leaving the other rows untouched", () => {
+    render(
+      <ToolGuardrailTable
+        level="agent"
+        rows={[
+          {
+            toolKey: "github",
+            connection: undefined,
+            ceilingPolicy: BLANK,
+            ownValue: BLANK,
+            status: "inherited",
+          },
+          {
+            toolKey: "odoo",
+            connection: undefined,
+            ceilingPolicy: BLANK,
+            ownValue: BLANK,
+            status: "inherited",
+          },
+        ]}
+        addableNames={[]}
+        connections={[]}
+        onSave={vi.fn()}
+        onAdd={vi.fn()}
+        saving={false}
+      />,
+    );
+    // No editor open yet -- only the two row-level "Bearbeiten"/"Edit" buttons exist.
+    expect(screen.queryByRole("button", { name: /speichern|save/i })).toBeNull();
+
+    const editButtons = screen.getAllByRole("button", { name: /bearbeiten|edit/i });
+    fireEvent.click(editButtons[0]);
+    expect(screen.getByRole("button", { name: /speichern|save/i })).toBeInTheDocument();
+    // The row being edited itself now reads "Cancel", not "Edit" -- only one
+    // "Edit" button remains, for the OTHER row, proving this expands in place
+    // rather than opening something disconnected from the table.
+    expect(screen.getAllByRole("button", { name: /bearbeiten|edit/i })).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /abbrechen|cancel/i }));
+    expect(screen.queryByRole("button", { name: /speichern|save/i })).toBeNull();
+    expect(screen.getAllByRole("button", { name: /bearbeiten|edit/i })).toHaveLength(2);
   });
 });

@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { Plus } from "lucide-react";
 import { useT } from "@/lib/i18n";
 import type { McpConnection } from "@/lib/hooks";
 import type { GuardrailValue } from "@/components/guardrail-preset-picker";
-import { ToolGuardrailEditorDrawer } from "@/components/tool-guardrail-editor-drawer";
+import { ToolGuardrailEditorPanel } from "@/components/tool-guardrail-editor-panel";
 import { AddToolPicker } from "@/components/add-tool-picker";
 
 export interface ToolGuardrailRow {
@@ -69,8 +69,6 @@ export function ToolGuardrailTable({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [draft, setDraft] = useState<GuardrailValue | null>(null);
 
-  const editingRow = rows.find((r) => r.toolKey === editingKey);
-
   return (
     <div className="overflow-x-auto rounded-md border border-border">
       <table className="w-full text-left text-sm">
@@ -86,51 +84,81 @@ export function ToolGuardrailTable({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            <tr key={row.toolKey} className="border-b border-border/60 last:border-0">
-              <td className="p-3 font-medium">{row.toolKey}</td>
-              <td className="p-3 text-xs text-muted-foreground">
-                {[
-                  row.ownValue.read && t("Read", "Lesen"),
-                  row.ownValue.modify && t("Modify", "Verändern"),
-                ]
-                  .filter(Boolean)
-                  .join(", ") || "—"}
-              </td>
-              <td className="p-3 text-xs text-muted-foreground">
-                {row.ownValue.approvalActions.join(", ") || "—"}
-                {row.ownValue.approvalEur != null && ` ≥ ${row.ownValue.approvalEur} €`}
-              </td>
-              {level === "agent" && <td className="p-3">{row.loginPicker ?? "—"}</td>}
-              {level === "agent" && (
-                <td className="p-3">
-                  <StatusBadge status={row.status} t={t} />
-                </td>
-              )}
-              {level === "department" && (
-                <td className="p-3 text-xs text-muted-foreground">
-                  {row.deviationCount
-                    ? t(
-                        `${row.deviationCount.count} of ${row.deviationCount.total} agents`,
-                        `${row.deviationCount.count} von ${row.deviationCount.total} Agents`,
-                      )
-                    : "—"}
-                </td>
-              )}
-              <td className="p-3 text-right">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDraft(row.ownValue);
-                    setEditingKey(row.toolKey);
-                  }}
-                  className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground transition hover:bg-accent"
-                >
-                  {t("Edit", "Bearbeiten")}
-                </button>
-              </td>
-            </tr>
-          ))}
+          {rows.map((row) => {
+            const isEditing = row.toolKey === editingKey;
+            return (
+              <Fragment key={row.toolKey}>
+                <tr className="border-b border-border/60 last:border-0">
+                  <td className="p-3 font-medium">{row.toolKey}</td>
+                  <td className="p-3 text-xs text-muted-foreground">
+                    {[
+                      row.ownValue.read && t("Read", "Lesen"),
+                      row.ownValue.modify && t("Modify", "Verändern"),
+                    ]
+                      .filter(Boolean)
+                      .join(", ") || "—"}
+                  </td>
+                  <td className="p-3 text-xs text-muted-foreground">
+                    {row.ownValue.approvalActions.join(", ") || "—"}
+                    {row.ownValue.approvalEur != null && ` ≥ ${row.ownValue.approvalEur} €`}
+                  </td>
+                  {level === "agent" && <td className="p-3">{row.loginPicker ?? "—"}</td>}
+                  {level === "agent" && (
+                    <td className="p-3">
+                      <StatusBadge status={row.status} t={t} />
+                    </td>
+                  )}
+                  {level === "department" && (
+                    <td className="p-3 text-xs text-muted-foreground">
+                      {row.deviationCount
+                        ? t(
+                            `${row.deviationCount.count} of ${row.deviationCount.total} agents`,
+                            `${row.deviationCount.count} von ${row.deviationCount.total} Agents`,
+                          )
+                        : "—"}
+                    </td>
+                  )}
+                  <td className="p-3 text-right">
+                    {/* While this row is expanded, the panel below owns Save/Cancel --
+                        a second row-level toggle here would be a duplicate control
+                        with the identical label and action. */}
+                    {!isEditing && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDraft(row.ownValue);
+                          setEditingKey(row.toolKey);
+                        }}
+                        className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground transition hover:bg-accent"
+                      >
+                        {t("Edit", "Bearbeiten")}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+                {isEditing && draft && (
+                  <tr className="border-b border-border/60 last:border-0">
+                    <td className="p-3" colSpan={level === "agent" ? 6 : 5}>
+                      <ToolGuardrailEditorPanel
+                        toolKey={row.toolKey}
+                        connection={row.connection}
+                        ceiling={level === "agent" ? row.ceilingPolicy : null}
+                        value={draft}
+                        onChange={setDraft}
+                        loginPicker={row.loginPicker}
+                        onCancel={() => setEditingKey(null)}
+                        onSave={() => {
+                          onSave(row.toolKey, draft);
+                          setEditingKey(null);
+                        }}
+                        saving={saving}
+                      />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            );
+          })}
         </tbody>
       </table>
       <div className="border-t border-border p-3">
@@ -143,23 +171,6 @@ export function ToolGuardrailTable({
           <Plus className="h-3.5 w-3.5" /> {t("Add tool", "Tool hinzufügen")}
         </button>
       </div>
-
-      {editingRow && draft && (
-        <ToolGuardrailEditorDrawer
-          toolKey={editingRow.toolKey}
-          connection={editingRow.connection}
-          ceiling={level === "agent" ? editingRow.ceilingPolicy : null}
-          value={draft}
-          onChange={setDraft}
-          loginPicker={editingRow.loginPicker}
-          onClose={() => setEditingKey(null)}
-          onSave={() => {
-            onSave(editingRow.toolKey, draft);
-            setEditingKey(null);
-          }}
-          saving={saving}
-        />
-      )}
 
       {pickerOpen && (
         <AddToolPicker
