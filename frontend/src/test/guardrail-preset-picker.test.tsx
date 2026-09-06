@@ -74,9 +74,7 @@ describe("GuardrailPresetPicker", () => {
         onChange={vi.fn()}
       />,
     );
-    const options = screen.getAllByRole("button", {
-      name: /Read only|Assist with approval|myself/i,
-    });
+    const options = screen.getAllByRole("button", { name: /Read only|Assist with approval/i });
     expect(options[0]).toHaveTextContent(/Assist with approval/i);
     expect(screen.getByText("Recommended")).toBeInTheDocument();
   });
@@ -129,7 +127,7 @@ describe("GuardrailPresetPicker", () => {
     expect(applied.only).not.toContain("delete_record");
   });
 
-  it("editing a control after a preset is selected reads back as 'myself' (custom)", () => {
+  it("stops highlighting a preset as selected once a control is edited away from it", () => {
     const onChange = vi.fn();
     const applied: GuardrailValue = {
       read: true,
@@ -165,7 +163,7 @@ describe("GuardrailPresetPicker", () => {
     );
   });
 
-  it("dropping a preset's `only` restriction (widening it) also reads back as custom", () => {
+  it("dropping a preset's `only` restriction (widening it) also stops highlighting it as selected", () => {
     const widened: GuardrailValue = {
       read: AUTONOMOUS_WITH_LIMIT.read,
       modify: AUTONOMOUS_WITH_LIMIT.modify,
@@ -187,7 +185,30 @@ describe("GuardrailPresetPicker", () => {
     );
   });
 
-  it("clicking 'Configure myself' reveals the pre-filled free controls even when the value exactly matches a preset", () => {
+  it("keeps the free controls visible and pre-filled even when the value exactly matches a preset -- applying a preset is not a locked state", () => {
+    const applied: GuardrailValue = {
+      read: true,
+      modify: true,
+      approvalActions: ["modify"],
+      approvalEur: null,
+      only: [],
+    };
+    render(
+      <GuardrailPresetPicker
+        presets={PRESETS}
+        hasValueSpec={false}
+        value={applied}
+        onChange={vi.fn()}
+      />,
+    );
+    // Pre-filled from the matching preset: the "modify" checkbox (its one
+    // approval action) is already checked, with no extra click required.
+    const checkboxes = screen.getAllByRole("checkbox");
+    expect(checkboxes.length).toBeGreaterThan(0);
+    expect((checkboxes[0] as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("editing a control while a preset's values are still applied propagates the edit, not a reset", () => {
     const onChange = vi.fn();
     const applied: GuardrailValue = {
       read: true,
@@ -204,14 +225,8 @@ describe("GuardrailPresetPicker", () => {
         onChange={onChange}
       />,
     );
-    // The free controls are collapsed while a preset matches exactly.
-    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText(/Configure myself/i));
-    // Now revealed, pre-filled from the preset that was selected: the
-    // "modify" checkbox (its one approval action) is already checked.
-    const checkboxes = screen.getAllByRole("checkbox");
-    expect(checkboxes.length).toBeGreaterThan(0);
-    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(onChange).toHaveBeenCalledWith({ ...applied, approvalActions: [] });
   });
 
   it("shows the euro field only when hasValueSpec is true", () => {
@@ -257,10 +272,9 @@ describe("GuardrailPresetPicker", () => {
 });
 
 // Realistic shapes lifted from plugins/odoo_mcp/guardrails/ (design §7):
-// two use_cases, one entry with an adjustable `approval_eur` field (the only
-// field any real guardrail ever adjusts), one entry with none. Deliberately
-// NOT shared with `PRESETS`/`GENERIC_FIVE` below -- these fixtures exist only
-// to exercise the library branch.
+// two use_cases, one entry with an `approval_eur` default set, one with none.
+// Deliberately NOT shared with `PRESETS`/`GENERIC_FIVE` below -- these
+// fixtures exist only to exercise the library branch.
 const LIBRARY: GuardrailLibraryEntry[] = [
   {
     key: "sales_quote_approval_threshold",
@@ -323,12 +337,12 @@ describe("GuardrailPresetPicker -- guardrail library (grouped by use_case)", () 
 
   it("renders a tool-name approval_actions entry as the raw tool name, not the bilingual 'sends' right label", () => {
     // Regression for the final-review Critical 2 finding: unlike
-    // `GuardrailPreset.approvalActions` (generic-preset branch, validated
-    // server-side to be rights-only), a library `Guardrail.approval_actions`
-    // can legitimately name a real tool -- `helpdesk_reply_needs_approval`
-    // ships `approval_actions = ["post_message"]` specifically so OTHER
-    // sends stay ungated. Rendering it as "sends" claims every send is
-    // gated, which is exactly backwards for this entry's purpose.
+    // `GuardrailPreset.approvalActions` (generic-preset branch), a library
+    // `Guardrail.approval_actions` can legitimately name a real tool --
+    // `helpdesk_reply_needs_approval` ships `approval_actions =
+    // ["post_message"]` specifically so OTHER sends stay ungated. Rendering
+    // it as "sends" claims every send is gated, which is exactly backwards
+    // for this entry's purpose.
     render(
       <GuardrailPresetPicker
         presets={[]}
@@ -343,7 +357,7 @@ describe("GuardrailPresetPicker -- guardrail library (grouped by use_case)", () 
     expect(chip).not.toHaveTextContent(/sends/i);
   });
 
-  it("selecting a library entry reveals its adjustable field, pre-filled with the shipped default", () => {
+  it("selecting a library entry applies its policy, with the shared euro field picking up its default", () => {
     const onChange = vi.fn();
     const { rerender } = render(
       <GuardrailPresetPicker
@@ -354,9 +368,6 @@ describe("GuardrailPresetPicker -- guardrail library (grouped by use_case)", () 
         onChange={onChange}
       />,
     );
-    // No adjustable control before anything is selected.
-    expect(screen.queryByLabelText(/Approval from/i)).not.toBeInTheDocument();
-
     fireEvent.click(screen.getByText(/Approve quotes above an amount/i));
     expect(onChange).toHaveBeenCalledWith({
       read: true,
@@ -368,8 +379,10 @@ describe("GuardrailPresetPicker -- guardrail library (grouped by use_case)", () 
     const applied = onChange.mock.calls[0][0] as GuardrailValue;
 
     // The picker is controlled -- feed the applied value back in, as the real
-    // consumers do via their own `onChange` state, to see the now-selected
-    // entry's adjustable control render bound to it.
+    // consumers do via their own `onChange` state, to see the shared euro
+    // field reflect it. There is no separate per-entry "adjustable" widget
+    // any more -- the one euro field, always visible, is the only place
+    // `approval_eur` is edited regardless of which entry is selected.
     rerender(
       <GuardrailPresetPicker
         presets={[]}
@@ -379,57 +392,8 @@ describe("GuardrailPresetPicker -- guardrail library (grouped by use_case)", () 
         onChange={onChange}
       />,
     );
-    const input = screen.getByLabelText(/Approval from/i) as HTMLInputElement;
-    expect(input.value).toBe("3000");
-    expect(input.min).toBe("0");
-    expect(input.max).toBe("50000");
-
-    // The helpdesk entry ships no `adjustable` at all -- selecting it must
-    // not render a control either. Selection derives from the controlled
-    // `value` prop (same architecture as the generic-preset path), so the
-    // click's `onChange` result has to be fed back in before that shows up.
-    fireEvent.click(screen.getByText(/Work tickets, customer replies need approval/i));
-    const secondApplied = onChange.mock.calls[1][0] as GuardrailValue;
-    rerender(
-      <GuardrailPresetPicker
-        presets={[]}
-        guardrailLibrary={LIBRARY}
-        hasValueSpec
-        value={secondApplied}
-        onChange={onChange}
-      />,
-    );
-    expect(screen.queryByLabelText(/Approval from/i)).not.toBeInTheDocument();
-  });
-
-  it("'Selbst festlegen' (Configure myself) stays present and last, and pre-fills the free controls from the last-selected library entry", () => {
-    const onChange = vi.fn();
-    const applied: GuardrailValue = {
-      read: true,
-      modify: true,
-      approvalActions: [],
-      approvalEur: 3000,
-      only: [],
-    };
-    render(
-      <GuardrailPresetPicker
-        presets={[]}
-        guardrailLibrary={LIBRARY}
-        hasValueSpec
-        value={applied}
-        onChange={onChange}
-      />,
-    );
-    const buttons = screen.getAllByRole("button");
-    expect(buttons[buttons.length - 1]).toHaveTextContent(/Configure myself/i);
-    // Free controls collapsed while the sales entry matches `value` exactly.
-    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByText(/Configure myself/i));
-    // Revealed now, pre-filled from the entry that was in force: its euro
-    // value carries straight into the free euro field.
     expect(screen.getByLabelText(/€/i)).toHaveValue(3000);
-    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText(/Approval from/i)).not.toBeInTheDocument();
   });
 
   it("`only` survives selecting a library entry into the applied policy, same as a generic preset", () => {
@@ -454,7 +418,7 @@ describe("GuardrailPresetPicker -- guardrail library (grouped by use_case)", () 
     expect(applied.only).not.toContain("delete_record");
   });
 
-  it("offers the same free-text approval-action input under 'Configure myself' in the library branch", () => {
+  it("the free-text approval-action input is available in the library branch too, without any extra click", () => {
     const onChange = vi.fn();
     render(
       <GuardrailPresetPicker
@@ -465,7 +429,6 @@ describe("GuardrailPresetPicker -- guardrail library (grouped by use_case)", () 
         onChange={onChange}
       />,
     );
-    fireEvent.click(screen.getByText(/Configure myself/i));
     const input = screen.getByPlaceholderText(/delete_record/i);
     fireEvent.change(input, { target: { value: "delete_record" } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -510,13 +473,12 @@ describe("GuardrailPresetPicker -- guardrail library (grouped by use_case)", () 
           />
         </LanguageProvider>,
       );
-      // use_case heading, entry copy and the adjustable field label all have
-      // a German pair and must use it -- not the English fallback.
+      // use_case heading, entry copy, and the always-visible free editor's
+      // own labels all have a German pair and must use it -- not the
+      // English fallback.
       expect(screen.getByText("Vertrieb")).toBeInTheDocument();
       expect(screen.getByText("Angebote ab einem Betrag freigeben")).toBeInTheDocument();
-      expect(screen.getByLabelText("Freigabe ab")).toBeInTheDocument();
-      expect(screen.getByText("Selbst festlegen")).toBeInTheDocument();
-      expect(screen.queryByText("Configure myself")).not.toBeInTheDocument();
+      expect(screen.getByText(/Freigabe nötig für:/i)).toBeInTheDocument();
       expect(screen.queryByText(/Approve quotes above an amount/i)).not.toBeInTheDocument();
     } finally {
       window.localStorage.removeItem("oc8-lang");
@@ -601,7 +563,7 @@ describe("GuardrailPresetPicker -- no library (backward-compat regression)", () 
     window.localStorage.removeItem("oc8-lang");
   });
 
-  it("renders exactly today's five generic presets when guardrailLibrary is absent", () => {
+  it("renders exactly today's five generic presets when guardrailLibrary is absent, plus the always-visible free editor", () => {
     render(
       <GuardrailPresetPicker presets={GENERIC_FIVE} hasValueSpec value={FREE} onChange={vi.fn()} />,
     );
@@ -611,8 +573,9 @@ describe("GuardrailPresetPicker -- no library (backward-compat regression)", () 
     // No library grouping ever appears when there is no library.
     expect(screen.queryByText("Sales")).not.toBeInTheDocument();
     expect(screen.queryByText("Helpdesk")).not.toBeInTheDocument();
-    const buttons = screen.getAllByRole("button");
-    expect(buttons[buttons.length - 1]).toHaveTextContent(/Configure myself/i);
+    // The free editor is always present now, not gated behind a separate
+    // "Configure myself" mode.
+    expect(screen.getByRole("button", { name: "Modify" })).toBeInTheDocument();
   });
 
   it("renders exactly today's five generic presets when guardrailLibrary is explicitly null", () => {

@@ -37,12 +37,12 @@ export interface GuardrailPreset {
 }
 
 /** The policy actually applied to a connection -- what a preset selection
- * writes, and what the free controls edit directly. Carries `only` for the
- * same reason `GuardrailPreset` does: it is part of the policy, not
- * metadata about it. Free controls never widen `only` (there is no control
- * for it here -- the tool catalog behind those names is not this
- * component's concern), so choosing "Configure myself" after a preset keeps
- * whatever restriction that preset had. */
+ * writes, and what the always-visible free controls below it edit directly.
+ * Carries `only` for the same reason `GuardrailPreset` does: it is part of
+ * the policy, not metadata about it. The free controls never widen `only`
+ * (there is no control for it here -- the tool catalog behind those names is
+ * not this component's concern), so continuing to edit after a preset click
+ * keeps whatever restriction that preset had. */
 export interface GuardrailValue {
   read: boolean;
   modify: boolean;
@@ -52,11 +52,11 @@ export interface GuardrailValue {
 }
 
 /** Mirrors `GuardrailAdjustableDTO` (`backend/src/oc8/schemas/dto.py`)
- * exactly -- one number on a `GuardrailLibraryEntry` the wizard lets an
- * operator change before applying it. In every real guardrail shipped today
- * (`plugins/odoo_mcp/guardrails/`) `field` is `"approval_eur"`; the type
- * stays general because the schema is, but the renderer below only knows how
- * to edit that one field and skips (never crashes on) any other name. */
+ * exactly -- carried on `GuardrailLibraryEntry` for wire-format fidelity with
+ * the backend, though this component no longer renders a special per-entry
+ * control for it: the shared `FreeGuardrailControls` €-field (always visible
+ * below the entry list) is the one place `approval_eur` gets edited now,
+ * regardless of which entry, if any, is selected. */
 export interface GuardrailAdjustable {
   field: string;
   label: string;
@@ -169,16 +169,6 @@ function groupByUseCase(
     byUseCase.get(entry.useCase)!.push(entry);
   }
   return order.map((useCase) => [useCase, byUseCase.get(useCase)!]);
-}
-
-/** The `adjustable` entries this component actually knows how to render.
- * Every real entry in `plugins/odoo_mcp/guardrails/` only ever adjusts
- * `approval_eur` (confirmed by reading that file), and `GuardrailValue` has
- * a slot for exactly that field and no other. A future `adjustable.field`
- * naming anything else is filtered out here -- skipped, not crashed on --
- * rather than inventing UI for a case that doesn't occur in real data. */
-function supportedAdjustable(entry: GuardrailLibraryEntry): GuardrailAdjustable[] {
-  return entry.adjustable.filter((a) => a.field === "approval_eur");
 }
 
 function libraryPolicyOf(entry: GuardrailLibraryEntry): GuardrailValue {
@@ -305,18 +295,98 @@ function FreeTextApprovalActions({
   );
 }
 
-/** Renders a plugin's named guardrail presets (recommended first) plus an
- * always-last "decide myself" option that reveals free controls. A plugin
- * with no presets renders only the free controls -- no empty chooser.
+/** The free controls (Modify, approval-actions, €-threshold) -- always
+ * rendered below the preset/library list, never gated behind a "does the
+ * current value happen to match a preset" check. A preset or library entry
+ * is a quick-fill shortcut for this same editor, not a separate locked
+ * state: once applied, the result is a plain, independent policy record
+ * with no further tie to the capa that suggested it, so it must stay
+ * editable the same way a from-scratch policy is. */
+function FreeGuardrailControls({
+  value,
+  onChange,
+  hasValueSpec,
+  t,
+}: {
+  value: GuardrailValue;
+  onChange: (next: GuardrailValue) => void;
+  hasValueSpec: boolean;
+  t: (en: string, de: string) => string;
+}) {
+  return (
+    <div className="space-y-3 rounded-md border border-border p-3">
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => onChange({ ...value, modify: !value.modify })}
+          className={cn(
+            "rounded-full border px-3 py-1.5 text-sm transition",
+            value.modify
+              ? "border-primary bg-primary/10 text-primary"
+              : "border-border text-muted-foreground",
+          )}
+        >
+          {t("Modify", "Verändern")}
+        </button>
+      </div>
+      <label className="block text-xs uppercase tracking-wider text-muted-foreground">
+        {t("Approval needed for:", "Freigabe nötig für:")}
+        <div className="mt-1 flex gap-3">
+          <label className="flex items-center gap-1.5 text-sm normal-case text-foreground">
+            <input
+              type="checkbox"
+              checked={value.approvalActions.includes("modify")}
+              onChange={(e) =>
+                onChange({
+                  ...value,
+                  approvalActions: e.target.checked
+                    ? [...value.approvalActions, "modify"]
+                    : value.approvalActions.filter((a) => a !== "modify"),
+                })
+              }
+            />
+            {t("modifies", "verändert")}
+          </label>
+        </div>
+      </label>
+      <FreeTextApprovalActions value={value} onChange={onChange} t={t} />
+      {hasValueSpec && (
+        <label className="block text-xs uppercase tracking-wider text-muted-foreground">
+          {t("Approval needed from (€, optional)", "Freigabe nötig ab (€, optional)")}
+          <input
+            aria-label="€"
+            type="number"
+            min={0}
+            step={100}
+            value={value.approvalEur ?? ""}
+            onChange={(e) =>
+              onChange({
+                ...value,
+                approvalEur: e.target.value.trim() === "" ? null : Number(e.target.value),
+              })
+            }
+            placeholder="—"
+            className="mt-1 w-full rounded-md border border-border bg-background/40 px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
+          />
+        </label>
+      )}
+    </div>
+  );
+}
+
+/** Renders a plugin's named guardrail presets (recommended first), each a
+ * quick-fill shortcut into the always-visible free controls below -- not a
+ * locked, mutually-exclusive state. Clicking one seeds `value` with that
+ * preset's exact policy; the free controls right underneath then let the
+ * operator keep editing from there, since the applied policy is now a plain,
+ * independent record with no further dependency on the capa that suggested
+ * it. A plugin with no presets renders only the free controls -- no empty
+ * chooser.
  *
- * The selected preset is DERIVED by comparing `value` (and, importantly,
- * `value.only`) to each preset's policy, not tracked as separate state:
- * editing any control after picking a preset makes it stop matching, so the
- * screen never claims a preset is in force when the values have drifted
- * from it. "Configure myself" additionally carries one bit of local UI
- * state (`manualCustom`) purely to stay revealed when clicked on a value
- * that happens to match a preset exactly -- clicking a preset button clears
- * it again. */
+ * The "selected" highlight on a preset card is DERIVED by comparing `value`
+ * (and, importantly, `value.only`) to each preset's policy, not tracked as
+ * separate state -- purely visual feedback for "this preset currently
+ * describes your active values," not a gate on editing. */
 export function GuardrailPresetPicker({
   presets,
   guardrailLibrary,
@@ -337,18 +407,16 @@ export function GuardrailPresetPicker({
 }) {
   const t = useT();
   const { lang } = useLang();
-  const [manualCustom, setManualCustom] = useState(false);
 
   // Library branch, kept entirely separate from -- and returning before --
   // the generic-preset path below so that path's markup/logic stays exactly
-  // what it was before this feature: a byte-for-byte backward-compat
-  // guarantee for every connection whose plugin ships no library (design §6,
-  // "a plugin with no library falls back to today's behaviour exactly").
+  // what it was before this feature, aside from the shared unification below
+  // (design §6, "a plugin with no library falls back to today's behaviour
+  // exactly").
   if (guardrailLibrary && guardrailLibrary.length > 0) {
     const groups = groupByUseCase(guardrailLibrary);
     const matchedEntry =
       guardrailLibrary.find((entry) => libraryMatches(entry, value, hasValueSpec)) ?? null;
-    const isCustom = matchedEntry === null || manualCustom;
     return (
       <div className="space-y-4">
         <div className="flex flex-col gap-4">
@@ -358,197 +426,89 @@ export function GuardrailPresetPicker({
                 {formatUseCaseHeading(useCase, t)}
               </div>
               {entries.map((entry) => {
-                const selected = matchedEntry?.key === entry.key && !manualCustom;
-                const adjustable = supportedAdjustable(entry);
+                const selected = matchedEntry?.key === entry.key;
                 return (
-                  <div key={entry.key} className="flex flex-col gap-2">
-                    <button
-                      type="button"
-                      aria-pressed={selected}
-                      onClick={() => {
-                        setManualCustom(false);
-                        onChange(libraryPolicyOf(entry));
-                      }}
-                      className={cn(
-                        "rounded-md border p-3 text-left transition",
-                        selected
-                          ? "border-primary bg-primary/10"
-                          : "border-border hover:bg-muted/40",
-                      )}
-                    >
-                      <span className="text-sm font-medium text-foreground">
-                        {resolveTranslation(entry.label, entry.labelTranslations, lang)}
-                      </span>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {resolveTranslation(entry.summary, entry.summaryTranslations, lang)}
-                      </p>
-                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                        <GrantChip on={entry.read} label={t("Read", "Lesen")} />
-                        <GrantChip on={entry.modify} label={t("Modify", "Verändern")} />
-                        {entry.approvalActions.length > 0 && (
-                          <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
-                            {t("Approval for:", "Freigabe für:")}{" "}
-                            {entry.approvalActions
-                              .map((a) => {
-                                // Unlike `GuardrailPreset.approvalActions` (generic-preset
-                                // branch below), a library `Guardrail.approval_actions` is
-                                // NOT restricted to rights -- it can name a real tool (e.g.
-                                // "post_message"), which is the whole point of an entry like
-                                // `helpdesk_reply_needs_approval` (gate one modify-capable tool,
-                                // leave the rest of `modify` ungated). Only the "modify"
-                                // literal gets the bilingual right label; anything else is a
-                                // raw tool name, rendered unmodified -- same convention as
-                                // `entry.only.join(", ")` below.
-                                if (a === "modify") return t("modifies", "verändert");
-                                return a; // a real tool name, rendered unmodified
-                              })
-                              .join(", ")}
-                          </span>
-                        )}
-                        {hasValueSpec && entry.approvalEur != null && (
-                          <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
-                            &ge; {entry.approvalEur} €
-                          </span>
-                        )}
-                        {entry.only.length > 0 && (
-                          <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
-                            {t("Only:", "Nur:")} {entry.only.join(", ")}
-                          </span>
-                        )}
-                      </div>
-                    </button>
-                    {selected && adjustable.length > 0 && (
-                      <div className="ml-3 space-y-2 rounded-md border border-border/70 bg-background/30 p-3">
-                        {adjustable.map((adj) => (
-                          <label
-                            key={adj.field}
-                            className="block text-xs uppercase tracking-wider text-muted-foreground"
-                          >
-                            {resolveTranslation(adj.label, adj.labelTranslations, lang)}
-                            {adj.unit ? ` (${adj.unit})` : ""}
-                            <input
-                              aria-label={resolveTranslation(
-                                adj.label,
-                                adj.labelTranslations,
-                                lang,
-                              )}
-                              type="number"
-                              min={adj.min ?? undefined}
-                              max={adj.max ?? undefined}
-                              value={value.approvalEur ?? ""}
-                              onChange={(e) =>
-                                onChange({
-                                  ...value,
-                                  approvalEur:
-                                    e.target.value.trim() === "" ? null : Number(e.target.value),
-                                })
-                              }
-                              className="mt-1 w-full rounded-md border border-border bg-background/40 px-3 py-2 text-sm normal-case text-foreground outline-none focus:border-primary/50"
-                            />
-                          </label>
-                        ))}
-                      </div>
+                  <button
+                    key={entry.key}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => onChange(libraryPolicyOf(entry))}
+                    className={cn(
+                      "rounded-md border p-3 text-left transition",
+                      selected ? "border-primary bg-primary/10" : "border-border hover:bg-muted/40",
                     )}
-                  </div>
+                  >
+                    <span className="text-sm font-medium text-foreground">
+                      {resolveTranslation(entry.label, entry.labelTranslations, lang)}
+                    </span>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {resolveTranslation(entry.summary, entry.summaryTranslations, lang)}
+                    </p>
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                      <GrantChip on={entry.read} label={t("Read", "Lesen")} />
+                      <GrantChip on={entry.modify} label={t("Modify", "Verändern")} />
+                      {entry.approvalActions.length > 0 && (
+                        <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
+                          {t("Approval for:", "Freigabe für:")}{" "}
+                          {entry.approvalActions
+                            .map((a) => {
+                              // Unlike `GuardrailPreset.approvalActions` (generic-preset
+                              // branch below), a library `Guardrail.approval_actions` is
+                              // NOT restricted to rights -- it can name a real tool (e.g.
+                              // "post_message"), which is the whole point of an entry like
+                              // `helpdesk_reply_needs_approval` (gate one modify-capable tool,
+                              // leave the rest of `modify` ungated). Only the "modify"
+                              // literal gets the bilingual right label; anything else is a
+                              // raw tool name, rendered unmodified -- same convention as
+                              // `entry.only.join(", ")` below.
+                              if (a === "modify") return t("modifies", "verändert");
+                              return a; // a real tool name, rendered unmodified
+                            })
+                            .join(", ")}
+                        </span>
+                      )}
+                      {hasValueSpec && entry.approvalEur != null && (
+                        <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
+                          &ge; {entry.approvalEur} €
+                        </span>
+                      )}
+                      {entry.only.length > 0 && (
+                        <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
+                          {t("Only:", "Nur:")} {entry.only.join(", ")}
+                        </span>
+                      )}
+                    </div>
+                  </button>
                 );
               })}
             </div>
           ))}
-          <button
-            type="button"
-            aria-pressed={isCustom}
-            onClick={() => setManualCustom(true)}
-            className={cn(
-              "rounded-md border p-3 text-left text-sm transition",
-              isCustom ? "border-primary bg-primary/10" : "border-border hover:bg-muted/40",
-            )}
-          >
-            {t("Configure myself", "Selbst festlegen")}
-          </button>
         </div>
-        {isCustom && (
-          <div className="space-y-3 rounded-md border border-border p-3">
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => onChange({ ...value, modify: !value.modify })}
-                className={cn(
-                  "rounded-full border px-3 py-1.5 text-sm transition",
-                  value.modify
-                    ? "border-primary bg-primary/10 text-primary"
-                    : "border-border text-muted-foreground",
-                )}
-              >
-                {t("Modify", "Verändern")}
-              </button>
-            </div>
-            <label className="block text-xs uppercase tracking-wider text-muted-foreground">
-              {t("Approval needed for:", "Freigabe nötig für:")}
-              <div className="mt-1 flex gap-3">
-                <label className="flex items-center gap-1.5 text-sm normal-case text-foreground">
-                  <input
-                    type="checkbox"
-                    checked={value.approvalActions.includes("modify")}
-                    onChange={(e) =>
-                      onChange({
-                        ...value,
-                        approvalActions: e.target.checked
-                          ? [...value.approvalActions, "modify"]
-                          : value.approvalActions.filter((a) => a !== "modify"),
-                      })
-                    }
-                  />
-                  {t("modifies", "verändert")}
-                </label>
-              </div>
-            </label>
-            <FreeTextApprovalActions value={value} onChange={onChange} t={t} />
-            {hasValueSpec && (
-              <label className="block text-xs uppercase tracking-wider text-muted-foreground">
-                {t("Approval needed from (€, optional)", "Freigabe nötig ab (€, optional)")}
-                <input
-                  aria-label="€"
-                  type="number"
-                  min={0}
-                  step={100}
-                  value={value.approvalEur ?? ""}
-                  onChange={(e) =>
-                    onChange({
-                      ...value,
-                      approvalEur: e.target.value.trim() === "" ? null : Number(e.target.value),
-                    })
-                  }
-                  placeholder="—"
-                  className="mt-1 w-full rounded-md border border-border bg-background/40 px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
-                />
-              </label>
-            )}
-          </div>
-        )}
+        <FreeGuardrailControls
+          value={value}
+          onChange={onChange}
+          hasValueSpec={hasValueSpec}
+          t={t}
+        />
       </div>
     );
   }
 
   const ordered = [...presets].sort((a, b) => Number(b.recommended) - Number(a.recommended));
   const matchedKey = ordered.find((p) => matches(p, value, hasValueSpec))?.key ?? null;
-  const isCustom = matchedKey === null || manualCustom;
-  const showFree = presets.length === 0 || isCustom;
 
   return (
     <div className="space-y-4">
       {presets.length > 0 && (
         <div className="flex flex-col gap-2">
           {ordered.map((preset) => {
-            const selected = matchedKey === preset.key && !manualCustom;
+            const selected = matchedKey === preset.key;
             return (
               <button
                 key={preset.key}
                 type="button"
                 aria-pressed={selected}
-                onClick={() => {
-                  setManualCustom(false);
-                  onChange(policyOf(preset));
-                }}
+                onClick={() => onChange(policyOf(preset))}
                 className={cn(
                   "rounded-md border p-3 text-left transition",
                   selected ? "border-primary bg-primary/10" : "border-border hover:bg-muted/40",
@@ -595,78 +555,9 @@ export function GuardrailPresetPicker({
               </button>
             );
           })}
-          <button
-            type="button"
-            aria-pressed={isCustom}
-            onClick={() => setManualCustom(true)}
-            className={cn(
-              "rounded-md border p-3 text-left text-sm transition",
-              isCustom ? "border-primary bg-primary/10" : "border-border hover:bg-muted/40",
-            )}
-          >
-            {t("Configure myself", "Selbst festlegen")}
-          </button>
         </div>
       )}
-      {showFree && (
-        <div className="space-y-3 rounded-md border border-border p-3">
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => onChange({ ...value, modify: !value.modify })}
-              className={cn(
-                "rounded-full border px-3 py-1.5 text-sm transition",
-                value.modify
-                  ? "border-primary bg-primary/10 text-primary"
-                  : "border-border text-muted-foreground",
-              )}
-            >
-              {t("Modify", "Verändern")}
-            </button>
-          </div>
-          <label className="block text-xs uppercase tracking-wider text-muted-foreground">
-            {t("Approval needed for:", "Freigabe nötig für:")}
-            <div className="mt-1 flex gap-3">
-              <label className="flex items-center gap-1.5 text-sm normal-case text-foreground">
-                <input
-                  type="checkbox"
-                  checked={value.approvalActions.includes("modify")}
-                  onChange={(e) =>
-                    onChange({
-                      ...value,
-                      approvalActions: e.target.checked
-                        ? [...value.approvalActions, "modify"]
-                        : value.approvalActions.filter((a) => a !== "modify"),
-                    })
-                  }
-                />
-                {t("modifies", "verändert")}
-              </label>
-            </div>
-          </label>
-          <FreeTextApprovalActions value={value} onChange={onChange} t={t} />
-          {hasValueSpec && (
-            <label className="block text-xs uppercase tracking-wider text-muted-foreground">
-              {t("Approval needed from (€, optional)", "Freigabe nötig ab (€, optional)")}
-              <input
-                aria-label="€"
-                type="number"
-                min={0}
-                step={100}
-                value={value.approvalEur ?? ""}
-                onChange={(e) =>
-                  onChange({
-                    ...value,
-                    approvalEur: e.target.value.trim() === "" ? null : Number(e.target.value),
-                  })
-                }
-                placeholder="—"
-                className="mt-1 w-full rounded-md border border-border bg-background/40 px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
-              />
-            </label>
-          )}
-        </div>
-      )}
+      <FreeGuardrailControls value={value} onChange={onChange} hasValueSpec={hasValueSpec} t={t} />
     </div>
   );
 }
