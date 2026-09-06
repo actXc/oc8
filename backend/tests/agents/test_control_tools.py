@@ -2349,3 +2349,66 @@ async def test_agent_status_dispatch_is_refused_for_a_non_assistant_agent(app_se
         agent, task = await _dept_agent_task(db, tenant, is_team_lead=True)
         outcome = await _agent_status(db, tenant, agent, task, {})
         assert outcome.output.startswith("ERROR")
+
+
+# ------------------------------------------------------------ budget_overview
+
+
+async def _budget_overview(
+    db: Any, tenant: uuid.UUID, assistant: m.Agent, task: m.Task, arguments: dict[str, Any]
+) -> ControlOutcome:
+    outcome = await execute_control_tool(
+        db,
+        tenant_id=tenant,
+        agent=assistant,
+        task=task,
+        tc=ToolCall(id="c1", name="budget_overview", arguments=arguments),
+        decision=Decision(Effect.ALLOW),
+        assigned_skills=[],
+        active_skills=[],
+        mcp_conn=None,
+        originating_operator=None,
+    )
+    assert outcome is not None
+    return outcome
+
+
+@pytest.mark.asyncio
+async def test_budget_overview_reports_the_tenant_wide_budget(app_session: Any) -> None:
+    from oc8.authz.permissions import ORG_ADMIN
+
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        role = await _builtin_role(db, tenant, ORG_ADMIN)
+        member = await _human_behind(db, tenant, task)
+        member.role_id = role.id
+        await db.flush()
+        db.add(m.Budget(tenant_id=tenant, department_id=None, soft_limit_tokens=1000, hard_limit_tokens=2000))
+        await db.flush()
+
+        outcome = await _budget_overview(db, tenant, assistant, task, {})
+        assert "1000" in outcome.output
+        assert "2000" in outcome.output
+
+
+@pytest.mark.asyncio
+async def test_budget_overview_refuses_a_department_seat_alone(app_session: Any) -> None:
+    """BUDGET_VIEW is not seat-grantable at all -- a seat that grants every
+    other status tool must still refuse this one, with no
+    scope.holds_anywhere fallback."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        await _human_behind(db, tenant, task, all_departments=True)
+        outcome = await _budget_overview(db, tenant, assistant, task, {})
+        assert outcome.output.startswith("ERROR")
+
+
+@pytest.mark.asyncio
+async def test_budget_overview_dispatch_is_refused_for_a_non_assistant_agent(app_session: Any) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        agent, task = await _dept_agent_task(db, tenant, is_team_lead=True)
+        outcome = await _budget_overview(db, tenant, agent, task, {})
+        assert outcome.output.startswith("ERROR")

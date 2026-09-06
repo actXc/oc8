@@ -44,6 +44,7 @@ from oc8.capas.discovery import find_plugin
 from oc8.departments.repo import visible_department, visible_departments
 from oc8.knowledge.retrieval import retrieve_kb_context
 from oc8.memory.router import retrieve_context, write_memory
+from oc8.metering.budget import current_month_tokens, get_budget
 from oc8.modelrouter import NeutralTool, ToolCall
 from oc8.realtime.emit import record_activity
 from oc8.runtime.repository import RunRepository
@@ -1513,6 +1514,41 @@ async def execute_control_tool(
             return ControlOutcome(output="No agents visible.")
         lines = [f"- {a.name} | id {a.id} | status {a.status}" for a in rows]
         return ControlOutcome(output="\n".join(lines))
+
+    if tc.name == BUDGET_OVERVIEW.name:
+        if not agent.is_tenant_assistant:
+            return ControlOutcome(output="ERROR: only the oc8 Assistant can read the budget")
+        agent_actor = await _resolve_agent_actor(db, tenant_id=tenant_id, task=task, run_id=run_id)
+        if agent_actor is None:
+            return ControlOutcome(output="ERROR: could not resolve who you are acting for")
+        authority = await authority_for_member(
+            db,
+            agent_actor.member,
+            token_role=await _acting_token_role(db, tenant_id=tenant_id, run_id=run_id),
+        )
+        # BUDGET_VIEW is not in SEAT_PERMISSIONS -- no department seat can ever
+        # grant it, so there is deliberately no scope.holds_anywhere fallback
+        # here, unlike list_pending_approvals/department_status/agent_status.
+        if perm(BUDGET, VIEW) not in authority.tenant_wide:
+            return ControlOutcome(output="ERROR: you don't have permission to view the budget")
+        department_id: uuid.UUID | None = None
+        department_id_raw = tc.arguments.get("department_id")
+        if department_id_raw:
+            try:
+                department_id = uuid.UUID(str(department_id_raw))
+            except ValueError:
+                return ControlOutcome(output="ERROR: department_id is not a valid id")
+        budget = await get_budget(db, tenant_id=tenant_id, department_id=department_id)
+        used = await current_month_tokens(db, tenant_id=tenant_id, department_id=department_id)
+        scope_label = f"department {department_id}" if department_id else "the whole tenant"
+        if budget is None:
+            return ControlOutcome(output=f"No budget configured for {scope_label}. Used this month: {used} tokens.")
+        return ControlOutcome(
+            output=(
+                f"Budget for {scope_label}: soft limit {budget.soft_limit_tokens}, "
+                f"hard limit {budget.hard_limit_tokens}. Used this month: {used} tokens."
+            )
+        )
 
     if tc.name == RENDER_COMPONENT.name:
         component_key = str(tc.arguments.get("component_key", "")).strip()
