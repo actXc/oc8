@@ -2447,9 +2447,22 @@ async def test_kpi_overview_for_one_agent(app_session: Any) -> None:
     tenant = uuid.uuid4()
     async with app_session(tenant) as db:
         assistant, task = await _assistant_and_task(db, tenant)
-        await _human_behind(db, tenant, task, all_departments=True)
+        # A separate, non-assistant agent: _assistant_and_task's own agent has
+        # been flipped to is_tenant_assistant=True, and visible_agent excludes
+        # the assistant by design (same as agent_status's Task 5 fixture fix).
+        other_agent = m.Agent(
+            tenant_id=tenant,
+            department_id=assistant.department_id,
+            name="Nora",
+            status="idle",
+            definition={},
+            presentation={},
+        )
+        db.add(other_agent)
+        await db.flush()
+        await _human_behind(db, tenant, task, seat_in=task.department_id)
         outcome = await _kpi_overview(
-            db, tenant, assistant, task, {"agent_id": str(task.assigned_agent_id)}
+            db, tenant, assistant, task, {"agent_id": str(other_agent.id)}
         )
         assert outcome.output.startswith("KPIs for agent Nora")
 

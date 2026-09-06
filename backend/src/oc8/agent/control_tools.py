@@ -1607,15 +1607,12 @@ async def execute_control_tool(
                 target_agent_id = uuid.UUID(str(agent_id_raw))
             except ValueError:
                 return ControlOutcome(output="ERROR: agent_id is not a valid id")
-            tenant_wide = tenant_wide_read(
-                authority, view_perm
-            ) or agent_actor.scope.is_unrestricted
+            tenant_wide = tenant_wide_read(authority, view_perm)
             target = await visible_agent(
                 db,
                 scope=agent_actor.scope,
                 tenant_wide=tenant_wide,
                 agent_id=target_agent_id,
-                include_tenant_assistant=True,
             )
             if target is None:
                 return ControlOutcome(output="ERROR: agent not found")
@@ -1636,9 +1633,7 @@ async def execute_control_tool(
                 target_department_id = uuid.UUID(str(department_id_raw))
             except ValueError:
                 return ControlOutcome(output="ERROR: department_id is not a valid id")
-            tenant_wide = tenant_wide_read(
-                authority, view_perm
-            ) or agent_actor.scope.is_unrestricted
+            tenant_wide = tenant_wide_read(authority, view_perm)
             dept = await visible_department(
                 db,
                 scope=agent_actor.scope,
