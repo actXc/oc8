@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from oc8 import models as m
 from oc8.agent.components import COMPONENT_CATALOG
+from oc8.agents.repo import visible_agent, visible_agents
 from oc8.approvals import (
     AlreadyDecided,
     NotYourDepartment,
@@ -1463,6 +1464,55 @@ async def execute_control_tool(
         if not rows:
             return ControlOutcome(output="No departments visible.")
         return ControlOutcome(output="\n".join(f"- {d.name} | id {d.id}" for d in rows))
+
+    if tc.name == AGENT_STATUS.name:
+        if not agent.is_tenant_assistant:
+            return ControlOutcome(output="ERROR: only the oc8 Assistant can read agent status")
+        agent_actor = await _resolve_agent_actor(db, tenant_id=tenant_id, task=task, run_id=run_id)
+        if agent_actor is None:
+            return ControlOutcome(output="ERROR: could not resolve who you are acting for")
+        authority = await authority_for_member(
+            db,
+            agent_actor.member,
+            token_role=await _acting_token_role(db, tenant_id=tenant_id, run_id=run_id),
+        )
+        view_perm = perm(AGENT, VIEW)
+        admitted = view_perm in authority.tenant_wide or agent_actor.scope.holds_anywhere(view_perm)
+        if not admitted:
+            return ControlOutcome(output="ERROR: you don't have permission to view agents")
+        tenant_wide = tenant_wide_read(authority, view_perm)
+        agent_id_raw = tc.arguments.get("agent_id")
+        if agent_id_raw:
+            try:
+                target_id = uuid.UUID(str(agent_id_raw))
+            except ValueError:
+                return ControlOutcome(output="ERROR: agent_id is not a valid id")
+            target = await visible_agent(
+                db, scope=agent_actor.scope, tenant_wide=tenant_wide, agent_id=target_id
+            )
+            if target is None:
+                return ControlOutcome(output="ERROR: agent not found")
+            output = f"{target.name} | id {target.id} | status {target.status}"
+            return ControlOutcome(output=output)
+        department_id_raw = tc.arguments.get("department_id")
+        department_id: uuid.UUID | None = None
+        if department_id_raw:
+            try:
+                department_id = uuid.UUID(str(department_id_raw))
+            except ValueError:
+                return ControlOutcome(output="ERROR: department_id is not a valid id")
+        status_filter = tc.arguments.get("status")
+        rows, _total = await visible_agents(
+            db,
+            scope=agent_actor.scope,
+            tenant_wide=tenant_wide,
+            department_id=department_id,
+            status=str(status_filter) if status_filter else None,
+        )
+        if not rows:
+            return ControlOutcome(output="No agents visible.")
+        lines = [f"- {a.name} | id {a.id} | status {a.status}" for a in rows]
+        return ControlOutcome(output="\n".join(lines))
 
     if tc.name == RENDER_COMPONENT.name:
         component_key = str(tc.arguments.get("component_key", "")).strip()

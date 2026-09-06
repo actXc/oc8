@@ -2239,3 +2239,113 @@ async def test_department_status_dispatch_is_refused_for_a_non_assistant_agent(
         agent, task = await _dept_agent_task(db, tenant, is_team_lead=True)
         outcome = await _department_status(db, tenant, agent, task, {})
         assert outcome.output.startswith("ERROR")
+
+
+# -------------------------------------------------------------- agent_status
+
+
+async def _agent_status(
+    db: Any, tenant: uuid.UUID, assistant: m.Agent, task: m.Task, arguments: dict[str, Any]
+) -> ControlOutcome:
+    outcome = await execute_control_tool(
+        db,
+        tenant_id=tenant,
+        agent=assistant,
+        task=task,
+        tc=ToolCall(id="c1", name="agent_status", arguments=arguments),
+        decision=Decision(Effect.ALLOW),
+        assigned_skills=[],
+        active_skills=[],
+        mcp_conn=None,
+        originating_operator=None,
+    )
+    assert outcome is not None
+    return outcome
+
+
+@pytest.mark.asyncio
+async def test_agent_status_lists_only_visible_agents(app_session: Any) -> None:
+    from oc8.authz.permissions import ORG_ADMIN
+
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        # Create a regular agent (not the tenant assistant) in the same department
+        other_agent = m.Agent(
+            tenant_id=tenant,
+            department_id=assistant.department_id,
+            name="Nora",
+            status="idle",
+            definition={},
+            presentation={},
+        )
+        db.add(other_agent)
+        await db.flush()
+        member = await _human_behind(db, tenant, task)
+        member.role_id = (await _builtin_role(db, tenant, ORG_ADMIN)).id
+        await db.flush()
+        outcome = await _agent_status(db, tenant, assistant, task, {})
+        assert "Nora" in outcome.output
+
+
+@pytest.mark.asyncio
+async def test_agent_status_by_id_404s_for_a_foreign_agent(app_session: Any) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        other = m.Department(tenant_id=tenant, name="Buchhaltung", frame={})
+        db.add(other)
+        await db.flush()
+        stranger = m.Agent(
+            tenant_id=tenant,
+            department_id=other.id,
+            name="Fremd",
+            status="idle",
+            definition={},
+            presentation={},
+        )
+        db.add(stranger)
+        await db.flush()
+        await _human_behind(db, tenant, task, seat_in=task.department_id)
+        outcome = await _agent_status(db, tenant, assistant, task, {"agent_id": str(stranger.id)})
+        assert outcome.output.startswith("ERROR")
+
+
+@pytest.mark.asyncio
+async def test_agent_status_refuses_without_agent_view(app_session: Any) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        await _human_behind(db, tenant, task)
+        outcome = await _agent_status(db, tenant, assistant, task, {})
+        assert outcome.output.startswith("ERROR")
+
+
+@pytest.mark.asyncio
+async def test_agent_status_is_visible_to_a_seat_only_member(app_session: Any) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        # Create a regular agent (not the tenant assistant) in the same department
+        other_agent = m.Agent(
+            tenant_id=tenant,
+            department_id=assistant.department_id,
+            name="Nora",
+            status="idle",
+            definition={},
+            presentation={},
+        )
+        db.add(other_agent)
+        await db.flush()
+        await _human_behind(db, tenant, task, seat_in=task.department_id)
+        outcome = await _agent_status(db, tenant, assistant, task, {})
+        assert "Nora" in outcome.output
+
+
+@pytest.mark.asyncio
+async def test_agent_status_dispatch_is_refused_for_a_non_assistant_agent(app_session: Any) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        agent, task = await _dept_agent_task(db, tenant, is_team_lead=True)
+        outcome = await _agent_status(db, tenant, agent, task, {})
+        assert outcome.output.startswith("ERROR")
