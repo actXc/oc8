@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const {
   canMock,
   assistantMock,
+  authMock,
   sessionsMock,
   createSessionMock,
   messagesMock,
@@ -17,6 +18,7 @@ const {
 } = vi.hoisted(() => ({
   canMock: vi.fn(() => true),
   assistantMock: vi.fn(),
+  authMock: vi.fn(),
   sessionsMock: vi.fn(),
   createSessionMock: vi.fn(),
   messagesMock: vi.fn(),
@@ -38,6 +40,7 @@ vi.mock("@/lib/hooks", async (importOriginal) => {
   return {
     ...actual,
     useAssistant: () => assistantMock(),
+    useAuth: () => authMock(),
     useCopilotProposals: (options?: unknown) => proposalsMock(options),
     useApplyCopilotProposal: () => ({ mutate: applyProposalMock, isPending: false }),
     useRejectCopilotProposal: () => ({ mutate: rejectProposalMock, isPending: false }),
@@ -78,13 +81,18 @@ describe("CopilotDock", () => {
   beforeEach(() => {
     // Tabs are now persisted to localStorage (scoped by member id) -- clear
     // it so one test's open tabs can't leak into the next test's initial
-    // render (every test here resolves the same "anon" member id, since none
-    // of them mock useAuth to return a signed-in member).
+    // render. useAuth resolves synchronously to a fixed member here so every
+    // test's tabs/bootstrap logic activates on the very first render, same
+    // as before memberId depended on useAuth actually resolving; the one
+    // test below that needs the real pending-then-resolved race overrides
+    // this itself.
     localStorage.clear();
     canMock.mockReset();
     canMock.mockImplementation(() => true);
     assistantMock.mockReset();
     assistantMock.mockReturnValue({ data: { agentId: "assistant-1" } });
+    authMock.mockReset();
+    authMock.mockReturnValue({ data: { memberId: "member-1" } });
     sessionsMock.mockReset();
     sessionsMock.mockReturnValue({ data: [] });
     createSessionMock.mockReset();
@@ -757,10 +765,44 @@ describe("CopilotDock", () => {
 
     unmount();
 
-    expect(localStorage.getItem("oc8-copilot-tabs-anon")).not.toBeNull();
+    expect(localStorage.getItem("oc8-copilot-tabs-member-1")).not.toBeNull();
 
     renderDock();
     openDock();
     expect(screen.getAllByRole("button", { name: /frage tab|untitled chat tab/i })).toHaveLength(2);
+  });
+
+  it("does not clobber a real member's persisted tabs while useAuth is still resolving", () => {
+    // Pre-seed localStorage as if this member already had two tabs open from
+    // a previous visit.
+    localStorage.setItem(
+      "oc8-copilot-tabs-member-1",
+      JSON.stringify([
+        { uiId: "existing-1", sessionId: null },
+        { uiId: "existing-2", sessionId: null },
+      ]),
+    );
+
+    // Simulate the exact race the bug depended on: useAuth's query is still
+    // pending (`data: undefined`) on the first render, and only resolves to
+    // the real member afterwards. authMock is a plain vi.fn() rather than a
+    // real async query, so changing its return value alone doesn't trigger a
+    // re-render -- the toggle clicks below force CopilotDockPanel to
+    // re-render and read the new value, the same way a real query settling
+    // would.
+    authMock.mockReturnValue({ data: undefined });
+
+    renderDock();
+    openDock();
+    // While useAuth is still pending, memberId is unknown -- no tabs should
+    // have loaded or bootstrapped yet (no composer for a tab).
+    expect(screen.queryByPlaceholderText(/configure or ask oc8/i)).not.toBeInTheDocument();
+
+    authMock.mockReturnValue({ data: { memberId: "member-1" } });
+    // Force a re-render so the new mock return value is actually read.
+    fireEvent.click(screen.getByRole("button", { name: /oc8 copilot/i }));
+    fireEvent.click(screen.getByRole("button", { name: /oc8 copilot/i }));
+
+    expect(JSON.parse(localStorage.getItem("oc8-copilot-tabs-member-1") ?? "[]")).toHaveLength(2);
   });
 });

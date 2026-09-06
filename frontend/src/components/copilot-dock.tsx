@@ -233,14 +233,42 @@ function CopilotDockPanel() {
   const { data: sessions } = useChatSessions(assistantAgentId);
 
   const { data: me } = useAuth();
-  const memberId = me?.memberId ?? "anon";
+  const memberId = me === undefined ? undefined : (me.memberId ?? "anon");
 
-  const [tabs, setTabs] = useState<CopilotTab[]>(() => loadTabs(memberId));
-  const [activeUiId, setActiveUiId] = useState<string | null>(() => tabs[0]?.uiId ?? null);
+  const [tabs, setTabs] = useState<CopilotTab[]>([]);
+  const [activeUiId, setActiveUiId] = useState<string | null>(null);
+  // Tracks which member's tabs are currently loaded into `tabs` above, so the
+  // persistence and bootstrap effects below never fire before the matching
+  // load has actually committed (they would otherwise write/derive from the
+  // OLD member's -- or the not-yet-resolved "anon" placeholder's -- tabs,
+  // destroying whatever was saved for the new member). `undefined` means "not
+  // loaded for anyone yet."
+  //
+  // This is STATE, not a ref: a ref would flip synchronously the moment the
+  // load effect below runs, making it already look "loaded" to the
+  // persist/bootstrap effects that fire in that very same effect flush --
+  // while `tabs` itself is still the pre-load value from this same render
+  // (React batches all three effects' setState calls from one flush into a
+  // single next render, so their closures over `tabs` don't see each other's
+  // updates). That reintroduces the exact clobbering race this fix exists to
+  // close, just one level down, whenever `sessions` has already resolved by
+  // the time `memberId` first does. Using state instead defers visibility to
+  // the NEXT render, by which point `tabs` genuinely reflects the load.
+  const [loadedMemberId, setLoadedMemberId] = useState<string | undefined>(undefined);
 
   useEffect(() => {
-    localStorage.setItem(tabsStorageKey(memberId), JSON.stringify(tabs));
-  }, [tabs, memberId]);
+    if (memberId === undefined) return; // /me hasn't resolved yet
+    if (loadedMemberId === memberId) return; // already loaded for this member
+    const loaded = loadTabs(memberId);
+    setTabs(loaded);
+    setActiveUiId(loaded[0]?.uiId ?? null);
+    setLoadedMemberId(memberId);
+  }, [memberId, loadedMemberId]);
+
+  useEffect(() => {
+    if (loadedMemberId === undefined || loadedMemberId !== memberId) return; // don't persist before the load above has committed
+    localStorage.setItem(tabsStorageKey(loadedMemberId), JSON.stringify(tabs));
+  }, [tabs, memberId, loadedMemberId]);
 
   // Today's own bootstrap-to-most-recent-session behaviour, now scoped to
   // "no tabs at all yet" instead of "no session yet" -- a returning user with
@@ -253,12 +281,13 @@ function CopilotDockPanel() {
   // always leaves at least one tab open, matching the old single-session dock
   // never having a "nothing to show" state.
   useEffect(() => {
+    if (loadedMemberId === undefined || loadedMemberId !== memberId) return; // wait for the per-member load above to commit
     if (tabs.length > 0) return;
     if (!sessions) return;
     const uiId = crypto.randomUUID();
     setTabs([{ uiId, sessionId: sessions[0]?.id ?? null }]);
     setActiveUiId(uiId);
-  }, [tabs.length, sessions]);
+  }, [memberId, loadedMemberId, tabs.length, sessions]);
 
   function openNewTab() {
     const uiId = crypto.randomUUID();
