@@ -146,7 +146,7 @@ class RunMessageRequest(BaseModel):
     body: str
 
 
-def _to_dto(run: m.AgentRun) -> RunDTO:
+def run_to_dto(run: m.AgentRun) -> RunDTO:
     ctx = run.context or {}
     return RunDTO(
         id=str(run.id),
@@ -190,13 +190,13 @@ async def run(
     if body.mcp_connection_id is not None:
         context["mcp_connection_id"] = str(body.mcp_connection_id)
 
-    # enqueue_run commits `db` before publishing; _to_dto(run_row) below only
+    # enqueue_run commits `db` before publishing; run_to_dto(run_row) below only
     # reads already-loaded attributes (safe because the sessionmaker uses
     # expire_on_commit=False).
     run_row, _published = await enqueue_run(
         db, tenant_id=principal.tenant_id, agent_id=agent.id, context=context, source="manual"
     )
-    return _to_dto(run_row)
+    return run_to_dto(run_row)
 
 
 @router.get(
@@ -288,7 +288,7 @@ async def get_run(run_id: uuid.UUID, db: DbSession, principal: CurrentPrincipal)
     run_row = await db.get(m.AgentRun, run_id)
     if run_row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "run not found")
-    return _to_dto(run_row)
+    return run_to_dto(run_row)
 
 
 @router.post(
@@ -311,10 +311,10 @@ async def answer_run(
     # already-existing run (not a new one, so publish_run, not enqueue_run).
     await resolve_clarification(db, run=run_row, answer=body.answer)
     # No further DB query after commit (the transaction-local tenant binding
-    # ends); _to_dto only reads already-loaded attributes.
+    # ends); run_to_dto only reads already-loaded attributes.
     await db.commit()
     await publish_run(run_id=run_row.id, tenant_id=principal.tenant_id)
-    return _to_dto(run_row)
+    return run_to_dto(run_row)
 
 
 @router.post(
@@ -419,4 +419,4 @@ async def cancel_run(
         principal=principal,
     )
     await db.commit()
-    return _to_dto(run_row)
+    return run_to_dto(run_row)
