@@ -11,7 +11,8 @@ fixed by the caller's own identity token.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from oc8 import models as m
 from oc8.api.deps import CurrentPrincipal, DbSession, unguarded
@@ -99,21 +100,28 @@ async def put_layout(
 ) -> DashboardLayoutDTO:
     member = await _member_for(db, principal)
     widgets_json = [w.model_dump(mode="json") for w in body.widgets]
-    result = await db.execute(
-        select(m.MemberDashboardLayout).where(m.MemberDashboardLayout.member_id == member.id)
-    )
-    row = result.scalar_one_or_none()
-    if row is None:
-        row = m.MemberDashboardLayout(
+    # Upsert rather than select-then-insert: two concurrent first-saves could
+    # otherwise both see no existing row and race on the INSERT against the
+    # table's UNIQUE(member_id) constraint, with the loser hitting an
+    # unhandled unique-violation.
+    stmt = (
+        pg_insert(m.MemberDashboardLayout)
+        .values(
             tenant_id=principal.tenant_id,
             member_id=member.id,
             widgets=widgets_json,
             template_id=body.template_id,
         )
-        db.add(row)
-    else:
-        row.widgets = widgets_json
-        row.template_id = body.template_id
+        .on_conflict_do_update(
+            index_elements=["member_id"],
+            set_={
+                "widgets": widgets_json,
+                "template_id": body.template_id,
+                "updated_at": func.now(),
+            },
+        )
+    )
+    await db.execute(stmt)
     await db.commit()
     return DashboardLayoutDTO(widgets=body.widgets, template_id=body.template_id)
 

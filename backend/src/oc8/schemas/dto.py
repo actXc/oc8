@@ -1081,7 +1081,7 @@ class VapidPublicKeyDTO(CamelModel):
 
 class WidgetInstanceDTO(CamelModel):
     id: str
-    type: str
+    type: Literal["chat", "approvals", "reports", "budget", "activity"]
     x: int
     y: int
     w: int
@@ -1090,7 +1090,7 @@ class WidgetInstanceDTO(CamelModel):
 
 
 class DashboardLayoutDTO(CamelModel):
-    widgets: list[WidgetInstanceDTO]
+    widgets: list[WidgetInstanceDTO] = Field(max_length=50)
     template_id: str | None = None
 
 

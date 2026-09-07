@@ -1,7 +1,10 @@
 import { useActivity } from "@/lib/hooks";
 import { useT } from "@/lib/i18n";
 
-export function ActivityWidget({}: { config: Record<string, unknown>; onConfigChange: (c: Record<string, unknown>) => void }) {
+export function ActivityWidget(_props: {
+  config: Record<string, unknown>;
+  onConfigChange: (c: Record<string, unknown>) => void;
+}) {
   const t = useT();
   const { data, isPending } = useActivity({ limit: 8 });
   const items = (data ?? []).slice(0, 8);

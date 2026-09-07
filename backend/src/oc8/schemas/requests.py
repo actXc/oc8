@@ -664,5 +664,5 @@ class PushSubscribeRequest(CamelModel):
 
 
 class PutDashboardLayoutRequest(CamelModel):
-    widgets: list[WidgetInstanceDTO]
+    widgets: list[WidgetInstanceDTO] = Field(max_length=50)
     template_id: str | None = None

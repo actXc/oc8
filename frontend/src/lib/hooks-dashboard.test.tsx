@@ -3,11 +3,7 @@ import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { api } from "@/lib/api";
-import {
-  useDashboardLayout,
-  useDashboardTemplates,
-  useSaveDashboardLayout,
-} from "@/lib/hooks";
+import { useDashboardLayout, useDashboardTemplates, useSaveDashboardLayout } from "@/lib/hooks";
 
 vi.mock("@/lib/api", () => ({
   api: { get: vi.fn(), put: vi.fn() },

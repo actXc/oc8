@@ -5,8 +5,8 @@ import uuid
 import pytest
 
 from oc8 import models as m
-from tests.conftest import AppSessionFactory
 from oc8.constants import ACME_TENANT_ID
+from tests.conftest import AppSessionFactory
 
 pytestmark = pytest.mark.asyncio
 
