@@ -16,6 +16,7 @@ const {
   applyProposalMock,
   rejectProposalMock,
   runActivityMock,
+  liveStatusMock,
 } = vi.hoisted(() => ({
   canMock: vi.fn(() => true),
   assistantMock: vi.fn(),
@@ -30,6 +31,7 @@ const {
   applyProposalMock: vi.fn(),
   rejectProposalMock: vi.fn(),
   runActivityMock: vi.fn(),
+  liveStatusMock: vi.fn(),
 }));
 
 vi.mock("@/lib/governance-hooks", async (importOriginal) => {
@@ -61,8 +63,14 @@ vi.mock("@/lib/hooks-chat", () => ({
   useSendChatMessage: () => ({ mutate: sendMessageMock, isPending: false }),
   useRenameChatSession: () => ({ mutate: renameSessionMock, isPending: false }),
   useDeleteChatSession: () => ({ mutate: deleteSessionMock, isPending: false }),
-  useCopilotRunActivity: (sessionId: string | null, runId: string | null) => runActivityMock(sessionId, runId),
+  useCopilotRunActivity: (sessionId: string | null, runId: string | null) =>
+    runActivityMock(sessionId, runId),
 }));
+
+vi.mock("@/lib/live/provider", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/live/provider")>();
+  return { ...actual, useLiveConnectionStatus: () => liveStatusMock() };
+});
 
 import { CopilotDock } from "@/components/copilot-dock";
 
@@ -110,6 +118,8 @@ describe("CopilotDock", () => {
     rejectProposalMock.mockReset();
     runActivityMock.mockReset();
     runActivityMock.mockReturnValue({ data: null });
+    liveStatusMock.mockReset();
+    liveStatusMock.mockReturnValue("connected");
   });
 
   it("renders nothing for a caller without copilot:use, and never even calls the chat-pipeline hooks", () => {
@@ -828,5 +838,19 @@ describe("CopilotDock", () => {
     renderDock();
     openDock();
     expect(screen.getByPlaceholderText(/configure or ask oc8/i)).toBeInTheDocument();
+  });
+
+  it("shows a reconnecting notice while the WS connection is down", () => {
+    liveStatusMock.mockReturnValue("disconnected");
+    renderDock();
+    openDock();
+    expect(screen.getByText(/reconnecting/i)).toBeInTheDocument();
+  });
+
+  it("hides the reconnecting notice once the WS connection is back", () => {
+    liveStatusMock.mockReturnValue("connected");
+    renderDock();
+    openDock();
+    expect(screen.queryByText(/reconnecting/i)).not.toBeInTheDocument();
   });
 });

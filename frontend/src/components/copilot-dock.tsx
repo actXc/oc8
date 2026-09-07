@@ -1,4 +1,4 @@
-import { ChevronDown, Plus, Send, Sparkles, X } from "lucide-react";
+import { ChevronDown, Plus, Send, Sparkles, WifiOff, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ChatMarkdown } from "@/components/chat-markdown";
@@ -20,6 +20,7 @@ import {
   useChatMessages,
   useSendChatMessage,
 } from "@/lib/hooks-chat";
+import { useLiveConnectionStatus } from "@/lib/live/provider";
 import { ChatSessionPicker } from "@/components/chat-window";
 
 // Set by DoneStep right before the full-page navigation into "/" that follows
@@ -232,6 +233,7 @@ function CopilotDockPanel() {
   const { data: assistant } = useAssistant();
   const assistantAgentId = assistant?.agentId;
   const { data: sessions } = useChatSessions(assistantAgentId);
+  const liveConnectionStatus = useLiveConnectionStatus();
 
   const { data: me, isError: authFailed } = useAuth();
   const memberId = me !== undefined ? (me.memberId ?? "anon") : authFailed ? "anon" : undefined;
@@ -449,6 +451,18 @@ function CopilotDockPanel() {
               />
             )}
           </div>
+
+          {liveConnectionStatus === "disconnected" && (
+            <div className="flex items-center gap-1.5 border-b border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs text-amber-700 dark:text-amber-400">
+              <WifiOff className="h-3.5 w-3.5" />
+              <span>
+                {t(
+                  "Reconnecting -- new messages may be delayed.",
+                  "Verbindung wird wiederhergestellt -- neue Nachrichten können sich verzögern.",
+                )}
+              </span>
+            </div>
+          )}
 
           <PendingProposals de={de} />
 
