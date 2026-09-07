@@ -521,7 +521,7 @@ function CopilotDockPanel() {
 // (and therefore its `input` draft) alive across a tab switch; it just
 // renders nothing while another tab is focused, which is what keeps two
 // tabs' composers/messages from both landing in the DOM at once.
-function CopilotChatTab({
+export function CopilotChatTab({
   sessionId,
   onSessionChange,
   assistantAgentId,
