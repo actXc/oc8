@@ -1,9 +1,12 @@
 // A compact strip showing what the current run is doing right now --
 // step count, latest tool call, and an explicit failed-run notice. Reads
-// the SAME ["run", runId] cache useCopilotRunActivity seeds, which the WS
-// patchers in live/apply-event.ts keep live for as long as the tab stays
-// mounted (see copilot-dock.tsx's Task 16 "render every tab, hide inactive
-// ones" choice -- a backed-out tab keeps receiving these patches).
+// the ["run", runId] cache useCopilotRunActivity seeds, kept live by the WS
+// patchers in live/apply-event.ts. This component itself sits after
+// CopilotChatTab's `if (!active) return null`, so it unmounts along with
+// the rest of a backgrounded tab's JSX and does NOT keep observing patches
+// while unfocused -- reactivating the tab simply re-fetches the run's
+// current state, which is correct and cheap (useCopilotRunActivity's
+// staleTime is Infinity, so this only ever fires once per distinct runId).
 
 import { useCopilotRunActivity } from "@/lib/hooks-chat";
 import { useT } from "@/lib/i18n";
