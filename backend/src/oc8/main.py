@@ -163,6 +163,17 @@ def create_app(
                 ],
             )
 
+    # Service-to-service edition routers (z.B. oc8-enterprises Tenant-
+    # Provisioning-API) liegen NICHT unter /api/v1 und haben hier keine
+    # Principal-Dependencies -- jeder verifiziert sein eigenes statisches
+    # Service-Token-Credential intern, genau wie internal_agent_router sein
+    # eigenes run-scoped Agent-Token verifiziert. Kein Prefix: der deployte
+    # URL-Contract (fleet's HttpTenantProvisioner) ist {base_url}/admin/tenants,
+    # nicht {base_url}/api/v1/admin/tenants.
+    for extension in edition_extensions:
+        for router in extension.service_routers():
+            app.include_router(router)
+
     from oc8.realtime.ws import router as realtime_router
 
     # No dependency here: this router is a WebSocket, which cannot carry an HTTP
