@@ -112,11 +112,11 @@ def test_null_round_trips_as_null_for_every_nullable_column() -> None:
 
 def test_every_exported_table_round_trips_a_fully_populated_row() -> None:
     tables = exported_tables()
-    # guards against a silently-shrunk table list (53 since migration 0085's
-    # imported_skill_file joined the export -- see test_tables.py's own comment
-    # on why a directly-imported skill's bundled files are portable company
+    # guards against a silently-shrunk table list (54 since migration 0086's
+    # member_dashboard_layout joined the export -- see test_tables.py's own
+    # comment on why a member's widget-grid arrangement is portable company
     # data, not instance-bound)
-    assert len(tables) == 53
+    assert len(tables) == 54
     for name in sorted(tables):
         table = table_by_name(name)
         row = {col.name: _sample_value(col.type, i) for i, col in enumerate(table.columns)}
