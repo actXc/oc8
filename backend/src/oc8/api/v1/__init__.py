@@ -21,6 +21,7 @@ from oc8.api.v1 import (
     contracts,
     copilot,
     credentials,
+    dashboard,
     departments,
     events,
     feed,
@@ -72,6 +73,7 @@ api_router.include_router(members.router, tags=["members"])
 api_router.include_router(mcp.router, tags=["mcp"])
 api_router.include_router(mcp_logins.router, tags=["mcp"])
 api_router.include_router(notifications.router, tags=["notifications"])
+api_router.include_router(dashboard.router, tags=["dashboard"])
 api_router.include_router(oauth.router, tags=["oauth"])
 api_router.include_router(capas.router, tags=["capas"])
 api_router.include_router(roles.router, tags=["roles"])
