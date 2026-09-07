@@ -91,6 +91,9 @@ function clarificationRow(c: Clarification): Row {
   };
 }
 
+/** Relative age from an ISO timestamp. Empty for an empty or unparseable one —
+ *  a row that says "0m" because a field was blank is a row that lies about how
+ *  long somebody has been waiting. */
 function relativeAge(iso: string): string {
   if (!iso) return "";
   const then = new Date(iso).getTime();
@@ -108,6 +111,20 @@ function avatarColor(agentId: string): string {
   return `oklch(0.78 0.12 ${h})`;
 }
 
+/** Whether the caller may act on a row, and the wire now says exactly.
+ *
+ * `decidesEverywhere` and not `unrestricted`. The two are different people and
+ * the backend has always known it — `authz/scope.py` carries two flags and
+ * documents at length why they must not become one — but `/me` sent only the
+ * first, so this returned true for an `auditor`, who holds `approval:view_any`,
+ * sees every department, and is 403'd by `require_departmental(approval:decide)`
+ * on every click. The role's entire value is that its account cannot have caused
+ * what it is auditing; offering it Approve was the screen contradicting that.
+ *
+ * Below that, authority is only the seats, so the seat role in that row's own
+ * department is the whole answer: a `dept_viewer` reads the queue and may not
+ * empty it, and hiding the buttons is the honest way to say so.
+ */
 function mayActOn(seats: Seat[], decidesEverywhere: boolean, departmentId: string | null): boolean {
   if (decidesEverywhere) return true;
   if (!departmentId) return false;
@@ -399,6 +416,10 @@ function ApprovalPane({
   const [confirming, setConfirming] = useState(false);
 
   const toolArguments = Object.entries(approval.toolArguments ?? {});
+  // Truthiness, not `!= null`: `amount_text` is a free-text column and an empty
+  // string is not an amount. Testing for null alone would render a big blank
+  // where the number goes AND put a confirm dialog in front of an approval that
+  // has no number on it at all.
   const hasAmount = !!approval.amount;
   const needsConfirm = hasAmount || approval.actionType === "tool_send";
   const canReject = reason.trim().length > 0;
