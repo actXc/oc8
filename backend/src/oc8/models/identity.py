@@ -209,3 +209,22 @@ class TotpCredential(Base, PkMixin, TenantMixin, TimestampMixin):
     backup_codes: Mapped[list[dict[str, str | None]]] = mapped_column(
         JSONB, nullable=False, default=list
     )
+
+
+class MemberDashboardLayout(Base, PkMixin, TenantMixin, TimestampMixin):
+    """One member's own "My Work" grid arrangement -- widget positions,
+    sizes, and per-widget config. Strictly personal: no sharing, no
+    tenant-wide default, never read by anyone but the member who owns it
+    (enforced entirely by scoping every query to `current_member.id`, the
+    same ownership pattern `notifications.py`'s push subscriptions use --
+    see that module's docstring).
+
+    No `SoftDeleteMixin`: a layout carries no audit/compliance value once
+    replaced, unlike an approval or a TOTP credential.
+    """
+
+    __tablename__ = "member_dashboard_layout"
+
+    member_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, unique=True)
+    widgets: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
+    template_id: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
