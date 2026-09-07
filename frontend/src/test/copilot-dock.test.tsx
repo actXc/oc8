@@ -840,6 +840,53 @@ describe("CopilotDock", () => {
     expect(screen.getByPlaceholderText(/configure or ask oc8/i)).toBeInTheDocument();
   });
 
+  it("keeps tracking a run's activity after the message poll clears the persisted user turn's runId", () => {
+    sessionsMock.mockReturnValue({
+      data: [{ id: "s1", agentId: "assistant-1", title: "", createdAt: "t", lastMessageAt: null }],
+    });
+    messagesMock.mockReturnValue({ data: [] });
+    sendMessageMock.mockImplementation(
+      (text: string, opts?: { onSuccess?: (message: unknown) => void }) =>
+        opts?.onSuccess?.({
+          id: "m1",
+          sessionId: "s1",
+          role: "user",
+          content: text,
+          runId: "run-1",
+          renderedComponents: [],
+          createdAt: "t",
+        }),
+    );
+    renderDock();
+    openDock();
+
+    const textarea = screen.getByPlaceholderText(/configure or ask oc8/i) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "Cost this month?" } });
+    fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+
+    expect(runActivityMock).toHaveBeenLastCalledWith("s1", "run-1");
+
+    // Simulate the 2s poll replacing the cache with the persisted row -- the
+    // backend never sets run_id on the user's own ChatMessage (only on the
+    // assistant's terminal reply), so this is what a real poll looks like.
+    messagesMock.mockReturnValue({
+      data: [
+        {
+          id: "m1",
+          sessionId: "s1",
+          role: "user",
+          content: "Cost this month?",
+          runId: null,
+          renderedComponents: [],
+          createdAt: "t",
+        },
+      ],
+    });
+    fireEvent.change(textarea, { target: { value: "x" } });
+
+    expect(runActivityMock).toHaveBeenLastCalledWith("s1", "run-1");
+  });
+
   it("shows a reconnecting notice while the WS connection is down", () => {
     liveStatusMock.mockReturnValue("disconnected");
     renderDock();

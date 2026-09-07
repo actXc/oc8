@@ -565,6 +565,15 @@ function CopilotChatTab({
     setInput(text);
   }
 
+  // The run-activity strip's own tracking id -- set from the same-response
+  // signal useSendChatMessage's onSuccess receives (the one place the real
+  // run_id actually exists; the user's own persisted ChatMessage row never
+  // gets one, only the assistant's terminal reply does), and reset before
+  // every new send so a prior run's id can't leak into a new one. Deriving
+  // this from `messages` instead (as before) broke the moment the 2s poll
+  // replaced the cache with the persisted, runId-less user row.
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+
   // A message typed before any session exists yet: send() creates the
   // session first, then this fires once `sessionId` (and therefore a
   // `sendMessage` bound to the right session) lands on the next render.
@@ -573,7 +582,10 @@ function CopilotChatTab({
     if (!sessionId || pendingSend === null) return;
     const text = pendingSend;
     setPendingSend(null);
-    sendMessage.mutate(text, { onError: () => fail(text) });
+    sendMessage.mutate(text, {
+      onSuccess: (message) => setActiveRunId(message.runId),
+      onError: () => fail(text),
+    });
     // sendMessage/fail are fresh every render; only sessionId/pendingSend
     // should re-trigger this.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -606,6 +618,7 @@ function CopilotChatTab({
     if (!text || busy || !assistantAgentId) return;
     setSendError(false);
     setInput("");
+    setActiveRunId(null);
     if (!sessionId) {
       createSession.mutate(assistantAgentId, {
         onSuccess: (session) => {
@@ -616,7 +629,10 @@ function CopilotChatTab({
       });
       return;
     }
-    sendMessage.mutate(text, { onError: () => fail(text) });
+    sendMessage.mutate(text, {
+      onSuccess: (message) => setActiveRunId(message.runId),
+      onError: () => fail(text),
+    });
   }
 
   const suggestions = de
@@ -628,10 +644,7 @@ function CopilotChatTab({
 
   return (
     <>
-      <CopilotRunActivity
-        sessionId={sessionId}
-        runId={messages && messages.length > 0 ? messages[messages.length - 1].runId : null}
-      />
+      <CopilotRunActivity sessionId={sessionId} runId={activeRunId} />
       <div ref={scroller} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
         {!hasMessages && (
           <div className="flex gap-2">
