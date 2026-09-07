@@ -1,8 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { ChatWidget } from "./chat-widget";
+import * as governanceHooks from "@/lib/governance-hooks";
+import * as hooksChat from "@/lib/hooks-chat";
 
 vi.mock("@/lib/hooks", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/hooks")>();
@@ -30,7 +32,7 @@ describe("ChatWidget", () => {
     expect(screen.getByPlaceholderText(/configure or ask oc8/i)).toBeInTheDocument();
   });
 
-  it("writes the newly created session id back into config on send", () => {
+  it("does not call onConfigChange merely from mounting with an existing session id", () => {
     const onConfigChange = vi.fn();
     render(<ChatWidget config={{ sessionId: "s1" }} onConfigChange={onConfigChange} />, {
       wrapper,
@@ -39,5 +41,34 @@ describe("ChatWidget", () => {
     // to that session -- onConfigChange fires only when the session CHANGES,
     // not on every render, so it should not have been called yet.
     expect(onConfigChange).not.toHaveBeenCalled();
+  });
+
+  it("writes the newly created session id back into config on send", () => {
+    // No sessionId in config yet -- sending a message has to create a
+    // session first, same as CopilotChatTab's own `send()`.
+    vi.spyOn(hooksChat, "useCreateChatSession").mockReturnValue({
+      mutate: (_agentId: string, options?: { onSuccess?: (session: { id: string }) => void }) =>
+        options?.onSuccess?.({ id: "new-session-1" }),
+      isPending: false,
+    } as never);
+
+    const onConfigChange = vi.fn();
+    render(<ChatWidget config={{}} onConfigChange={onConfigChange} />, { wrapper });
+
+    fireEvent.change(screen.getByPlaceholderText(/configure or ask oc8/i), {
+      target: { value: "hello" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    expect(onConfigChange).toHaveBeenCalledWith({ sessionId: "new-session-1" });
+  });
+
+  it("renders a fallback instead of the composer for a member without copilot:use", () => {
+    vi.spyOn(governanceHooks, "useCan").mockReturnValue(() => false);
+
+    render(<ChatWidget config={{}} onConfigChange={vi.fn()} />, { wrapper });
+
+    expect(screen.queryByPlaceholderText(/configure or ask oc8/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/don't have access to copilot chat/i)).toBeInTheDocument();
   });
 });

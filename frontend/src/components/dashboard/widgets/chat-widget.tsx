@@ -6,11 +6,44 @@ import { useState } from "react";
 import { Plus } from "lucide-react";
 import { CopilotChatTab } from "@/components/copilot-dock";
 import { ChatSessionPicker } from "@/components/chat-window";
+import { useCan } from "@/lib/governance-hooks";
 import { useAssistant } from "@/lib/hooks";
 import { useChatSessions } from "@/lib/hooks-chat";
 import { useT } from "@/lib/i18n";
 
+// Gated the same way `CopilotDock` gates itself (copilot-dock.tsx) and for
+// the same reason: checked BEFORE `useAssistant()`/`useChatSessions()` ever
+// mount, not inside a later `if`, so a member without `copilot:use` never
+// fires a GET /assistant + GET /chat/sessions the backend would 403 anyway.
+// The backend already refuses those for such a member (this is UX, not a
+// security boundary) -- without this gate, the composer below still
+// renders and accepts input, but silently no-ops on send because
+// `assistantAgentId` never resolves. This intentionally does NOT attempt
+// full parity with `CopilotDock` (no proposals surface, no reconnect
+// indicator) -- see the final-review fix brief for that scoping.
 export function ChatWidget({
+  config,
+  onConfigChange,
+}: {
+  config: Record<string, unknown>;
+  onConfigChange: (config: Record<string, unknown>) => void;
+}) {
+  const t = useT();
+  const can = useCan();
+  if (!can("copilot:use")) {
+    return (
+      <div className="flex h-full items-center justify-center p-3 text-center text-xs text-muted-foreground">
+        {t(
+          "You don't have access to Copilot chat.",
+          "Du hast keinen Zugriff auf den Copilot-Chat.",
+        )}
+      </div>
+    );
+  }
+  return <ChatWidgetPanel config={config} onConfigChange={onConfigChange} />;
+}
+
+function ChatWidgetPanel({
   config,
   onConfigChange,
 }: {
