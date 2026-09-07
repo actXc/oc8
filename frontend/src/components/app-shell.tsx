@@ -879,9 +879,7 @@ export function AppShell() {
         and `sonner` does not replay toasts raised before a Toaster mounted. It
         still follows this theme -- root reads the same persisted "bf-theme".
       */}
-      {pathname !== "/workspace" &&
-        <CopilotDock />
-      }
+      {pathname !== "/workspace" && <CopilotDock />}
     </div>
   );
 }

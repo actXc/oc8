@@ -44,8 +44,8 @@ describe("app-shell nav: TP3 restructuring", () => {
   });
 
   it("hides <CopilotDock /> specifically on /workspace", () => {
-    const mountSite = src.slice(src.indexOf("<CopilotDock"));
-    const precedingLine = src.slice(0, src.indexOf("<CopilotDock")).split("\n").at(-2) ?? "";
-    expect(precedingLine + mountSite.slice(0, 40)).toContain('"/workspace"');
+    const idx = src.indexOf("<CopilotDock");
+    const context = src.slice(Math.max(0, idx - 80), idx + 40);
+    expect(context).toContain('"/workspace"');
   });
 });

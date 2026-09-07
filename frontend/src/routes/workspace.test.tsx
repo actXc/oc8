@@ -35,11 +35,17 @@ describe("WorkspacePage", () => {
 
   it("shows the grid once a layout exists", async () => {
     vi.spyOn(hooks, "useDashboardLayout").mockReturnValue({
-      data: { widgets: [{ id: "w1", type: "budget", x: 0, y: 0, w: 3, h: 3, config: {} }], templateId: "focus-chat" },
+      data: {
+        widgets: [{ id: "w1", type: "budget", x: 0, y: 0, w: 3, h: 3, config: {} }],
+        templateId: "focus-chat",
+      },
       isPending: false,
     } as never);
     vi.spyOn(hooks, "useSaveDashboardLayout").mockReturnValue({ mutate: vi.fn() } as never);
-    vi.spyOn(hooks, "useBudgetStatus").mockReturnValue({ data: undefined, isPending: true } as never);
+    vi.spyOn(hooks, "useBudgetStatus").mockReturnValue({
+      data: undefined,
+      isPending: true,
+    } as never);
 
     const { WorkspacePage } = await import("./workspace");
     render(<WorkspacePage />, { wrapper });
