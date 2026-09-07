@@ -19,7 +19,10 @@ describe("BudgetWidget", () => {
     } as never);
 
     render(<BudgetWidget config={{}} onConfigChange={vi.fn()} />);
-    expect(screen.getByText(/2500/)).toBeInTheDocument();
-    expect(screen.getByText(/2000/)).toBeInTheDocument();
+    // Use locale-formatted strings to tolerate different locale settings
+    const expectedCurrent = (2500).toLocaleString();
+    const expectedLimit = (2000).toLocaleString();
+    expect(screen.getByText(new RegExp(expectedCurrent))).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(expectedLimit))).toBeInTheDocument();
   });
 });

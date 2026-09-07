@@ -32,8 +32,8 @@ export function BudgetWidget({
           : t("Department", "Abteilung")}
       </div>
       <div className="font-mono text-sm tabular-nums">
-        {status.currentTokens}
-        {limit ? ` / ${limit}` : ""}
+        {status.currentTokens.toLocaleString()}
+        {limit ? ` / ${limit.toLocaleString()}` : ""}
       </div>
       {limit && (
         <div className="h-2 w-full overflow-hidden rounded-full bg-muted/40">
