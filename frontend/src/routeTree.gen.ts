@@ -30,7 +30,6 @@ import { Route as DepartmentsRouteImport } from './routes/departments'
 import { Route as CredentialsRouteImport } from './routes/credentials'
 import { Route as CostsRouteImport } from './routes/costs'
 import { Route as ConfirmEmailRouteImport } from './routes/confirm-email'
-import { Route as ChatRouteImport } from './routes/chat'
 import { Route as CapasRouteImport } from './routes/capas'
 import { Route as AuditRouteImport } from './routes/audit'
 import { Route as AppStoreRouteImport } from './routes/app-store'
@@ -150,11 +149,6 @@ const ConfirmEmailRoute = ConfirmEmailRouteImport.update({
   path: '/confirm-email',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ChatRoute = ChatRouteImport.update({
-  id: '/chat',
-  path: '/chat',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const CapasRoute = CapasRouteImport.update({
   id: '/capas',
   path: '/capas',
@@ -229,7 +223,6 @@ export interface FileRoutesByFullPath {
   '/app-store': typeof AppStoreRoute
   '/audit': typeof AuditRoute
   '/capas': typeof CapasRoute
-  '/chat': typeof ChatRoute
   '/confirm-email': typeof ConfirmEmailRoute
   '/costs': typeof CostsRoute
   '/credentials': typeof CredentialsRoute
@@ -265,7 +258,6 @@ export interface FileRoutesByTo {
   '/app-store': typeof AppStoreRoute
   '/audit': typeof AuditRoute
   '/capas': typeof CapasRoute
-  '/chat': typeof ChatRoute
   '/confirm-email': typeof ConfirmEmailRoute
   '/costs': typeof CostsRoute
   '/credentials': typeof CredentialsRoute
@@ -301,7 +293,6 @@ export interface FileRoutesById {
   '/app-store': typeof AppStoreRoute
   '/audit': typeof AuditRoute
   '/capas': typeof CapasRoute
-  '/chat': typeof ChatRoute
   '/confirm-email': typeof ConfirmEmailRoute
   '/costs': typeof CostsRoute
   '/credentials': typeof CredentialsRoute
@@ -340,7 +331,6 @@ export interface FileRouteTypes {
     | '/app-store'
     | '/audit'
     | '/capas'
-    | '/chat'
     | '/confirm-email'
     | '/costs'
     | '/credentials'
@@ -376,7 +366,6 @@ export interface FileRouteTypes {
     | '/app-store'
     | '/audit'
     | '/capas'
-    | '/chat'
     | '/confirm-email'
     | '/costs'
     | '/credentials'
@@ -411,7 +400,6 @@ export interface FileRouteTypes {
     | '/app-store'
     | '/audit'
     | '/capas'
-    | '/chat'
     | '/confirm-email'
     | '/costs'
     | '/credentials'
@@ -449,7 +437,6 @@ export interface RootRouteChildren {
   AppStoreRoute: typeof AppStoreRoute
   AuditRoute: typeof AuditRoute
   CapasRoute: typeof CapasRoute
-  ChatRoute: typeof ChatRoute
   ConfirmEmailRoute: typeof ConfirmEmailRoute
   CostsRoute: typeof CostsRoute
   CredentialsRoute: typeof CredentialsRoute
@@ -623,13 +610,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConfirmEmailRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/chat': {
-      id: '/chat'
-      path: '/chat'
-      fullPath: '/chat'
-      preLoaderRoute: typeof ChatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/capas': {
       id: '/capas'
       path: '/capas'
@@ -771,7 +751,6 @@ const rootRouteChildren: RootRouteChildren = {
   AppStoreRoute: AppStoreRoute,
   AuditRoute: AuditRoute,
   CapasRoute: CapasRoute,
-  ChatRoute: ChatRoute,
   ConfirmEmailRoute: ConfirmEmailRoute,
   CostsRoute: CostsRoute,
   CredentialsRoute: CredentialsRoute,
