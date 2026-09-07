@@ -232,8 +232,8 @@ function CopilotDockPanel() {
   const assistantAgentId = assistant?.agentId;
   const { data: sessions } = useChatSessions(assistantAgentId);
 
-  const { data: me } = useAuth();
-  const memberId = me === undefined ? undefined : (me.memberId ?? "anon");
+  const { data: me, isError: authFailed } = useAuth();
+  const memberId = me !== undefined ? (me.memberId ?? "anon") : authFailed ? "anon" : undefined;
 
   const [tabs, setTabs] = useState<CopilotTab[]>([]);
   const [activeUiId, setActiveUiId] = useState<string | null>(null);
@@ -255,6 +255,16 @@ function CopilotDockPanel() {
   // the time `memberId` first does. Using state instead defers visibility to
   // the NEXT render, by which point `tabs` genuinely reflects the load.
   const [loadedMemberId, setLoadedMemberId] = useState<string | undefined>(undefined);
+
+  // Composer draft text, keyed by uiId, lifted out of `CopilotChatTab` so it
+  // survives that tab's instance unmounting and remounting when the dock is
+  // closed and reopened (every `CopilotChatTab` lives inside `{open && ...}`
+  // below, so closing the dock unmounts them all).
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+
+  function setDraft(uiId: string, text: string) {
+    setDrafts((prev) => (prev[uiId] === text ? prev : { ...prev, [uiId]: text }));
+  }
 
   useEffect(() => {
     if (memberId === undefined) return; // /me hasn't resolved yet
@@ -313,6 +323,11 @@ function CopilotDockPanel() {
         setActiveUiId(next[next.length - 1]?.uiId ?? null);
       }
       return next;
+    });
+    setDrafts((prev) => {
+      if (!(uiId in prev)) return prev;
+      const { [uiId]: _removed, ...rest } = prev;
+      return rest;
     });
   }
 
@@ -443,6 +458,8 @@ function CopilotDockPanel() {
               sessionId={tab.sessionId}
               onSessionChange={(sid) => setTabSession(tab.uiId, sid)}
               assistantAgentId={assistantAgentId}
+              draft={drafts[tab.uiId] ?? ""}
+              onDraftChange={(text) => setDraft(tab.uiId, text)}
             />
           ))}
           {tabs.length === 0 && (
@@ -494,15 +511,23 @@ function CopilotChatTab({
   onSessionChange,
   assistantAgentId,
   active,
+  draft,
+  onDraftChange,
 }: {
   sessionId: string | null;
   onSessionChange: (sessionId: string | null) => void;
   assistantAgentId: string | undefined;
   active: boolean;
+  draft: string;
+  onDraftChange: (text: string) => void;
 }) {
   const t = useT();
   const de = t("en", "de") === "de";
-  const [input, setInput] = useState("");
+  const [input, setInputState] = useState(() => draft);
+  function setInput(text: string) {
+    setInputState(text);
+    onDraftChange(text);
+  }
   const scroller = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 

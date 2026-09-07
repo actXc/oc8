@@ -805,4 +805,23 @@ describe("CopilotDock", () => {
 
     expect(JSON.parse(localStorage.getItem("oc8-copilot-tabs-member-1") ?? "[]")).toHaveLength(2);
   });
+
+  it("preserves an unsent draft across closing and reopening the dock", () => {
+    renderDock();
+    openDock();
+    fireEvent.change(screen.getByPlaceholderText(/configure or ask oc8/i), {
+      target: { value: "unsent draft" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /oc8 copilot/i })); // close
+    expect(screen.queryByPlaceholderText(/configure or ask oc8/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /oc8 copilot/i })); // reopen
+    expect(screen.getByPlaceholderText(/configure or ask oc8/i)).toHaveValue("unsent draft");
+  });
+
+  it("falls back to a working composer when useAuth fails outright, instead of staying blocked forever", () => {
+    authMock.mockReturnValue({ data: undefined, isError: true });
+    renderDock();
+    openDock();
+    expect(screen.getByPlaceholderText(/configure or ask oc8/i)).toBeInTheDocument();
+  });
 });
