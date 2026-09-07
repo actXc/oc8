@@ -15,6 +15,7 @@ const {
   proposalsMock,
   applyProposalMock,
   rejectProposalMock,
+  runActivityMock,
 } = vi.hoisted(() => ({
   canMock: vi.fn(() => true),
   assistantMock: vi.fn(),
@@ -28,6 +29,7 @@ const {
   proposalsMock: vi.fn(),
   applyProposalMock: vi.fn(),
   rejectProposalMock: vi.fn(),
+  runActivityMock: vi.fn(),
 }));
 
 vi.mock("@/lib/governance-hooks", async (importOriginal) => {
@@ -59,6 +61,7 @@ vi.mock("@/lib/hooks-chat", () => ({
   useSendChatMessage: () => ({ mutate: sendMessageMock, isPending: false }),
   useRenameChatSession: () => ({ mutate: renameSessionMock, isPending: false }),
   useDeleteChatSession: () => ({ mutate: deleteSessionMock, isPending: false }),
+  useCopilotRunActivity: (sessionId: string | null, runId: string | null) => runActivityMock(sessionId, runId),
 }));
 
 import { CopilotDock } from "@/components/copilot-dock";
@@ -105,6 +108,8 @@ describe("CopilotDock", () => {
     proposalsMock.mockReturnValue({ data: [] });
     applyProposalMock.mockReset();
     rejectProposalMock.mockReset();
+    runActivityMock.mockReset();
+    runActivityMock.mockReturnValue({ data: null });
   });
 
   it("renders nothing for a caller without copilot:use, and never even calls the chat-pipeline hooks", () => {

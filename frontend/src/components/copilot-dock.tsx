@@ -2,6 +2,7 @@ import { ChevronDown, Plus, Send, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ChatMarkdown } from "@/components/chat-markdown";
+import { CopilotRunActivity } from "@/components/copilot-run-activity";
 import { RUN_COMPONENT_REGISTRY } from "@/components/run-record-card";
 import { useT } from "@/lib/i18n";
 import { useCan } from "@/lib/governance-hooks";
@@ -613,6 +614,10 @@ function CopilotChatTab({
 
   return (
     <>
+      <CopilotRunActivity
+        sessionId={sessionId}
+        runId={messages && messages.length > 0 ? messages[messages.length - 1].runId : null}
+      />
       <div ref={scroller} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
         {!hasMessages && (
           <div className="flex gap-2">
