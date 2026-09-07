@@ -18,3 +18,18 @@ class EditionExtension(Protocol):
     def routers(self) -> Sequence[APIRouter]:
         """Return operator API routers contributed by this edition."""
         ...
+
+    def service_routers(self) -> Sequence[APIRouter]:
+        """Return service-to-service API routers contributed by this edition.
+
+        Unlike routers(), these are mounted WITHOUT get_principal/deny_*
+        dependencies -- each router verifies its own service-to-service
+        credential (e.g. a static bearer token), the same way
+        internal_agent_router verifies its own run-scoped agent token.
+
+        Defaults to no routers so existing extensions (e.g.
+        SupervisionExtension) that only contribute operator routers don't
+        need to implement it. `Protocol` subclasses inherit this concrete
+        body through ordinary nominal inheritance.
+        """
+        return ()

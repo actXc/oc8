@@ -49,6 +49,42 @@ class _QueryProbeEdition(EditionExtension):
         return [router]
 
 
+class _ServiceEdition(EditionExtension):
+    def routers(self) -> list[APIRouter]:
+        return []
+
+    def service_routers(self) -> list[APIRouter]:
+        router = APIRouter()
+
+        @router.get("/edition-service-test")
+        async def edition_service_test() -> dict[str, str]:
+            return {"edition": "service"}
+
+        return [router]
+
+
+async def test_service_router_is_mounted_without_any_auth_header() -> None:
+    app = create_app(edition_extensions=[_ServiceEdition()])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/edition-service-test")
+
+    assert response.status_code == 200
+    assert response.json() == {"edition": "service"}
+
+
+async def test_default_extension_contributes_no_service_routers() -> None:
+    """`_DummyEdition` überschreibt service_routers() nie -- der No-Op-Default
+    des Protocols muss über normale nominale Vererbung greifen, statt die
+    Mount-Schleife mit AttributeError abstürzen zu lassen."""
+    app = create_app(edition_extensions=[_DummyEdition()])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/api/v1/edition-test")
+
+    assert response.status_code == 401  # unverändert: routers()-Pfad weiterhin geschützt
+
+
 async def test_default_app_does_not_mount_edition_routes() -> None:
     app = create_app()
 
