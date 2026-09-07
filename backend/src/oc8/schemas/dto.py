@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from pydantic import Field
+
 from oc8.schemas.base import CamelModel
 
 
@@ -1075,3 +1077,24 @@ class RuntimeOptionDTO(CamelModel):
 
 class VapidPublicKeyDTO(CamelModel):
     public_key: str
+
+
+class WidgetInstanceDTO(CamelModel):
+    id: str
+    type: str
+    x: int
+    y: int
+    w: int
+    h: int
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class DashboardLayoutDTO(CamelModel):
+    widgets: list[WidgetInstanceDTO]
+    template_id: str | None = None
+
+
+class DashboardTemplateDTO(CamelModel):
+    id: str
+    name: dict[str, str]
+    widgets: list[WidgetInstanceDTO]

@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import AwareDatetime, ConfigDict, EmailStr, Field, field_validator
 
 from oc8.schemas.base import CamelModel
+from oc8.schemas.dto import WidgetInstanceDTO
 
 
 def _normalized_address(value: str) -> str:
@@ -660,3 +661,8 @@ class PushSubscriptionKeys(CamelModel):
 class PushSubscribeRequest(CamelModel):
     endpoint: str
     keys: PushSubscriptionKeys
+
+
+class PutDashboardLayoutRequest(CamelModel):
+    widgets: list[WidgetInstanceDTO]
+    template_id: str | None = None
