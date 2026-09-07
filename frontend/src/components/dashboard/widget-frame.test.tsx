@@ -12,6 +12,16 @@ vi.mock("@/lib/hooks", async (importOriginal) => {
   return { ...actual, useBudgetStatus: () => ({ data: undefined, isPending: true }) };
 });
 
+// Makes the "activity" slot in the registry throw during render, so the
+// "catches a rendering exception" test below exercises the real error
+// boundary against a real registry lookup -- no other test in this file
+// renders an "activity" widget, so this is scoped to that one test only.
+vi.mock("@/components/dashboard/widgets/activity-widget", () => ({
+  ActivityWidget: () => {
+    throw new Error("boom");
+  },
+}));
+
 describe("WidgetFrame", () => {
   it("renders the registered widget's title and a remove button", () => {
     render(<WidgetFrame instance={makeInstance()} onConfigChange={vi.fn()} onRemove={vi.fn()} />);
@@ -46,9 +56,11 @@ describe("WidgetFrame", () => {
         onRemove={vi.fn()}
       />,
     );
-    // ActivityWidget with the real useActivity (unmocked here) will render
-    // its own loading/empty state rather than throw -- this test's real
-    // purpose is exercised by the boundary catching an injected throw,
-    // covered directly against the boundary component in the next test.
+    // The mocked ActivityWidget above throws during render -- the error
+    // boundary only swallows the widget's own subtree, so the frame's
+    // chrome (label, remove button) stays mounted around the fallback.
+    expect(screen.getByText("Activity")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /remove/i })).toBeInTheDocument();
+    expect(screen.getByText(/could not be displayed/i)).toBeInTheDocument();
   });
 });
