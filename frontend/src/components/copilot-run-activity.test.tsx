@@ -52,6 +52,41 @@ describe("CopilotRunActivity", () => {
     expect(await screen.findByText(/failed/i)).toBeInTheDocument();
   });
 
+  it("shows the run's failure output under the failed-run notice when present", async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      id: "r1",
+      agentId: "a1",
+      state: "failed",
+      phase: null,
+      output: "the department lookup timed out",
+      steps: 1,
+      toolCalls: [],
+      taskId: null,
+      question: null,
+      renderedComponents: [],
+    });
+    render(<CopilotRunActivity sessionId="s1" runId="r1" />, { wrapper });
+    expect(await screen.findByText(/the department lookup timed out/)).toBeInTheDocument();
+  });
+
+  it("shows the run's phase alongside the step count while working", async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      id: "r1",
+      agentId: "a1",
+      state: "running",
+      phase: "calling tools",
+      output: null,
+      steps: 3,
+      toolCalls: [{ name: "department_status" }],
+      taskId: null,
+      question: null,
+      renderedComponents: [],
+    });
+    render(<CopilotRunActivity sessionId="s1" runId="r1" />, { wrapper });
+    expect(await screen.findByText(/calling tools/)).toBeInTheDocument();
+    expect(await screen.findByText(/3/)).toBeInTheDocument();
+  });
+
   it("renders nothing once the run is done", async () => {
     vi.mocked(api.get).mockResolvedValue({
       id: "r1",

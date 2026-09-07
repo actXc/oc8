@@ -28,9 +28,12 @@ export function CopilotRunActivity({
 
   if (run.state === "failed") {
     return (
-      <div className="flex items-center gap-2 border-b border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
-        <TriangleAlert className="h-3.5 w-3.5" />
-        <span>{t("This run failed.", "Dieser Lauf ist fehlgeschlagen.")}</span>
+      <div className="flex flex-col gap-1 border-b border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
+        <div className="flex items-center gap-2">
+          <TriangleAlert className="h-3.5 w-3.5" />
+          <span>{t("This run failed.", "Dieser Lauf ist fehlgeschlagen.")}</span>
+        </div>
+        {run.output && <span className="pl-6 text-destructive/80">{run.output}</span>}
       </div>
     );
   }
@@ -52,7 +55,9 @@ export function CopilotRunActivity({
             ? t(`Working: ${lastCall.name}`, `Arbeitet: ${lastCall.name}`)
             : t("Working...", "Arbeitet ...")}
         </span>
-        <span className="text-muted-foreground">{run.steps}</span>
+        <span className="text-muted-foreground">
+          {run.phase ? `${run.phase} · ${run.steps}` : run.steps}
+        </span>
         {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
       </button>
       {expanded && run.toolCalls.length > 0 && (
