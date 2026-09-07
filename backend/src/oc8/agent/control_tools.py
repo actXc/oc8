@@ -396,7 +396,10 @@ LIST_PENDING_APPROVALS = NeutralTool(
             },
             "department_id": {
                 "type": "string",
-                "description": "Optional: the uuid of one department, as seen in context, to narrow the list to.",
+                "description": (
+                    "Optional: the uuid of one department, as seen in context, "
+                    "to narrow the list to."
+                ),
             },
             "limit": {
                 "type": "integer",
@@ -419,7 +422,10 @@ DEPARTMENT_STATUS = NeutralTool(
         "properties": {
             "department_id": {
                 "type": "string",
-                "description": "Optional: the uuid of one department, as seen in context. Omit to list every visible department.",
+                "description": (
+                    "Optional: the uuid of one department, as seen in context. "
+                    "Omit to list every visible department."
+                ),
             },
             "search": {
                 "type": "string",

@@ -2022,7 +2022,7 @@ async def test_decide_approval_dispatch_is_refused_for_a_non_assistant_agent(
 
 
 @pytest.mark.asyncio
-async def test_status_tools_are_offered_only_to_the_assistant_and_only_with_the_permission() -> None:
+async def test_status_tools_need_assistant_and_the_permission() -> None:
     """Two independent gates, both required: is_tenant_assistant (existing
     precedent, same as decide_approval), and the specific permission in
     copilot_permissions (new to these 5 tools -- unlike decide_approval,
@@ -2054,7 +2054,9 @@ async def test_status_tools_are_offered_only_to_the_assistant_and_only_with_the_
             lead, assigned_skills=[], active_skills=[], mcp_tools=MCP_TOOLS
         )
     ]
-    assert "list_pending_approvals" not in names, "no copilot_permissions given, so nothing is offered"
+    assert "list_pending_approvals" not in names, (
+        "no copilot_permissions given, so nothing is offered"
+    )
 
     names = [
         t.name
