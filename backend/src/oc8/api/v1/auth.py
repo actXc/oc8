@@ -14,13 +14,11 @@ import datetime as dt
 import hashlib
 import secrets
 import uuid
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select, update
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from oc8 import models as m
 from oc8.api.deps import CurrentPrincipal, DbSession, unguarded
@@ -34,7 +32,7 @@ from oc8.authz.permissions import MEMBER_ROLE
 from oc8.authz.scope import scope_for_principal, subject_uuid_for
 from oc8.config import get_settings
 from oc8.constants import ACME_TENANT_ID, DEV_OPERATOR_SUBJECT
-from oc8.db.session import tenant_session
+from oc8.db.session import owner_session, tenant_session
 from oc8.mail.send import active_smtp_credential, deliver, resolve_smtp_config
 from oc8.schemas.base import CamelModel
 from oc8.schemas.dto import AuthConfig, MeDTO, MemberDTO
@@ -116,18 +114,6 @@ def _dev_only() -> None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
 
-@asynccontextmanager
-async def _owner_session() -> AsyncIterator[AsyncSession]:
-    """Dev tooling still writes as schema owner; the app role never gets this power."""
-    engine = create_async_engine(get_settings().migration_async_url)
-    sessions = async_sessionmaker(engine, expire_on_commit=False)
-    try:
-        async with sessions() as db:
-            yield db
-    finally:
-        await engine.dispose()
-
-
 @router.post(
     "/auth/dev-login",
     response_model=TokenResponse,
@@ -150,7 +136,7 @@ async def dev_login(body: DevLoginRequest) -> TokenResponse:
 )
 async def dev_tenants() -> list[DevTenantDTO]:
     _dev_only()
-    async with _owner_session() as db:
+    async with owner_session() as db:
         return [
             DevTenantDTO(id=row.tenant_id, name=row.name, slug=row.slug, region=row.region)
             for row in await list_tenants(db)
@@ -185,7 +171,7 @@ async def dev_members(tenant_id: uuid.UUID = ACME_TENANT_ID) -> list[MemberDTO]:
     the quick-access buttons that test the built-in ladder without a seat.
     """
     _dev_only()
-    async with _owner_session() as db:
+    async with owner_session() as db:
         rows, _total = await list_members(db, tenant_id=tenant_id)
         return [member_to_dto(r) for r in rows]
 
@@ -205,7 +191,7 @@ async def create_dev_tenant(body: DevTenantRequest) -> DevTenantDTO:
     """
     _dev_only()
     try:
-        async with _owner_session() as db:
+        async with owner_session() as db:
             created = await create_tenant(
                 db, slug=body.slug, name=body.name, region=body.region, department_name="Sales"
             )
@@ -911,7 +897,7 @@ async def _bootstrap_community_organization_if_empty() -> None:
     roles, department, templates, and audit event.  Existing roots still go
     through the normal fail-closed singleton validation in ``password_setup``.
     """
-    async with _owner_session() as db:
+    async with owner_session() as db:
         existing = (await db.execute(select(m.Organization.id).limit(2))).scalars().all()
         if existing:
             return

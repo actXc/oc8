@@ -20,8 +20,9 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from oc8.config import get_settings
 from oc8.db.engine import get_sessionmaker
 
 
@@ -41,3 +42,23 @@ async def tenant_session(tenant_id: uuid.UUID | None) -> AsyncIterator[AsyncSess
         except Exception:
             await session.rollback()
             raise
+
+
+@asynccontextmanager
+async def owner_session() -> AsyncIterator[AsyncSession]:
+    """Schema-owner session: bypasst RLS, für Cross-Tenant-Operationen wie
+    Tenant-Erstellung, die die RLS-Policies der App-Rolle verbieten (Migrationen
+    0013/0015 beschränken `organization` INSERT auf `id =
+    current_setting('app.tenant_id')`, was kein owner-session-Aufrufer setzt)."""
+    engine = create_async_engine(get_settings().migration_async_url)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with sessions() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+    finally:
+        await engine.dispose()

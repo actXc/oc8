@@ -13,17 +13,14 @@ from __future__ import annotations
 import csv
 import sys
 import uuid
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from oc8 import models as m
 from oc8.audit import append_event
 from oc8.authz.permissions import SEAT_PERMISSIONS
-from oc8.config import get_settings
-from oc8.db.session import tenant_session
+from oc8.db.session import owner_session, tenant_session
 from oc8.roles.service import (
     RoleRefused,
     assign_role,
@@ -48,24 +45,12 @@ EXIT_OK = 0
 EXIT_BAD_INPUT = 2
 
 
-@asynccontextmanager
-async def _owner_session() -> AsyncIterator[AsyncSession]:
-    """Schema-owner session. The app role cannot insert an organization row."""
-    engine = create_async_engine(get_settings().migration_async_url)
-    sm = async_sessionmaker(engine, expire_on_commit=False)
-    try:
-        async with sm() as session:
-            yield session
-    finally:
-        await engine.dispose()
-
-
 def _err(message: str) -> None:
     print(message, file=sys.stderr)
 
 
 async def cmd_list() -> int:
-    async with _owner_session() as db:
+    async with owner_session() as db:
         rows = await list_tenants(db)
     for r in rows:
         print(f"{r.slug:<24} {r.tenant_id}  {r.name}  ({r.tier}/{r.region})")
@@ -74,14 +59,14 @@ async def cmd_list() -> int:
 
 # ------------------------------------------------------------------ people/seats
 #
-# These run through `tenant_session`, not `_owner_session`: RLS then applies as
+# These run through `tenant_session`, not `owner_session`: RLS then applies as
 # it does to the API, so a slug typo cannot reach into another tenant's rows. The
 # session commits once, at the end of the context -- a commit in the middle would
 # unbind `app.tenant_id` and every statement after it would silently see nothing.
 
 
 async def _tenant_id_for(slug: str) -> uuid.UUID | None:
-    async with _owner_session() as db:
+    async with owner_session() as db:
         org = (
             await db.execute(select(m.Organization).where(m.Organization.slug == slug))
         ).scalar_one_or_none()
