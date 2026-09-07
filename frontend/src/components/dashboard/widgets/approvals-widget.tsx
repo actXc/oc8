@@ -1,0 +1,738 @@
+import { useMemo, useState } from "react";
+import { toast } from "sonner";
+import {
+  AlertTriangle,
+  ArrowRight,
+  Check,
+  ChevronRight,
+  HelpCircle,
+  Send,
+  ShieldCheck,
+  Sparkles,
+  XCircle,
+} from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  useAnswerClarification,
+  useApprovals,
+  useClarifications,
+  useDecideApproval,
+  useStanding,
+  type Approval,
+  type Clarification,
+  type Seat,
+} from "@/lib/hooks";
+import { useT } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
+
+// --------------------------------------------------------------------- model
+// Verbatim from the old workspace.tsx (routes/workspace.tsx, pre-rewrite
+// lines 73-177): Kind, Row, DecidedRow, TENANT_WIDE, approvalRow,
+// clarificationRow, relativeAge, avatarColor, mayActOn, ViewOnlyBecause.
+
+type Kind = "approval" | "clarification";
+
+interface Row {
+  kind: Kind;
+  id: string;
+  title: string;
+  agentId: string;
+  agentName: string;
+  departmentId: string | null;
+  departmentName: string;
+  amount: string | null;
+  createdAt: string;
+}
+
+interface DecidedRow {
+  id: string;
+  kind: Kind;
+  title: string;
+  outcome: "approved" | "rejected" | "answered";
+}
+
+const TENANT_WIDE = "__tenant_wide__";
+
+function approvalRow(a: Approval): Row {
+  return {
+    kind: "approval",
+    id: a.id,
+    title: a.title,
+    agentId: a.agentId,
+    agentName: a.agentName || a.agentId,
+    departmentId: a.departmentId ?? null,
+    departmentName: a.departmentName ?? "",
+    amount: a.amount ?? null,
+    createdAt: a.createdAt ?? "",
+  };
+}
+
+function clarificationRow(c: Clarification): Row {
+  return {
+    kind: "clarification",
+    id: c.id,
+    title: c.question,
+    agentId: c.agentId,
+    agentName: c.agentName || c.agentId,
+    departmentId: c.departmentId,
+    departmentName: c.departmentName,
+    amount: null,
+    createdAt: c.createdAt,
+  };
+}
+
+function relativeAge(iso: string): string {
+  if (!iso) return "";
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "";
+  const mins = Math.max(0, Math.round((Date.now() - then) / 60000));
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h`;
+  return `${Math.round(hrs / 24)}d`;
+}
+
+function avatarColor(agentId: string): string {
+  let h = 0;
+  for (let i = 0; i < agentId.length; i++) h = (h * 31 + agentId.charCodeAt(i)) % 360;
+  return `oklch(0.78 0.12 ${h})`;
+}
+
+function mayActOn(seats: Seat[], decidesEverywhere: boolean, departmentId: string | null): boolean {
+  if (decidesEverywhere) return true;
+  if (!departmentId) return false;
+  return seats.some((s) => s.departmentId === departmentId && s.seatRole === "dept_approver");
+}
+
+type ViewOnlyBecause = "role" | "seat";
+
+// ---------------------------------------------------------------- the widget
+
+export function ApprovalsWidget({
+  initialSelectedId,
+}: {
+  config: Record<string, unknown>;
+  onConfigChange: (config: Record<string, unknown>) => void;
+  initialSelectedId?: string;
+}) {
+  const t = useT();
+  const standing = useStanding();
+
+  const approvalsQuery = useApprovals("pending");
+  const clarificationsQuery = useClarifications();
+  const approvals = useMemo(() => approvalsQuery.data ?? [], [approvalsQuery.data]);
+  const clarifications = useMemo(() => clarificationsQuery.data ?? [], [clarificationsQuery.data]);
+
+  const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? null);
+  const [decided, setDecided] = useState<DecidedRow[]>([]);
+
+  const decide = useDecideApproval();
+  const answer = useAnswerClarification();
+
+  const decidedIds = useMemo(() => new Set(decided.map((d) => d.id)), [decided]);
+
+  const rows = useMemo(() => {
+    const all = [...approvals.map(approvalRow), ...clarifications.map(clarificationRow)].filter(
+      (r) => !decidedIds.has(r.id),
+    );
+    return all.sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+  }, [approvals, clarifications, decidedIds]);
+
+  const current = rows.find((r) => r.id === selectedId) ?? null;
+  const currentApproval =
+    current?.kind === "approval" ? (approvals.find((a) => a.id === current.id) ?? null) : null;
+  const currentClarification =
+    current?.kind === "clarification"
+      ? (clarifications.find((c) => c.id === current.id) ?? null)
+      : null;
+
+  const viewOnlyBecause: ViewOnlyBecause =
+    standing.unrestricted && !standing.decidesEverywhere ? "role" : "seat";
+
+  const loadError = approvalsQuery.error ?? clarificationsQuery.error;
+  const loading = approvalsQuery.isPending || clarificationsQuery.isPending || standing.pending;
+
+  async function onDecide(
+    a: Approval,
+    decision: "approve" | "reject",
+    reason: string,
+    option: string | null,
+  ) {
+    try {
+      const result = await decide.mutateAsync({ approvalId: a.id, decision, reason, option });
+      if (result?.resumed === false) {
+        toast.warning(
+          decision === "approve"
+            ? t(
+                "Recorded — but the agent's run could not be resumed, so the action never ran",
+                "Erfasst — aber der Lauf des Agenten konnte nicht fortgesetzt werden, die Aktion wurde also nie ausgeführt",
+              )
+            : t(
+                "Recorded — the run was already gone, so there was nothing to stop",
+                "Erfasst — der Lauf war bereits beendet, es gab also nichts mehr zu stoppen",
+              ),
+        );
+      } else {
+        toast.success(
+          decision === "approve" ? t("Approved", "Zugestimmt") : t("Rejected", "Abgelehnt"),
+        );
+      }
+      setDecided((prev) => [
+        {
+          id: a.id,
+          kind: "approval",
+          title: a.title,
+          outcome: decision === "approve" ? "approved" : "rejected",
+        },
+        ...prev,
+      ]);
+      setSelectedId(null);
+    } catch (e) {
+      toast.error(
+        e instanceof Error
+          ? e.message
+          : t("Could not record the decision", "Entscheidung konnte nicht erfasst werden"),
+      );
+    }
+  }
+
+  async function onAnswer(c: Clarification, text: string) {
+    try {
+      await answer.mutateAsync({ clarificationId: c.id, answer: text });
+      toast.success(t("Answer sent", "Antwort gesendet"));
+      setDecided((prev) => [
+        { id: c.id, kind: "clarification", title: c.question, outcome: "answered" },
+        ...prev,
+      ]);
+      setSelectedId(null);
+    } catch (e) {
+      toast.error(
+        e instanceof Error
+          ? e.message
+          : t("Could not send the answer", "Antwort konnte nicht gesendet werden"),
+      );
+    }
+  }
+
+  return (
+    <div className="flex h-full flex-col overflow-hidden">
+      {loadError && (
+        <div className="flex items-start gap-2 border-b border-[color:var(--status-error)]/40 px-3 py-2 text-xs">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--status-error)]" />
+          <span>
+            {t("Your queue could not be loaded", "Deine Liste konnte nicht geladen werden")}
+          </span>
+        </div>
+      )}
+      <div className="flex-1 divide-y divide-border overflow-y-auto">
+        {rows.length === 0 && !loadError && (
+          <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
+            <Sparkles className="h-5 w-5 text-primary" />
+            <div className="text-sm">
+              {loading
+                ? t("Loading…", "Wird geladen…")
+                : t("Nothing is waiting for you.", "Nichts wartet auf dich.")}
+            </div>
+          </div>
+        )}
+        {rows.map((r) => (
+          <QueueRow
+            key={r.id}
+            row={r}
+            active={r.id === selectedId}
+            showDepartment
+            onOpen={() => setSelectedId(r.id)}
+          />
+        ))}
+      </div>
+
+      <Dialog open={current !== null} onOpenChange={(open) => !open && setSelectedId(null)}>
+        <DialogContent className="max-w-2xl p-0">
+          <DialogHeader className="sr-only">
+            <DialogTitle>
+              {currentApproval?.title ?? currentClarification?.question ?? ""}
+            </DialogTitle>
+          </DialogHeader>
+          {currentApproval ? (
+            <ApprovalPane
+              key={currentApproval.id}
+              approval={currentApproval}
+              mayAct={mayActOn(
+                standing.seats,
+                standing.decidesEverywhere,
+                currentApproval.departmentId ?? null,
+              )}
+              viewOnlyBecause={viewOnlyBecause}
+              busy={decide.isPending}
+              onDecide={onDecide}
+            />
+          ) : currentClarification ? (
+            <ClarificationPane
+              key={currentClarification.id}
+              clarification={currentClarification}
+              mayAct={mayActOn(
+                standing.seats,
+                standing.decidesEverywhere,
+                currentClarification.departmentId,
+              )}
+              viewOnlyBecause={viewOnlyBecause}
+              busy={answer.isPending}
+              onAnswer={onAnswer}
+            />
+          ) : null}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ the list
+// QueueRow, ApprovalPane, ArgumentValue, ClarificationPane are verbatim from
+// the old workspace.tsx (pre-rewrite lines 565-1019), with one change: each
+// pane's outer wrapper keeps `flex h-full flex-col` so it fills the Dialog
+// exactly as it filled the old inline Panel.
+
+function QueueRow({
+  row,
+  active,
+  showDepartment,
+  onOpen,
+}: {
+  row: Row;
+  active: boolean;
+  showDepartment: boolean;
+  onOpen: () => void;
+}) {
+  const t = useT();
+  const age = relativeAge(row.createdAt);
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className={cn(
+        "flex w-full items-start gap-3 px-4 py-3 text-left transition",
+        active ? "bg-primary/5" : "hover:bg-muted/30",
+      )}
+    >
+      <span
+        className="grid h-9 w-9 shrink-0 place-items-center rounded-md font-serif text-sm text-black"
+        style={{ background: avatarColor(row.agentId) }}
+        aria-hidden
+      >
+        {row.agentName.slice(0, 1).toUpperCase()}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2">
+          {row.kind === "clarification" ? (
+            <HelpCircle className="h-3.5 w-3.5 shrink-0 text-primary" />
+          ) : (
+            <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-[color:var(--status-warning)]" />
+          )}
+          <span className="truncate text-sm font-medium">{row.title}</span>
+          {row.amount && (
+            <span className="shrink-0 rounded-full border border-border bg-background/60 px-1.5 py-0.5 font-mono text-[10px] tabular-nums">
+              {row.amount}
+            </span>
+          )}
+        </span>
+        <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+          <span className="truncate">{row.agentName}</span>
+          {showDepartment && (
+            <>
+              <span>·</span>
+              <span className="truncate">
+                {row.departmentId
+                  ? row.departmentName || t("Unnamed department", "Unbenannte Abteilung")
+                  : t("Company-wide", "Unternehmensweit")}
+              </span>
+            </>
+          )}
+          {age && (
+            <>
+              <span>·</span>
+              <span>{age}</span>
+            </>
+          )}
+        </span>
+      </span>
+      <ChevronRight
+        className={cn("mt-1 h-4 w-4 shrink-0", active ? "text-primary" : "text-muted-foreground")}
+      />
+    </button>
+  );
+}
+
+function ApprovalPane({
+  approval,
+  mayAct,
+  viewOnlyBecause,
+  busy,
+  onDecide,
+}: {
+  approval: Approval;
+  mayAct: boolean;
+  viewOnlyBecause: ViewOnlyBecause;
+  busy: boolean;
+  onDecide: (
+    a: Approval,
+    decision: "approve" | "reject",
+    reason: string,
+    option: string | null,
+  ) => void;
+}) {
+  const t = useT();
+  const options = approval.options ?? [];
+  const [choice, setChoice] = useState<string | null>(
+    approval.recommendation ?? (options.length === 1 ? options[0].key : null),
+  );
+  const [reason, setReason] = useState("");
+  const [confirming, setConfirming] = useState(false);
+
+  const toolArguments = Object.entries(approval.toolArguments ?? {});
+  const hasAmount = !!approval.amount;
+  const needsConfirm = hasAmount || approval.actionType === "tool_send";
+  const canReject = reason.trim().length > 0;
+
+  const approve = () => onDecide(approval, "approve", reason, choice);
+
+  return (
+    <div className="flex h-full max-h-[80vh] flex-col">
+      <div className="flex-1 space-y-6 overflow-y-auto px-6 py-5">
+        <section>
+          <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+            <span
+              className="grid h-5 w-5 place-items-center rounded font-serif text-[10px] text-black"
+              style={{ background: avatarColor(approval.agentId) }}
+              aria-hidden
+            >
+              {(approval.agentName || "?").slice(0, 1).toUpperCase()}
+            </span>
+            <span className="font-medium text-foreground">
+              {approval.agentName || approval.agentId}
+            </span>
+            {approval.departmentName && (
+              <>
+                <ArrowRight className="h-3 w-3" />
+                <span>{approval.departmentName}</span>
+              </>
+            )}
+            {approval.taskTitle && (
+              <>
+                <ArrowRight className="h-3 w-3" />
+                <span className="truncate">{approval.taskTitle}</span>
+              </>
+            )}
+          </div>
+          <h2 className="mt-2 font-serif text-2xl leading-tight">{approval.title}</h2>
+          {approval.detail && (
+            <p className="mt-2 text-sm leading-relaxed text-foreground/90">{approval.detail}</p>
+          )}
+        </section>
+
+        {(approval.toolName || options.length > 0) && (
+          <section>
+            <div className="mb-2 text-[10px] uppercase tracking-widest text-muted-foreground">
+              {t("What happens if you agree", "Was passiert, wenn du zustimmst")}
+            </div>
+
+            {approval.toolName && (
+              <div className="rounded-md border border-border bg-panel/60">
+                <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+                  <Send className="h-3.5 w-3.5 shrink-0 text-primary" />
+                  <code className="truncate font-mono text-sm">{approval.toolName}</code>
+                </div>
+                {toolArguments.length > 0 ? (
+                  <dl className="divide-y divide-border/60">
+                    {toolArguments.map(([k, v]) => (
+                      <div
+                        key={k}
+                        className="grid grid-cols-1 gap-0.5 px-3 py-2 sm:grid-cols-[minmax(0,10rem)_1fr] sm:gap-3"
+                      >
+                        <dt className="text-[10px] uppercase tracking-widest text-muted-foreground sm:pt-0.5">
+                          {k}
+                        </dt>
+                        <dd className="min-w-0 font-mono text-xs">
+                          <ArgumentValue value={v} />
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                ) : (
+                  <div className="px-3 py-2 text-xs text-muted-foreground">
+                    {t("Called with no arguments.", "Wird ohne Argumente aufgerufen.")}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {options.length > 0 && (
+              <div className={cn("space-y-2", approval.toolName && "mt-3")}>
+                {options.map((o) => {
+                  const active = o.key === choice;
+                  return (
+                    <button
+                      key={o.key}
+                      type="button"
+                      onClick={() => setChoice(o.key)}
+                      className={cn(
+                        "flex w-full items-start gap-3 rounded-md border px-3 py-2.5 text-left transition",
+                        active
+                          ? "border-primary/60 bg-primary/5"
+                          : "border-border hover:bg-muted/30",
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "mt-1 h-3 w-3 shrink-0 rounded-full border",
+                          active ? "border-primary bg-primary" : "border-muted-foreground/50",
+                        )}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-2 text-sm font-medium">
+                          {o.label}
+                          {o.key === approval.recommendation && (
+                            <span className="rounded-full border border-border px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
+                              {t("agent's suggestion", "Vorschlag des Agenten")}
+                            </span>
+                          )}
+                        </span>
+                        {o.detail && (
+                          <span className="mt-0.5 block text-xs text-muted-foreground">
+                            {o.detail}
+                          </span>
+                        )}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        )}
+
+        {hasAmount && (
+          <section>
+            <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
+              {t("Amount", "Betrag")}
+            </div>
+            <div className="mt-1 font-mono text-3xl tabular-nums">{approval.amount}</div>
+          </section>
+        )}
+
+        {mayAct && (
+          <section>
+            <label
+              htmlFor="dashboard-approval-reason"
+              className="mb-2 block text-[10px] uppercase tracking-widest text-muted-foreground"
+            >
+              {t("Reason", "Begründung")}
+              <span className="ml-1 normal-case tracking-normal text-muted-foreground/80">
+                {t("— required to reject", "— zum Ablehnen erforderlich")}
+              </span>
+            </label>
+            <textarea
+              id="dashboard-approval-reason"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              rows={3}
+              placeholder={t(
+                "e.g. discount too high for this customer",
+                "z. B. Rabatt für diesen Kunden zu hoch",
+              )}
+              className="w-full resize-none rounded-md border border-border bg-background/40 px-3 py-2 text-sm outline-none focus:border-primary/50"
+            />
+          </section>
+        )}
+      </div>
+
+      <footer className="sticky bottom-0 flex flex-wrap items-center gap-2 border-t border-border bg-panel px-6 py-3">
+        {!mayAct ? (
+          <p className="text-xs text-muted-foreground">
+            {viewOnlyBecause === "role"
+              ? t(
+                  "You can read every department, but decide in none — your role is read-only.",
+                  "Du kannst alle Abteilungen einsehen, aber in keiner entscheiden — deine Rolle ist nur lesend.",
+                )
+              : t(
+                  "You can read this one, but not decide it — your seat in this department is view-only.",
+                  "Du kannst diesen Vorgang einsehen, aber nicht entscheiden — dein Platz in dieser Abteilung ist nur lesend.",
+                )}
+          </p>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => onDecide(approval, "reject", reason, null)}
+              disabled={busy || !canReject}
+              title={
+                canReject
+                  ? undefined
+                  : t(
+                      "Give a reason first — a rejection with none is a dead end for the agent that has to act on it",
+                      "Bitte zuerst begründen — eine Ablehnung ohne Begründung ist eine Sackgasse für den Agenten, der damit weiterarbeiten muss",
+                    )
+              }
+              className="inline-flex items-center gap-1.5 rounded-md border border-[color:var(--status-error)]/40 bg-[color:var(--status-error)]/10 px-3 py-2 text-sm text-[color:var(--status-error)] transition hover:brightness-110 disabled:opacity-40"
+            >
+              <XCircle className="h-4 w-4" /> {t("Reject", "Ablehnen")}
+            </button>
+            <button
+              type="button"
+              onClick={() => (needsConfirm ? setConfirming(true) : approve())}
+              disabled={busy}
+              className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:brightness-110 glow-teal disabled:opacity-50"
+            >
+              <Check className="h-4 w-4" /> {t("Approve", "Zustimmen")}
+            </button>
+          </>
+        )}
+      </footer>
+
+      <AlertDialog open={confirming} onOpenChange={setConfirming}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("Approve this?", "Wirklich zustimmen?")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {hasAmount
+                ? t(
+                    `Approving releases ${approval.amount}. The agent carries on immediately and this cannot be taken back.`,
+                    `Mit der Zustimmung werden ${approval.amount} freigegeben. Der Agent macht sofort weiter, und das lässt sich nicht zurücknehmen.`,
+                  )
+                : t(
+                    `Approving lets the agent run ${approval.toolName ?? "this action"} now. It sends something outward and cannot be taken back.`,
+                    `Mit der Zustimmung führt der Agent ${approval.toolName ?? "diese Aktion"} sofort aus. Dabei geht etwas nach außen, und das lässt sich nicht zurücknehmen.`,
+                  )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("Cancel", "Abbrechen")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirming(false);
+                approve();
+              }}
+            >
+              {t("Yes, approve", "Ja, zustimmen")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+function ArgumentValue({ value }: { value: unknown }) {
+  if (value === null || value === undefined)
+    return <span className="text-muted-foreground">—</span>;
+  if (typeof value === "object") {
+    return (
+      <pre className="overflow-x-auto whitespace-pre-wrap break-words text-xs leading-relaxed">
+        {JSON.stringify(value, null, 2)}
+      </pre>
+    );
+  }
+  return <span className="break-words">{String(value)}</span>;
+}
+
+function ClarificationPane({
+  clarification,
+  mayAct,
+  viewOnlyBecause,
+  busy,
+  onAnswer,
+}: {
+  clarification: Clarification;
+  mayAct: boolean;
+  viewOnlyBecause: ViewOnlyBecause;
+  busy: boolean;
+  onAnswer: (c: Clarification, answer: string) => void;
+}) {
+  const t = useT();
+  const [text, setText] = useState("");
+  const canSend = text.trim().length > 0;
+
+  return (
+    <div className="flex h-full max-h-[80vh] flex-col">
+      <div className="flex-1 space-y-6 overflow-y-auto px-6 py-5">
+        <section>
+          <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+            <span
+              className="grid h-5 w-5 place-items-center rounded font-serif text-[10px] text-black"
+              style={{ background: avatarColor(clarification.agentId) }}
+              aria-hidden
+            >
+              {(clarification.agentName || "?").slice(0, 1).toUpperCase()}
+            </span>
+            <span className="font-medium text-foreground">
+              {clarification.agentName || clarification.agentId}
+            </span>
+            {clarification.departmentName && (
+              <>
+                <ArrowRight className="h-3 w-3" />
+                <span>{clarification.departmentName}</span>
+              </>
+            )}
+          </div>
+          <div className="mt-2 text-[10px] uppercase tracking-widest text-muted-foreground">
+            {t("Waiting on your answer", "Wartet auf deine Antwort")}
+          </div>
+          <p className="mt-1 text-sm text-foreground/90">{clarification.question}</p>
+        </section>
+
+        {mayAct && (
+          <section>
+            <label
+              htmlFor="dashboard-clarification-answer"
+              className="mb-2 block text-[10px] uppercase tracking-widest text-muted-foreground"
+            >
+              {t("Your answer", "Deine Antwort")}
+            </label>
+            <textarea
+              id="dashboard-clarification-answer"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              rows={4}
+              placeholder={t("Answer in your own words", "Antworte in eigenen Worten")}
+              className="w-full resize-none rounded-md border border-border bg-background/40 px-3 py-2 text-sm outline-none focus:border-primary/50"
+            />
+          </section>
+        )}
+      </div>
+
+      <footer className="sticky bottom-0 flex items-center justify-end gap-2 border-t border-border bg-panel px-6 py-3">
+        {!mayAct ? (
+          <p className="mr-auto text-xs text-muted-foreground">
+            {viewOnlyBecause === "role"
+              ? t(
+                  "You can read every department's questions, but answer none — your role is read-only.",
+                  "Du kannst die Fragen aller Abteilungen lesen, aber keine beantworten — deine Rolle ist nur lesend.",
+                )
+              : t(
+                  "You can read this question, but not answer it — your seat in this department is view-only.",
+                  "Du kannst diese Frage lesen, aber nicht beantworten — dein Platz in dieser Abteilung ist nur lesend.",
+                )}
+          </p>
+        ) : (
+          <button
+            type="button"
+            onClick={() => onAnswer(clarification, text)}
+            disabled={busy || !canSend}
+            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:brightness-110 glow-teal disabled:opacity-40"
+          >
+            <Check className="h-4 w-4" /> {t("Answer", "Antworten")}
+          </button>
+        )}
+      </footer>
+    </div>
+  );
+}
