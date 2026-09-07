@@ -2462,3 +2462,51 @@ export function useTenantKpis(params?: TenantKPIFilterParams) {
     },
   });
 }
+
+// ---- Widget-based "My Work" dashboard (§ My Work Widget Dashboard plan) ----
+
+export type WidgetType = "chat" | "approvals" | "reports" | "budget" | "activity";
+
+export interface WidgetInstance {
+  id: string;
+  type: WidgetType;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  config: Record<string, unknown>;
+}
+
+export interface DashboardLayoutDTO {
+  widgets: WidgetInstance[];
+  templateId: string | null;
+}
+
+export interface DashboardTemplateDTO {
+  id: string;
+  name: { en: string; de: string };
+  widgets: WidgetInstance[];
+}
+
+export function useDashboardLayout() {
+  return useQuery({
+    queryKey: ["dashboard", "layout"],
+    queryFn: () => api.get<DashboardLayoutDTO | null>("/dashboard/layout"),
+  });
+}
+
+export function useSaveDashboardLayout() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: DashboardLayoutDTO) =>
+      api.put<DashboardLayoutDTO>("/dashboard/layout", body),
+    onSuccess: (data) => qc.setQueryData(["dashboard", "layout"], data),
+  });
+}
+
+export function useDashboardTemplates() {
+  return useQuery({
+    queryKey: ["dashboard", "templates"],
+    queryFn: () => api.get<DashboardTemplateDTO[]>("/dashboard/templates"),
+  });
+}
