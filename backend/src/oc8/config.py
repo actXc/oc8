@@ -169,6 +169,13 @@ class Settings(BaseSettings):
     sandbox_provisioner_url: str = "http://runtime-provisioner:8090"
     sandbox_provisioner_token: str = ""
 
+    # Shared secret, das die eigenen service-to-service Tenant-Provisioning-
+    # Route(n) dieser Instanz in `Authorization: Bearer <token>` erwarten.
+    # Wird von oc8-enterprises admin/tenants-Router befüllt (Community definiert
+    # das Feld, damit jede Edition dieselbe Settings-Klasse teilt); leer bedeutet,
+    # dass die Route unerreichbar ist (require_service_token liefert immer 401).
+    tenant_provisioning_token: str = ""
+
     sandbox_user: str = ""
     """``uid:gid`` for sandbox containers, empty to keep the image's user.
 

@@ -9,6 +9,15 @@ def test_sandbox_user_empty_is_valid() -> None:
     assert Settings(sandbox_user="").sandbox_user == ""
 
 
+def test_tenant_provisioning_token_defaults_empty() -> None:
+    assert Settings(tenant_provisioning_token="").tenant_provisioning_token == ""
+
+
+def test_tenant_provisioning_token_reads_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OC8_TENANT_PROVISIONING_TOKEN", "shared-secret")
+    assert Settings().tenant_provisioning_token == "shared-secret"
+
+
 @pytest.mark.parametrize("value", ["1000", "1000:1000", "0:0"])
 def test_sandbox_user_accepts_uid_or_uid_colon_gid(value: str) -> None:
     assert Settings(sandbox_user=value).sandbox_user == value
