@@ -1,6 +1,7 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { ToolGuardrailTable } from "@/components/tool-guardrail-table";
+import { ToolGuardrailTable, describeGuardrailSaveError } from "@/components/tool-guardrail-table";
+import { ApiError } from "@/lib/api";
 
 vi.mock("@/lib/hooks", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/hooks")>();
@@ -174,5 +175,72 @@ describe("ToolGuardrailTable", () => {
     fireEvent.click(screen.getByRole("button", { name: /abbrechen|cancel/i }));
     expect(screen.queryByRole("button", { name: /speichern|save/i })).toBeNull();
     expect(screen.getAllByRole("button", { name: /bearbeiten|edit/i })).toHaveLength(2);
+  });
+
+  it("keeps the row expanded when onSave resolves false, instead of discarding the edit", async () => {
+    const onSave = vi.fn().mockResolvedValue(false);
+    render(
+      <ToolGuardrailTable
+        level="agent"
+        rows={[
+          {
+            toolKey: "github",
+            connection: undefined,
+            ceilingPolicy: BLANK,
+            ownValue: BLANK,
+            status: "inherited",
+          },
+        ]}
+        addableNames={[]}
+        connections={[]}
+        onSave={onSave}
+        onAdd={vi.fn()}
+        saving={false}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /bearbeiten|edit/i }));
+    fireEvent.click(screen.getByRole("button", { name: /speichern|save/i }));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    // A rejected save (e.g. the department's own ceiling doesn't allow the
+    // edited value) must not also throw away what the operator was editing --
+    // the row stays expanded so they can adjust and retry in place.
+    expect(screen.getByRole("button", { name: /speichern|save/i })).toBeInTheDocument();
+  });
+});
+
+describe("describeGuardrailSaveError", () => {
+  const t = (en: string, de: string) => en; // English fixed for assertions below.
+
+  it("explains a narrowing_exceeds_frame rejection using the department's own reason", () => {
+    const error = new ApiError(
+      JSON.stringify({
+        error: "narrowing_exceeds_frame",
+        violations: [{ tool_key: "github", reason: "'modify' not granted by frame" }],
+      }),
+      422,
+    );
+    expect(describeGuardrailSaveError(error, t)).toBe(
+      "The department doesn't allow this for github: 'modify' not granted by frame",
+    );
+  });
+
+  it("explains a value_spec_not_supported rejection by naming the connection", () => {
+    const error = new ApiError(
+      JSON.stringify({
+        error: "value_spec_not_supported",
+        violations: [{ connection: "github", field: "approval_eur" }],
+      }),
+      422,
+    );
+    expect(describeGuardrailSaveError(error, t)).toBe(
+      "github doesn't support a euro threshold for this tool",
+    );
+  });
+
+  it("falls back to a generic message for a plain-string or unstructured error", () => {
+    expect(describeGuardrailSaveError(new ApiError("agent not found", 404), t)).toBe(
+      "agent not found",
+    );
+    expect(describeGuardrailSaveError(new TypeError("Failed to fetch"), t)).toBe("Failed to fetch");
   });
 });

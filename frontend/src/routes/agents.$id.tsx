@@ -69,7 +69,7 @@ import {
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { CredentialPicker } from "@/components/credential-picker";
 import type { GuardrailValue } from "@/components/guardrail-preset-picker";
-import { ToolGuardrailTable } from "@/components/tool-guardrail-table";
+import { ToolGuardrailTable, describeGuardrailSaveError } from "@/components/tool-guardrail-table";
 import { SUBSCRIPTION_PROVIDER, SubscriptionRiskBadge, supportsRawParams } from "@/routes/models";
 import {
   extraToPairs,
@@ -1274,7 +1274,11 @@ export function AgentGuardrailsPanel({
   // save path instead of needing a second, parallel save function --
   // `undefined` means "leave whatever connection_id this tool already
   // has," `null` means "clear it," a string means "set it to this."
-  function persistOne(key: string, next: GuardrailValue, connectionIdOverride?: string | null) {
+  function persistOne(
+    key: string,
+    next: GuardrailValue,
+    connectionIdOverride?: string | null,
+  ): Promise<boolean> {
     const keys = new Set(allKeys);
     keys.add(key);
     const tools: Record<string, unknown> = {};
@@ -1295,17 +1299,23 @@ export function AgentGuardrailsPanel({
             : (src?.connectionId ?? null),
       };
     }
-    update.mutate(
-      { narrowing: { tools } },
-      {
-        onSuccess: () =>
-          toast.success(t("Guardrails saved", "Guardrails gespeichert"), {
-            description: agent.name,
-          }),
-        onError: () =>
-          toast.error(t("Couldn't save guardrails", "Guardrails konnten nicht gespeichert werden")),
-      },
-    );
+    return new Promise((resolve) => {
+      update.mutate(
+        { narrowing: { tools } },
+        {
+          onSuccess: () => {
+            toast.success(t("Guardrails saved", "Guardrails gespeichert"), {
+              description: agent.name,
+            });
+            resolve(true);
+          },
+          onError: (error) => {
+            toast.error(describeGuardrailSaveError(error, t));
+            resolve(false);
+          },
+        },
+      );
+    });
   }
 
   function addTool(name: string, policy: GuardrailValue | null) {

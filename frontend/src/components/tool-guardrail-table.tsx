@@ -6,6 +6,46 @@ import type { GuardrailValue } from "@/components/guardrail-preset-picker";
 import { ToolGuardrailEditorPanel } from "@/components/tool-guardrail-editor-panel";
 import { AddToolPicker } from "@/components/add-tool-picker";
 
+// `api.ts`'s `ApiError.message` is `JSON.stringify(detail)` whenever the
+// backend's `detail` isn't already a plain string -- both `PUT
+// /departments/{id}/tools` and `PUT /agents/{id}/narrowing` return one of
+// two structured shapes on 422, and a bare "couldn't save" toast leaves the
+// operator unable to tell "the department's own ceiling doesn't allow this"
+// (a normal, expected tightening-rule rejection they can act on) apart from
+// a real bug. Falls back to the raw message for anything else -- including
+// a genuine network failure, which has no JSON to parse in the first place.
+export function describeGuardrailSaveError(
+  error: unknown,
+  t: (en: string, de: string) => string,
+): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  let detail: unknown;
+  try {
+    detail = JSON.parse(raw);
+  } catch {
+    return raw || t("Couldn't save guardrails", "Guardrails konnten nicht gespeichert werden");
+  }
+  if (detail && typeof detail === "object" && "error" in detail) {
+    const kind = (detail as { error: unknown }).error;
+    const violations = (detail as { violations?: unknown }).violations;
+    if (kind === "narrowing_exceeds_frame" && Array.isArray(violations) && violations.length > 0) {
+      const first = violations[0] as { tool_key?: string; reason?: string };
+      return t(
+        `The department doesn't allow this for ${first.tool_key}: ${first.reason}`,
+        `Das Department erlaubt das nicht für ${first.tool_key}: ${first.reason}`,
+      );
+    }
+    if (kind === "value_spec_not_supported" && Array.isArray(violations) && violations.length > 0) {
+      const first = violations[0] as { connection?: string; field?: string };
+      return t(
+        `${first.connection} doesn't support a euro threshold for this tool`,
+        `${first.connection} unterstützt keine €-Schwelle für dieses Tool`,
+      );
+    }
+  }
+  return raw || t("Couldn't save guardrails", "Guardrails konnten nicht gespeichert werden");
+}
+
 export interface ToolGuardrailRow {
   toolKey: string;
   connection: McpConnection | undefined;
@@ -60,7 +100,11 @@ export function ToolGuardrailTable({
   rows: ToolGuardrailRow[];
   addableNames: string[];
   connections: McpConnection[];
-  onSave: (toolKey: string, next: GuardrailValue) => void;
+  // Resolves `true` on success, `false` on failure -- the row's editor
+  // stays open on `false` so a rejected save (e.g. the department's own
+  // ceiling doesn't allow it) doesn't also discard the edit the operator
+  // was mid-way through.
+  onSave: (toolKey: string, next: GuardrailValue) => Promise<boolean>;
   onAdd: (name: string, policy: GuardrailValue | null) => void;
   saving: boolean;
 }) {
@@ -147,9 +191,9 @@ export function ToolGuardrailTable({
                         onChange={setDraft}
                         loginPicker={row.loginPicker}
                         onCancel={() => setEditingKey(null)}
-                        onSave={() => {
-                          onSave(row.toolKey, draft);
-                          setEditingKey(null);
+                        onSave={async () => {
+                          const ok = await onSave(row.toolKey, draft);
+                          if (ok) setEditingKey(null);
                         }}
                         saving={saving}
                       />

@@ -437,6 +437,12 @@ export function useDepartmentTools(id: string) {
     queryKey: ["departments", id, "tools"],
     queryFn: () => api.get<DepartmentToolsDTO>(`/departments/${id}/tools`),
     enabled: !!id,
+    // A short staleTime, not zero: `useSetDepartmentTools` already
+    // invalidates this exact key on every successful save, so a save made
+    // from this browser tab is never stale. This only avoids re-fetching
+    // on every remount (e.g. switching away from and back to the
+    // Guardrails tab) within the same short window.
+    staleTime: 15 * 1000,
   });
 }
 
@@ -803,8 +809,25 @@ export const useClarifications = () =>
     queryFn: () => api.get<Clarification[]>("/clarifications?status=open"),
   });
 
+// `staleTime` matters here specifically: this payload carries every
+// connected plugin's full guardrail preset/library data (large for a
+// plugin like odoo_mcp -- dozens of TOML-authored entries), and the
+// backend resolves it by re-parsing each plugin's manifest on every
+// request (its own discovery-scan result is cached for 5s, but the
+// per-connection manifest parse on top of that isn't). Without a
+// `staleTime`, TanStack Query's default of 0 refetches this on every
+// remount -- e.g. every time an operator switches to a Guardrails tab --
+// making a ~1-2s backend call feel like it happens on every click. Plugin
+// data changes only when a plugin folder changes on disk, never at
+// runtime (same reasoning as the backend's own discovery cache), so a
+// multi-minute staleTime costs nothing in staleness for the reward of
+// not re-paying that cost on every navigation.
 export const useMcpConnections = () =>
-  useQuery({ queryKey: keys.mcp, queryFn: () => api.get<McpConnection[]>("/mcp/connections") });
+  useQuery({
+    queryKey: keys.mcp,
+    queryFn: () => api.get<McpConnection[]>("/mcp/connections"),
+    staleTime: 5 * 60 * 1000,
+  });
 
 export interface ConnectionToolNamesDTO {
   names: string[];

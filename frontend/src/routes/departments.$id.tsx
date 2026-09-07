@@ -24,7 +24,11 @@ import { MemoryEditor } from "@/components/memory-editor";
 import { KnowledgeAssignment } from "@/components/knowledge-assignment";
 import { ComponentGrantPanel } from "@/components/component-grant-panel";
 import type { GuardrailValue } from "@/components/guardrail-preset-picker";
-import { ToolGuardrailTable, type ToolGuardrailRow } from "@/components/tool-guardrail-table";
+import {
+  ToolGuardrailTable,
+  type ToolGuardrailRow,
+  describeGuardrailSaveError,
+} from "@/components/tool-guardrail-table";
 import { StatCard } from "@/components/stat-card";
 import { contractsFor, type IntakeContract } from "@/lib/collaboration";
 import { formatMs } from "@/lib/format";
@@ -802,7 +806,7 @@ export function DepartmentGuardrailsPanel({ departmentId }: { departmentId: stri
     };
   }
 
-  function persistOne(key: string, next: GuardrailValue) {
+  function persistOne(key: string, next: GuardrailValue): Promise<boolean> {
     const merged = {
       ...tools,
       [key]: {
@@ -821,11 +825,17 @@ export function DepartmentGuardrailsPanel({ departmentId }: { departmentId: stri
         only: next.only,
       },
     };
-    setTools.mutate(merged, {
-      onSuccess: () =>
-        toast.success(t("Guardrails saved", "Guardrails gespeichert"), { description: key }),
-      onError: () =>
-        toast.error(t("Could not save guardrails", "Guardrails konnten nicht gespeichert werden")),
+    return new Promise((resolve) => {
+      setTools.mutate(merged, {
+        onSuccess: () => {
+          toast.success(t("Guardrails saved", "Guardrails gespeichert"), { description: key });
+          resolve(true);
+        },
+        onError: (error) => {
+          toast.error(describeGuardrailSaveError(error, t));
+          resolve(false);
+        },
+      });
     });
   }
 
