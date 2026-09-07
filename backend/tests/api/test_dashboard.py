@@ -118,6 +118,50 @@ async def test_dashboard_layout_is_isolated_per_member() -> None:
             assert get_b.json()["widgets"] == body_b["widgets"]
 
 
+async def test_get_layout_returns_a_retired_widget_type_instead_of_500(
+    app_session: AppSessionFactory,
+) -> None:
+    """A widget type that is renamed or retired after a member already has an
+    instance of it stored must not turn `GET /dashboard/layout` into a
+    permanent 500 -- they would be unable to even load their dashboard to
+    remove the offending tile. Insert the unrecognized type directly
+    (bypassing the write path's `Literal` validation, which correctly still
+    rejects it on `PUT`) to simulate exactly that."""
+    tenant = uuid.UUID(str(ACME_TENANT_ID))
+    async with app_session(tenant) as db:
+        member = m.OrgMember(
+            tenant_id=tenant, subject="retired-widget-owner", subject_uuid=uuid.uuid4()
+        )
+        db.add(member)
+        await db.flush()
+        row = m.MemberDashboardLayout(
+            tenant_id=tenant,
+            member_id=member.id,
+            widgets=[
+                {
+                    "id": "w1",
+                    "type": "some-retired-type",
+                    "x": 0,
+                    "y": 0,
+                    "w": 4,
+                    "h": 4,
+                    "config": {},
+                }
+            ],
+            template_id=None,
+        )
+        db.add(row)
+
+    app = create_app()
+    async with LifespanManager(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            headers = {"Authorization": f"Bearer {_token(subject='retired-widget-owner')}"}
+            r = await client.get("/api/v1/dashboard/layout", headers=headers)
+            assert r.status_code == 200, r.text
+            assert r.json()["widgets"][0]["type"] == "some-retired-type"
+
+
 async def test_get_templates_returns_exactly_three_with_widgets() -> None:
     app = create_app()
     async with LifespanManager(app):

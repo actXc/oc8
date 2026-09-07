@@ -123,7 +123,12 @@ async def put_layout(
     )
     await db.execute(stmt)
     await db.commit()
-    return DashboardLayoutDTO(widgets=body.widgets, template_id=body.template_id)
+    # `widgets_json`, not `body.widgets` directly: the request's widgets are
+    # `WidgetInstanceDTO` (the write path's `Literal`-typed model), while
+    # `DashboardLayoutDTO` now expects the read path's `WidgetInstanceReadDTO`
+    # (plain `str` type) -- passing an instance of the wrong model class
+    # raises a validation error instead of coercing.
+    return DashboardLayoutDTO(widgets=widgets_json, template_id=body.template_id)
 
 
 @router.get(

@@ -1080,6 +1080,14 @@ class VapidPublicKeyDTO(CamelModel):
 
 
 class WidgetInstanceDTO(CamelModel):
+    """Write-path shape (`PutDashboardLayoutRequest`, the dashboard
+    templates below): `type` is validated against the currently known
+    widget types, so `PUT /dashboard/layout` correctly rejects an
+    unknown/misspelled one outright. See `WidgetInstanceReadDTO` for the
+    read-path counterpart, which deliberately does NOT share this
+    constraint.
+    """
+
     id: str
     type: Literal["chat", "approvals", "reports", "budget", "activity"]
     x: int
@@ -1089,8 +1097,28 @@ class WidgetInstanceDTO(CamelModel):
     config: dict[str, Any] = Field(default_factory=dict)
 
 
+class WidgetInstanceReadDTO(CamelModel):
+    """Read-path shape for a stored widget instance: `type` is a plain
+    `str`, not the write path's `Literal`. A widget instance can outlive its
+    own type's registration -- a type renamed or retired while a member
+    still has a tile of it stored -- and a `Literal` here would turn
+    `GET /dashboard/layout` into a permanent 500 for that member, with no
+    way to even load the dashboard to remove the offending tile. The
+    frontend already renders a neutral fallback for an unrecognized type
+    (`widget-frame.tsx`); this is what lets that fallback ever run.
+    """
+
+    id: str
+    type: str
+    x: int
+    y: int
+    w: int
+    h: int
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
 class DashboardLayoutDTO(CamelModel):
-    widgets: list[WidgetInstanceDTO] = Field(max_length=50)
+    widgets: list[WidgetInstanceReadDTO] = Field(max_length=50)
     template_id: str | None = None
 
 
