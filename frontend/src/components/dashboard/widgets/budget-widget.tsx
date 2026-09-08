@@ -22,7 +22,14 @@ export function BudgetWidget({
   }
 
   const limit = status.hardLimitTokens ?? status.softLimitTokens;
-  const pct = limit ? Math.min(100, Math.round((status.currentTokens / limit) * 100)) : 0;
+  // `limit === 0` is a real, already-exhausted limit, not "no limit set" --
+  // checked explicitly so it doesn't fall through the `? :` as falsy.
+  const pct =
+    limit == null
+      ? 0
+      : limit === 0
+        ? 100
+        : Math.min(100, Math.round((status.currentTokens / limit) * 100));
 
   return (
     <div className="flex h-full flex-col justify-center gap-2 p-4">
@@ -33,9 +40,9 @@ export function BudgetWidget({
       </div>
       <div className="font-mono text-sm tabular-nums">
         {status.currentTokens.toLocaleString()}
-        {limit ? ` / ${limit.toLocaleString()}` : ""}
+        {limit != null ? ` / ${limit.toLocaleString()}` : ""}
       </div>
-      {limit && (
+      {limit != null && (
         <div className="h-2 w-full overflow-hidden rounded-full bg-muted/40">
           <div
             className={cn(
