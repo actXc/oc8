@@ -6,6 +6,7 @@ import {
   Check,
   ChevronRight,
   HelpCircle,
+  KeyRound,
   Send,
   ShieldCheck,
   Sparkles,
@@ -36,9 +37,11 @@ import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 // --------------------------------------------------------------------- model
-// Verbatim from the old workspace.tsx (routes/workspace.tsx, pre-rewrite
-// lines 73-177): Kind, Row, DecidedRow, TENANT_WIDE, approvalRow,
-// clarificationRow, relativeAge, avatarColor, mayActOn, ViewOnlyBecause.
+// Kind, Row, DecidedRow, TENANT_WIDE, approvalRow, clarificationRow,
+// relativeAge, avatarColor, mayActOn, ViewOnlyBecause, Pill, the
+// kind/department filters, and the "Decided by you" list are carried over
+// from the pre-dashboard `workspace.tsx` (git history), which had them
+// inline rather than in a dedicated widget component.
 
 type Kind = "approval" | "clarification";
 
@@ -151,6 +154,8 @@ export function ApprovalsWidget({
   const clarifications = useMemo(() => clarificationsQuery.data ?? [], [clarificationsQuery.data]);
 
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? null);
+  const [kindFilter, setKindFilter] = useState<"all" | Kind>("all");
+  const [deptFilter, setDeptFilter] = useState<string | null>(null);
   const [decided, setDecided] = useState<DecidedRow[]>([]);
 
   const decide = useDecideApproval();
@@ -164,6 +169,39 @@ export function ApprovalsWidget({
     );
     return all.sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
   }, [approvals, clarifications, decidedIds]);
+
+  // The departments worth offering as a filter are the ones with work in
+  // them, not every department that exists: a filter option that always
+  // shows an empty list is furniture, and the employee cannot read
+  // /departments anyway.
+  const departmentOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const r of rows) {
+      const key = r.departmentId ?? TENANT_WIDE;
+      if (!seen.has(key)) seen.set(key, r.departmentName);
+    }
+    return [...seen.entries()].map(([id, name]) => ({ id, name }));
+  }, [rows]);
+
+  // A department filter only counts while its pill is on screen. Deciding
+  // the last item in a department drops it out of `departmentOptions`, and
+  // the pill row disappears entirely once one department is left —
+  // without this the filter would go on excluding rows with no visible
+  // control to clear it.
+  const activeDept =
+    deptFilter && departmentOptions.length > 1 && departmentOptions.some((d) => d.id === deptFilter)
+      ? deptFilter
+      : null;
+
+  const filtered = useMemo(
+    () =>
+      rows.filter((r) => {
+        if (kindFilter !== "all" && r.kind !== kindFilter) return false;
+        if (activeDept && (r.departmentId ?? TENANT_WIDE) !== activeDept) return false;
+        return true;
+      }),
+    [rows, kindFilter, activeDept],
+  );
 
   const current = rows.find((r) => r.id === selectedId) ?? null;
   const currentApproval =
@@ -241,36 +279,138 @@ export function ApprovalsWidget({
     }
   }
 
+  // "Nothing is waiting for you" and "nobody has assigned you to a
+  // department" are the same blank screen otherwise, and one of them is the
+  // system working while the other is a person locked out of their own job.
+  if (standing.unassigned) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center">
+        <div className="grid h-9 w-9 place-items-center rounded-full bg-[color:var(--status-warning)]/15 text-[color:var(--status-warning)]">
+          <KeyRound className="h-4.5 w-4.5" />
+        </div>
+        <div className="text-sm font-medium">
+          {t("You are not assigned to a department", "Du bist keiner Abteilung zugeordnet")}
+        </div>
+        <p className="max-w-xs text-xs text-muted-foreground">
+          {t(
+            "Ask an administrator to add you — your queue appears the moment they do.",
+            "Bitte einen Administrator, dich einzutragen — deine Liste erscheint, sobald das geschehen ist.",
+          )}
+        </p>
+        {/* A plain anchor, not the router's `Link` -- this is the only spot
+            in any widget that navigates away, and pulling in a router
+            context is not worth it for one link out of a grid tile. */}
+        <a
+          href="/governance"
+          className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline"
+        >
+          {t("What may I do?", "Was darf ich?")} <ArrowRight className="h-3 w-3" />
+        </a>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {loadError && (
         <div className="flex items-start gap-2 border-b border-[color:var(--status-error)]/40 px-3 py-2 text-xs">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--status-error)]" />
-          <span>
-            {t("Your queue could not be loaded", "Deine Liste konnte nicht geladen werden")}
-          </span>
-        </div>
-      )}
-      <div className="flex-1 divide-y divide-border overflow-y-auto">
-        {rows.length === 0 && !loadError && (
-          <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
-            <Sparkles className="h-5 w-5 text-primary" />
-            <div className="text-sm">
-              {loading
-                ? t("Loading…", "Wird geladen…")
-                : t("Nothing is waiting for you.", "Nichts wartet auf dich.")}
+          <div>
+            <div>
+              {t("Your queue could not be loaded", "Deine Liste konnte nicht geladen werden")}
+            </div>
+            {/* Named rather than swallowed: an empty list drawn over a
+                failed fetch is the screen telling somebody there is
+                nothing to do. */}
+            <div className="mt-0.5 text-muted-foreground">
+              {loadError instanceof Error ? loadError.message : String(loadError)}
             </div>
           </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-2 py-1.5">
+        <Pill active={kindFilter === "all"} onClick={() => setKindFilter("all")}>
+          {t("All", "Alles")}
+        </Pill>
+        <Pill active={kindFilter === "approval"} onClick={() => setKindFilter("approval")}>
+          {t("Approvals", "Freigaben")}
+        </Pill>
+        <Pill
+          active={kindFilter === "clarification"}
+          onClick={() => setKindFilter("clarification")}
+        >
+          {t("Questions", "Rückfragen")}
+        </Pill>
+        {/* A picker over one department is furniture, so it only appears
+            when there is actually something to tell apart. */}
+        {departmentOptions.length > 1 && (
+          <>
+            <span className="mx-0.5 h-3.5 w-px bg-border" />
+            <Pill active={activeDept === null} onClick={() => setDeptFilter(null)}>
+              {t("Every department", "Alle Abteilungen")}
+            </Pill>
+            {departmentOptions.map((d) => (
+              <Pill key={d.id} active={activeDept === d.id} onClick={() => setDeptFilter(d.id)}>
+                {d.id === TENANT_WIDE
+                  ? t("Company-wide", "Unternehmensweit")
+                  : d.name || t("Unnamed department", "Unbenannte Abteilung")}
+              </Pill>
+            ))}
+          </>
         )}
-        {rows.map((r) => (
-          <QueueRow
-            key={r.id}
-            row={r}
-            active={r.id === selectedId}
-            showDepartment
-            onOpen={() => setSelectedId(r.id)}
-          />
-        ))}
+      </div>
+
+      <div className="flex-1 overflow-y-auto">
+        <div className="divide-y divide-border">
+          {filtered.length === 0 && !loadError && (
+            <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
+              <Sparkles className="h-5 w-5 text-primary" />
+              <div className="text-sm">
+                {loading
+                  ? t("Loading…", "Wird geladen…")
+                  : rows.length > 0
+                    ? t(
+                        "Nothing under this filter. Your other departments still have work.",
+                        "Unter diesem Filter nichts. In deinen anderen Abteilungen liegt noch Arbeit.",
+                      )
+                    : t("Nothing is waiting for you.", "Nichts wartet auf dich.")}
+              </div>
+            </div>
+          )}
+          {filtered.map((r) => (
+            <QueueRow
+              key={r.id}
+              row={r}
+              active={r.id === selectedId}
+              showDepartment={departmentOptions.length > 1}
+              onOpen={() => setSelectedId(r.id)}
+            />
+          ))}
+        </div>
+
+        {decided.length > 0 && (
+          <div className="divide-y divide-border border-t border-border">
+            <div className="px-3 py-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
+              {t("Decided by you", "Von dir entschieden")}
+            </div>
+            {decided.map((d) => (
+              <div key={d.id} className="flex items-center gap-2 px-3 py-2 text-xs">
+                <span
+                  className={cn(
+                    "grid h-4 w-4 shrink-0 place-items-center rounded-full text-[9px]",
+                    d.outcome === "rejected"
+                      ? "bg-[color:var(--status-error)]/15 text-[color:var(--status-error)]"
+                      : "bg-[color:var(--status-running)]/15 text-[color:var(--status-running)]",
+                  )}
+                >
+                  {d.outcome === "rejected" ? "✕" : "✓"}
+                </span>
+                <span className="truncate text-muted-foreground">{d.title}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <Dialog open={current !== null} onOpenChange={(open) => !open && setSelectedId(null)}>
@@ -310,6 +450,31 @@ export function ApprovalsWidget({
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+function Pill({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-full border px-2 py-0.5 text-[11px] transition",
+        active
+          ? "border-primary/50 bg-primary/10 text-primary"
+          : "border-border bg-panel text-muted-foreground hover:text-foreground",
+      )}
+    >
+      {children}
+    </button>
   );
 }
 
