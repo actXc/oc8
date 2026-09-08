@@ -250,6 +250,13 @@ class CodexRuntime:
         inbox_check: Any = None,
         pre_decided: dict[str, str] | None = None,
         originating_operator: str | None = None,
+        # Accepted only to satisfy the RuntimeAdapter Protocol -- unused here
+        # because the container never receives images through this call. It
+        # reads them the same way it reads everything else about the run: off
+        # `run_row.context["task_images"]`, exactly as runtime/isolated.py's
+        # DockerIsolatedRuntime.execute() does for the other container-based
+        # runtime.
+        task_images_raw: list[dict[str, str]] | None = None,
     ) -> RunResult:
         assert run_id is not None, "codex_runtime requires a run row to correlate resumes"
         run = await db.get(m.AgentRun, run_id)
