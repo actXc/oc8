@@ -64,7 +64,7 @@ function untitledChatText(de: boolean): string {
 // rewrite and this, there was no live surface that could: the mutations
 // existed and had zero call sites, so every proposal the Assistant made --
 // over the web or over Telegram -- simply sat in the database.
-function PendingProposals({ de }: { de: boolean }) {
+export function PendingProposals({ de }: { de: boolean }) {
   const can = useCan();
   const { data: proposals } = useCopilotProposals({ poll: true, enabled: can("copilot:view") });
   const apply = useApplyCopilotProposal();

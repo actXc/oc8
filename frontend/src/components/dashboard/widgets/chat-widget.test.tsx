@@ -1,10 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, fireEvent } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatWidget } from "./chat-widget";
 import * as governanceHooks from "@/lib/governance-hooks";
+import * as hooks from "@/lib/hooks";
 import * as hooksChat from "@/lib/hooks-chat";
+import * as liveProvider from "@/lib/live/provider";
 
 vi.mock("@/lib/hooks", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/hooks")>();
@@ -27,6 +29,12 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 describe("ChatWidget", () => {
+  // `vi.spyOn(...).mockReturnValue(...)` otherwise leaks into later tests in
+  // this file -- there is no global mock-reset config (vitest.setup.ts).
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("renders a composer for a tile with no session yet", () => {
     render(<ChatWidget config={{}} onConfigChange={vi.fn()} />, { wrapper });
     expect(screen.getByPlaceholderText(/configure or ask oc8/i)).toBeInTheDocument();
@@ -70,5 +78,40 @@ describe("ChatWidget", () => {
 
     expect(screen.queryByPlaceholderText(/configure or ask oc8/i)).not.toBeInTheDocument();
     expect(screen.getByText(/don't have access to copilot chat/i)).toBeInTheDocument();
+  });
+
+  it("shows a reconnecting notice when the live connection drops, matching CopilotDock", () => {
+    vi.spyOn(liveProvider, "useLiveConnectionStatus").mockReturnValue("disconnected");
+
+    render(<ChatWidget config={{}} onConfigChange={vi.fn()} />, { wrapper });
+
+    expect(screen.getByText(/new messages may be delayed/i)).toBeInTheDocument();
+  });
+
+  it("surfaces a pending copilot proposal with Apply/Reject, matching CopilotDock", () => {
+    vi.spyOn(hooks, "useCopilotProposals").mockReturnValue({
+      data: [
+        {
+          id: "p1",
+          status: "draft",
+          operations: [{ label: "create_department", references: {} }],
+        },
+      ],
+    } as never);
+    vi.spyOn(hooks, "useApplyCopilotProposal").mockReturnValue({
+      isPending: false,
+      mutate: vi.fn(),
+    } as never);
+    vi.spyOn(hooks, "useRejectCopilotProposal").mockReturnValue({
+      isPending: false,
+      mutate: vi.fn(),
+    } as never);
+
+    render(<ChatWidget config={{}} onConfigChange={vi.fn()} />, { wrapper });
+
+    expect(screen.getByText(/pending proposals/i)).toBeInTheDocument();
+    expect(screen.getByText("create_department")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apply" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reject" })).toBeInTheDocument();
   });
 });

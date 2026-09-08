@@ -3,12 +3,13 @@
 // always true and draft text is scoped to this component's own state
 // rather than lifted to a shared tabs manager.
 import { useState } from "react";
-import { Plus } from "lucide-react";
-import { CopilotChatTab } from "@/components/copilot-dock";
+import { Plus, WifiOff } from "lucide-react";
+import { CopilotChatTab, PendingProposals } from "@/components/copilot-dock";
 import { ChatSessionPicker } from "@/components/chat-window";
 import { useCan } from "@/lib/governance-hooks";
 import { useAssistant } from "@/lib/hooks";
 import { useChatSessions } from "@/lib/hooks-chat";
+import { useLiveConnectionStatus } from "@/lib/live/provider";
 import { useT } from "@/lib/i18n";
 
 // Gated the same way `CopilotDock` gates itself (copilot-dock.tsx) and for
@@ -18,9 +19,9 @@ import { useT } from "@/lib/i18n";
 // The backend already refuses those for such a member (this is UX, not a
 // security boundary) -- without this gate, the composer below still
 // renders and accepts input, but silently no-ops on send because
-// `assistantAgentId` never resolves. This intentionally does NOT attempt
-// full parity with `CopilotDock` (no proposals surface, no reconnect
-// indicator) -- see the final-review fix brief for that scoping.
+// `assistantAgentId` never resolves. Reuses `CopilotDock`'s own
+// `PendingProposals` and reconnect banner for full surface parity with the
+// floating dock.
 export function ChatWidget({
   config,
   onConfigChange,
@@ -51,10 +52,12 @@ function ChatWidgetPanel({
   onConfigChange: (config: Record<string, unknown>) => void;
 }) {
   const t = useT();
+  const de = t("en", "de") === "de";
   const [draft, setDraft] = useState("");
   const { data: assistant } = useAssistant();
   const assistantAgentId = assistant?.agentId;
   const { data: sessions } = useChatSessions(assistantAgentId);
+  const liveConnectionStatus = useLiveConnectionStatus();
   const sessionId = typeof config.sessionId === "string" ? config.sessionId : null;
 
   function setSessionId(id: string | null) {
@@ -84,6 +87,18 @@ function ChatWidgetPanel({
           />
         )}
       </div>
+      {liveConnectionStatus === "disconnected" && (
+        <div className="flex items-center gap-1.5 border-b border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs text-amber-700 dark:text-amber-400">
+          <WifiOff className="h-3.5 w-3.5" />
+          <span>
+            {t(
+              "Reconnecting -- new messages may be delayed.",
+              "Verbindung wird wiederhergestellt -- neue Nachrichten können sich verzögern.",
+            )}
+          </span>
+        </div>
+      )}
+      <PendingProposals de={de} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <CopilotChatTab
           active
