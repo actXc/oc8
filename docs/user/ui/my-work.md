@@ -4,22 +4,29 @@
 
 ## What it is
 
-Your **personal inbox for human decisions**: approvals and clarifications that
-are waiting on a person — often you.
+Your **personal, rearrangeable dashboard**: a grid of tiles you pick and
+arrange yourself, covering the things a person on your team checks day to
+day — pending approvals and clarifications, chat with the assistant,
+budget status, reports, and recent activity.
 
-This is the screen people mean when they say “approvals”, even though there is
-no separate Approvals menu.
+On first visit you choose a starting layout (a template); after that you
+can add, remove, resize, and drag tiles freely, and your arrangement is
+saved automatically.
+
+The **Approvals** tile is the screen people mean when they say
+“approvals”, even though there is no separate Approvals menu.
 
 ## What it is for
 
 - Unblock an agent that paused on a risky tool call
 - Answer a clarification so the agent can continue
-- See only what needs a human, not the whole activity feed
+- Chat with the assistant without leaving the page
+- Keep an eye on budget, reports, or recent activity alongside your queue
 
 ## Where you are in the flow
 
 ```text
-Agent runs → hits gate / question → ★ My work → you decide → agent continues or stops
+Agent runs → hits gate / question → ★ My work (Approvals tile) → you decide → agent continues or stops
 ```
 
 Also reachable from the header badge and notification bell.
@@ -27,10 +34,14 @@ Also reachable from the header badge and notification bell.
 ## What you do here
 
 1. Open **My work** (sidebar or header).
-2. Filter by kind (approval / clarification) or department if needed.
-3. Read the proposal: tool, summary, value, related agent.
-4. **Approve**, **Reject**, or **Answer**.
-5. Optionally open the related agent to see context.
+2. First visit only: pick a starting layout, or start from an empty grid.
+3. In the **Approvals** tile, filter by kind (approval / question) or
+   department if your queue spans more than one.
+4. Click a row to open its detail and read the proposal: tool, summary,
+   value, related agent.
+5. **Approve**, **Reject**, or **Answer**.
+6. Add, remove, resize, or drag other tiles (Chat, Budget, Reports,
+   Activity) to shape the dashboard around what you check most.
 
 ## Where work goes next
 
