@@ -23,10 +23,6 @@ import { useT } from "@/lib/i18n";
 
 export const Route = createFileRoute("/workspace")({
   component: WorkspacePage,
-  validateSearch: (search: Record<string, unknown>): { item?: string } => {
-    const item = search.item;
-    return typeof item === "string" && item.length > 0 ? { item } : {};
-  },
 });
 
 function useDebouncedValue<T>(value: T, delayMs: number): T {
