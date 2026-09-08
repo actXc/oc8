@@ -4,6 +4,17 @@ import { WIDGET_REGISTRY } from "@/components/dashboard/widget-registry";
 import type { WidgetInstance } from "@/lib/hooks";
 import { useT } from "@/lib/i18n";
 
+// A plain function so it can call `useT()` -- the class boundary below
+// can't use hooks itself, but it can render this from its `render()`.
+function WidgetErrorFallback() {
+  const t = useT();
+  return (
+    <div className="flex h-full items-center justify-center p-3 text-center text-xs text-muted-foreground">
+      {t("This widget could not be displayed.", "Dieses Widget konnte nicht angezeigt werden.")}
+    </div>
+  );
+}
+
 class WidgetErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
   state = { hasError: false };
 
@@ -13,11 +24,7 @@ class WidgetErrorBoundary extends Component<{ children: ReactNode }, { hasError:
 
   render() {
     if (this.state.hasError) {
-      return (
-        <div className="flex h-full items-center justify-center p-3 text-center text-xs text-muted-foreground">
-          This widget could not be displayed.
-        </div>
-      );
+      return <WidgetErrorFallback />;
     }
     return this.props.children;
   }
