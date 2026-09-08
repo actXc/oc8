@@ -48,8 +48,8 @@ async def _cancellation_kind(db: AsyncSession, run_id: uuid.UUID) -> str | None:
     ).scalar_one_or_none()
 
 
-async def _tell_telegram(*, tenant_id: uuid.UUID, external_id: str, text: str) -> None:
-    """Best-effort: a Telegram send failure must never fail the run whose
+async def _tell_channel(*, tenant_id: uuid.UUID, channel: str, external_id: str, text: str) -> None:
+    """Best-effort: a chat channel send failure must never fail the run whose
     answer it is carrying. `say` is not part of the `ApprovalChannel`
     Protocol (it's a duck-typed extra a channel plugin may offer) -- reuses
     `dispatch.tell_sender_gated` rather than calling `impl.say` directly,
@@ -58,7 +58,9 @@ async def _tell_telegram(*, tenant_id: uuid.UUID, external_id: str, text: str) -
     -- the run's real answer, a park notice, a failure notice -- is an
     Assistant-produced reply and gets the same classification check an
     approval's own detail already gets against this channel's
-    `max_classification`."""
+    `max_classification`. `channel` is read off the run's own context
+    (`chat_channel`) rather than hardcoded, so Telegram, Teams, and any
+    later channel all reach this same function."""
     from oc8.channels.dispatch import tell_sender_gated
     from oc8.channels.registry import channels_for_tenant
 
@@ -66,9 +68,9 @@ async def _tell_telegram(*, tenant_id: uuid.UUID, external_id: str, text: str) -
         async with tenant_session(tenant_id) as db:
             channels = await channels_for_tenant(db, tenant_id=tenant_id)
     except Exception:
-        logger.warning("could not load Telegram channel to reply", exc_info=True)
+        logger.warning("could not load %s channel to reply", channel, exc_info=True)
         return
-    impl = channels.get("telegram")
+    impl = channels.get(channel)
     if impl is None:
         return
     await tell_sender_gated(impl, external_id, text)
@@ -79,8 +81,8 @@ async def _tell_telegram(*, tenant_id: uuid.UUID, external_id: str, text: str) -
 #: thing they ever heard: the reply hook only fired on DONE/FAILED, so a run
 #: that stopped to ask a question or to wait for an approval simply went quiet,
 #: and the person had no way to know anything was expected of them.
-_TELEGRAM_NEEDS_INPUT = "I need more information to continue -- please answer in oc8."
-_TELEGRAM_WAITING_FOR_APPROVAL = "This needs an approval before I can continue -- see oc8."
+_CHAT_NEEDS_INPUT = "I need more information to continue -- please answer in oc8."
+_CHAT_WAITING_FOR_APPROVAL = "This needs an approval before I can continue -- see oc8."
 #: The transcript message a crashed chat run leaves behind. Deliberately NOT
 #: `repr(exc)`: the exception text is already on the run (`context["error"]`)
 #: where an operator can read it, and a chat transcript is the one place it
@@ -88,14 +90,21 @@ _TELEGRAM_WAITING_FOR_APPROVAL = "This needs an approval before I can continue -
 _CHAT_RUN_FAILED = "That didn't work out -- see the run in oc8 for what happened."
 
 
-def _telegram_sender_of(run: m.AgentRun) -> str | None:
-    """The Telegram account waiting on this run, if it is a chat run started
-    from Telegram at all. None for a web chat turn and for every other source
-    -- both of which have their own surface to read the outcome on."""
+def _chat_channel_sender_of(run: m.AgentRun) -> tuple[str, str] | None:
+    """The (channel id, external id) a `source="chat"` run should reply on,
+    if it was started from a channel at all. None for a web chat turn and
+    for every other source -- both of which have their own surface to read
+    the outcome on. Returns the pair, not just the external id: choosing
+    WHICH channel to reply on is the entire point of this function once more
+    than one channel exists."""
     if run.source != "chat":
         return None
-    external_id = (run.context or {}).get("telegram_external_id")
-    return str(external_id) if external_id else None
+    context = run.context or {}
+    channel = context.get("chat_channel")
+    external_id = context.get("chat_channel_external_id")
+    if not channel or not external_id:
+        return None
+    return str(channel), str(external_id)
 
 
 async def requeue_if_already_decided(db: AsyncSession, *, run: m.AgentRun) -> bool:
@@ -219,7 +228,8 @@ async def _maybe_wake_parent(
     succeeded: bool,
     mcp_conn: m.McpConnection | None,
     chat_session_id: str | None = None,
-    telegram_external_id: str | None = None,
+    chat_channel: str | None = None,
+    chat_channel_external_id: str | None = None,
 ) -> uuid.UUID | None:
     """Create a follow-up run for the team lead that delegated this sub-run, so
     it can react to the outcome (§7). Returns the new run's id for the caller to
@@ -282,21 +292,23 @@ async def _maybe_wake_parent(
         context["mcp_connection_id"] = str(mcp_conn.id)
     # A wake-up whose delegation chain traces back to a chat turn is treated
     # as a chat turn itself: source="chat" is what the terminal-state path
-    # below reads (record_assistant_reply, and Telegram's _tell_telegram) to
-    # decide whether an outcome is user-facing at all. Without this the
-    # lead's real conclusion after a delegated sub-task -- the only part of
-    # "ask the Assistant something, it delegates, you get the answer" a
-    # human actually cares about -- was created with source="delegation" and
-    # never reached either. chat_session_id/telegram_external_id ride along
-    # unchanged from the finishing sub-run's own context (itself carried
-    # forward from delegate_task, see control_tools._delegate) rather than
-    # being re-derived here, so a delegation chain several hops deep keeps
-    # pointing at the SAME original conversation at every hop.
+    # below reads (record_assistant_reply, and _tell_channel) to decide
+    # whether an outcome is user-facing at all. Without this the lead's real
+    # conclusion after a delegated sub-task -- the only part of "ask the
+    # Assistant something, it delegates, you get the answer" a human
+    # actually cares about -- was created with source="delegation" and never
+    # reached either. chat_session_id/chat_channel/chat_channel_external_id
+    # ride along unchanged from the finishing sub-run's own context (itself
+    # carried forward from delegate_task, see control_tools._delegate)
+    # rather than being re-derived here, so a delegation chain several hops
+    # deep keeps pointing at the SAME original conversation, on the SAME
+    # channel, at every hop.
     wake_source = "chat" if chat_session_id else "delegation"
     if chat_session_id:
         context["chat_session_id"] = chat_session_id
-        if telegram_external_id:
-            context["telegram_external_id"] = telegram_external_id
+        if chat_channel and chat_channel_external_id:
+            context["chat_channel"] = chat_channel
+            context["chat_channel_external_id"] = chat_channel_external_id
     wake = await repo.create(
         tenant_id=tenant_id,
         agent_id=parent.assigned_agent_id,
@@ -529,7 +541,7 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
     #: reply sent before the transition/record_assistant_reply write is
     #: durable would hand the user an answer the system never recorded, and
     #: a redelivery would then send it a second time.
-    telegram_replies: list[tuple[uuid.UUID, str, str]] = []
+    channel_replies: list[tuple[uuid.UUID, str, str, str]] = []
 
     with get_tracer().start_as_current_span("run.execute") as span:
         span.set_attribute("run_id", str(run_id))
@@ -812,7 +824,10 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
                         succeeded=False,
                         mcp_conn=mcp_conn,
                         chat_session_id=(run.context or {}).get("chat_session_id"),
-                        telegram_external_id=(run.context or {}).get("telegram_external_id"),
+                        chat_channel=(run.context or {}).get("chat_channel"),
+                        chat_channel_external_id=(run.context or {}).get(
+                            "chat_channel_external_id"
+                        ),
                     )
                     if wake_id is not None:
                         pending_runs.append(wake_id)
@@ -840,10 +855,11 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
                     from oc8.chat.service import record_assistant_reply
 
                     await record_assistant_reply(db, run=run, output=_CHAT_RUN_FAILED)
-                    failed_sender = _telegram_sender_of(run)
+                    failed_sender = _chat_channel_sender_of(run)
                     if failed_sender is not None:
-                        telegram_replies.append(
-                            (run.tenant_id, failed_sender, _CHAT_RUN_FAILED)
+                        failed_channel, failed_external_id = failed_sender
+                        channel_replies.append(
+                            (run.tenant_id, failed_channel, failed_external_id, _CHAT_RUN_FAILED)
                         )
             else:
                 pending_runs.extend(result.pending_runs)
@@ -888,10 +904,16 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
                         # them, though, so without a word here their last
                         # message is answered by "Bin dran" and then silence,
                         # for ever.
-                        parked_sender = _telegram_sender_of(run)
+                        parked_sender = _chat_channel_sender_of(run)
                         if parked_sender is not None:
-                            telegram_replies.append(
-                                (run.tenant_id, parked_sender, _TELEGRAM_NEEDS_INPUT)
+                            parked_channel, parked_external_id = parked_sender
+                            channel_replies.append(
+                                (
+                                    run.tenant_id,
+                                    parked_channel,
+                                    parked_external_id,
+                                    _CHAT_NEEDS_INPUT,
+                                )
                             )
                     except RepeatedClarification as exc:
                         # The agent asked the identical question twice on this
@@ -917,8 +939,9 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
                                 succeeded=False,
                                 mcp_conn=mcp_conn,
                                 chat_session_id=(run.context or {}).get("chat_session_id"),
-                                telegram_external_id=(run.context or {}).get(
-                                    "telegram_external_id"
+                                chat_channel=(run.context or {}).get("chat_channel"),
+                                chat_channel_external_id=(run.context or {}).get(
+                                    "chat_channel_external_id"
                                 ),
                             )
                             if wake_id is not None:
@@ -993,7 +1016,10 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
                             succeeded=new_state is RunState.DONE,
                             mcp_conn=mcp_conn,
                             chat_session_id=(run.context or {}).get("chat_session_id"),
-                            telegram_external_id=(run.context or {}).get("telegram_external_id"),
+                            chat_channel=(run.context or {}).get("chat_channel"),
+                            chat_channel_external_id=(run.context or {}).get(
+                                "chat_channel_external_id"
+                            ),
                         )
                         if wake_id is not None:
                             pending_runs.append(wake_id)
@@ -1008,18 +1034,27 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
                         from oc8.chat.service import record_assistant_reply
 
                         await record_assistant_reply(db, run=run, output=result.output)
-                        done_sender = _telegram_sender_of(run)
+                        done_sender = _chat_channel_sender_of(run)
                         if done_sender is not None:
-                            telegram_replies.append((run.tenant_id, done_sender, result.output))
+                            done_channel, done_external_id = done_sender
+                            channel_replies.append(
+                                (run.tenant_id, done_channel, done_external_id, result.output)
+                            )
                     if new_state is RunState.WAITING_FOR_APPROVAL:
                         # Same reason as the waiting_for_input park above: the
                         # run is suspended, not finished, so nothing else tells
                         # the Telegram sender that their request is now sitting
                         # in somebody's approval queue.
-                        held_sender = _telegram_sender_of(run)
+                        held_sender = _chat_channel_sender_of(run)
                         if held_sender is not None:
-                            telegram_replies.append(
-                                (run.tenant_id, held_sender, _TELEGRAM_WAITING_FOR_APPROVAL)
+                            held_channel, held_external_id = held_sender
+                            channel_replies.append(
+                                (
+                                    run.tenant_id,
+                                    held_channel,
+                                    held_external_id,
+                                    _CHAT_WAITING_FOR_APPROVAL,
+                                )
                             )
                         # Close the parking race (see requeue_if_already_decided):
                         # an operator may have decided the held call while this run
@@ -1039,11 +1074,13 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
         for pending_id in pending_runs:
             await publish_run(run_id=pending_id, tenant_id=tenant_id)
 
-        # Same reasoning as the publish loop above: a Telegram reply is sent
+        # Same reasoning as the publish loop above: a chat reply is sent
         # only once the record_assistant_reply write it reports on is
         # durably committed, never from inside the still-open transaction.
-        for reply_tenant_id, external_id, text in telegram_replies:
-            await _tell_telegram(tenant_id=reply_tenant_id, external_id=external_id, text=text)
+        for reply_tenant_id, reply_channel, external_id, text in channel_replies:
+            await _tell_channel(
+                tenant_id=reply_tenant_id, channel=reply_channel, external_id=external_id, text=text
+            )
 
 
 async def recover_reclaimed(message: RunMessage) -> None:

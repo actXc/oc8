@@ -186,8 +186,14 @@ def test_control_tool_names_matches_the_schemas() -> None:
         "search_memory",
         "render_component",
         "propose_change",
+        "decide_approval",
         "read_reference_file",
         "read_instruction_file",
+        "list_pending_approvals",
+        "department_status",
+        "agent_status",
+        "budget_overview",
+        "kpi_overview",
     }
 
 
@@ -459,7 +465,11 @@ async def test_delegate_task_carries_the_chat_origin_onto_the_sub_run(app_sessio
             tenant_id=tenant,
             agent_id=lead.id,
             source="chat",
-            context={"chat_session_id": "aaaa-bbbb", "telegram_external_id": "tg-7"},
+            context={
+                "chat_session_id": "aaaa-bbbb",
+                "chat_channel": "teams",
+                "chat_channel_external_id": "tg-7",
+            },
         )
         db.add(executing_run)
         await db.flush()
@@ -485,7 +495,8 @@ async def test_delegate_task_carries_the_chat_origin_onto_the_sub_run(app_sessio
         sub = await db.get(m.AgentRun, outcome.pending_run)
         assert sub is not None
         assert sub.context["chat_session_id"] == "aaaa-bbbb"
-        assert sub.context["telegram_external_id"] == "tg-7"
+        assert sub.context["chat_channel"] == "teams"
+        assert sub.context["chat_channel_external_id"] == "tg-7"
 
 
 @pytest.mark.asyncio
@@ -529,7 +540,8 @@ async def test_delegate_task_without_a_chat_origin_carries_nothing(app_session: 
         sub = await db.get(m.AgentRun, outcome.pending_run)
         assert sub is not None
         assert "chat_session_id" not in sub.context
-        assert "telegram_external_id" not in sub.context
+        assert "chat_channel" not in sub.context
+        assert "chat_channel_external_id" not in sub.context
 
 
 @pytest.mark.asyncio
@@ -1097,12 +1109,24 @@ async def test_a_non_control_tool_is_not_handled_here(app_session: Any) -> None:
 @pytest.mark.parametrize("name", sorted(CONTROL_TOOL_NAMES))
 def test_each_control_tool_declares_its_required_arguments(name: str) -> None:
     """A tool offered without a schema the model can satisfy is a tool the model
-    will call wrongly."""
+    will call wrongly. (The 5 read-only status tools intentionally have all
+    optional parameters, so they are excepted from this check.)"""
     from oc8.agent.control_tools import CONTROL_TOOL_SCHEMAS
 
     schema = CONTROL_TOOL_SCHEMAS[name]
     assert schema.description
-    assert schema.parameters["required"]
+    # The status tools (list_pending_approvals, department_status, agent_status,
+    # budget_overview, kpi_overview) intentionally have all optional parameters,
+    # so they are allowed to have empty required lists.
+    optional_tools = {
+        "list_pending_approvals",
+        "department_status",
+        "agent_status",
+        "budget_overview",
+        "kpi_overview",
+    }
+    if name not in optional_tools:
+        assert schema.parameters["required"]
 
 
 @pytest.mark.asyncio
@@ -1771,3 +1795,762 @@ async def test_a_rejected_proposal_leaves_no_orphan_draft_behind(app_session: An
                 {"operation_type": "department.create", "payload": {"name": "Support EU"}},
             )
         ).output.startswith("Vorschlag")
+
+
+# ------------------------------------------ the Assistant's decide_approval seam
+
+
+async def _pending_approval(
+    db: Any, tenant: uuid.UUID, *, department_id: uuid.UUID, action_type: str = "tool_send"
+) -> m.ApprovalRequest:
+    approval = m.ApprovalRequest(
+        tenant_id=tenant,
+        agent_id=uuid.uuid4(),
+        department_id=department_id,
+        action_type=action_type,
+        title="Freigabe erforderlich",
+        status="pending",
+    )
+    db.add(approval)
+    await db.flush()
+    return approval
+
+
+async def _decide(
+    db: Any,
+    tenant: uuid.UUID,
+    assistant: m.Agent,
+    task: m.Task,
+    arguments: dict[str, Any],
+    *,
+    run_id: uuid.UUID | None = None,
+) -> ControlOutcome:
+    outcome = await execute_control_tool(
+        db,
+        tenant_id=tenant,
+        agent=assistant,
+        task=task,
+        tc=ToolCall(id="c1", name="decide_approval", arguments=arguments),
+        decision=Decision(Effect.ALLOW),
+        assigned_skills=[],
+        active_skills=[],
+        mcp_conn=None,
+        originating_operator=None,
+        run_id=run_id,
+    )
+    assert outcome is not None
+    return outcome
+
+
+@pytest.mark.asyncio
+async def test_decide_approval_approves_on_behalf_of_the_human_behind_the_chat(
+    app_session: Any,
+) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        await _human_behind(db, tenant, task, all_departments=True)
+        approval = await _pending_approval(db, tenant, department_id=task.department_id)
+
+        outcome = await _decide(
+            db, tenant, assistant, task, {"approval_id": str(approval.id), "decision": "approve"}
+        )
+        assert outcome.output == f"Approval {approval.id} approved."
+        await db.refresh(approval)
+        assert approval.status == "approved"
+
+        # The reject path renders its own past participle rather than a
+        # hand-built "reject" + "d" -- "rejectd" would pass a looser check.
+        approval2 = await _pending_approval(db, tenant, department_id=task.department_id)
+        outcome2 = await _decide(
+            db, tenant, assistant, task, {"approval_id": str(approval2.id), "decision": "reject"}
+        )
+        assert outcome2.output == f"Approval {approval2.id} rejected."
+        await db.refresh(approval2)
+        assert approval2.status == "rejected"
+
+
+@pytest.mark.asyncio
+async def test_decide_approval_refuses_when_posted_by_someone_other_than_the_session_owner(
+    app_session: Any,
+) -> None:
+    """`_owned_session`'s `copilot:manage` oversight carve-out (chat.py) lets
+    an org_admin post into a COLLEAGUE's Assistant session. That admin is not
+    the human behind the session -- and a decision made from inside that run
+    must not be attributed to, or scoped as, the session's own member just
+    because `_member_behind_task` still resolves to them."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        # The session owner, who COULD decide this if it were really them.
+        member = await _human_behind(db, tenant, task, all_departments=True)
+        approval = await _pending_approval(db, tenant, department_id=task.department_id)
+        assert member.subject != "sub-someone-else"
+
+        run = m.AgentRun(
+            tenant_id=tenant,
+            agent_id=assistant.id,
+            task_id=task.id,
+            source="chat",
+            state="running",
+            context={"originating_operator": "sub-someone-else"},
+        )
+        db.add(run)
+        await db.flush()
+
+        outcome = await _decide(
+            db,
+            tenant,
+            assistant,
+            task,
+            {"approval_id": str(approval.id), "decision": "approve"},
+            run_id=run.id,
+        )
+        assert outcome.output.startswith("ERROR")
+        assert "could not resolve who you are acting for" in outcome.output.lower()
+        await db.refresh(approval)
+        assert approval.status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_decide_approval_refuses_a_foreign_department(app_session: Any) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        # A seat in some OTHER department, not the one the approval belongs to.
+        other = m.Department(tenant_id=tenant, name="Buchhaltung", frame={})
+        db.add(other)
+        await db.flush()
+        await _human_behind(db, tenant, task, seat_in=other.id)
+        approval = await _pending_approval(db, tenant, department_id=task.department_id)
+
+        outcome = await _decide(
+            db, tenant, assistant, task, {"approval_id": str(approval.id), "decision": "approve"}
+        )
+        assert outcome.output.startswith("ERROR")
+        assert "not found" in outcome.output.lower()
+        await db.refresh(approval)
+        assert approval.status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_decide_approval_fails_closed_with_no_chat_session_behind_the_task(
+    app_session: Any,
+) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        approval = await _pending_approval(db, tenant, department_id=task.department_id)
+
+        outcome = await _decide(
+            db, tenant, assistant, task, {"approval_id": str(approval.id), "decision": "approve"}
+        )
+        assert outcome.output.startswith("ERROR")
+        await db.refresh(approval)
+        assert approval.status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_decide_approval_reports_an_already_decided_approval(app_session: Any) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        await _human_behind(db, tenant, task, all_departments=True)
+        approval = await _pending_approval(db, tenant, department_id=task.department_id)
+        approval.status = "approved"
+        await db.flush()
+
+        outcome = await _decide(
+            db, tenant, assistant, task, {"approval_id": str(approval.id), "decision": "reject"}
+        )
+        assert outcome.output.startswith("ERROR")
+        assert "approved" in outcome.output.lower()
+
+
+@pytest.mark.asyncio
+async def test_decide_approval_refuses_a_management_effect_the_copilot_cannot_apply(
+    app_session: Any,
+) -> None:
+    """hire_agent is a `:manage`-class effect (EFFECT_PERMISSIONS) -- an
+    AgentActor (never a HumanActor) can never satisfy `_may_apply_the_effect`
+    for it, whatever department it stands in. This is the concrete case for
+    NotYourSayAtAll and also the guarantee that the Copilot cannot decide its
+    way into a management act."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        await _human_behind(db, tenant, task, all_departments=True)
+        approval = await _pending_approval(
+            db, tenant, department_id=task.department_id, action_type="hire_agent"
+        )
+
+        outcome = await _decide(
+            db, tenant, assistant, task, {"approval_id": str(approval.id), "decision": "approve"}
+        )
+        assert outcome.output.startswith("ERROR")
+        await db.refresh(approval)
+        assert approval.status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_decide_approval_rejects_an_unknown_option(app_session: Any) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        await _human_behind(db, tenant, task, all_departments=True)
+        approval = await _pending_approval(
+            db, tenant, department_id=task.department_id, action_type="decision"
+        )
+
+        outcome = await _decide(
+            db,
+            tenant,
+            assistant,
+            task,
+            {"approval_id": str(approval.id), "decision": "approve", "option": "not-a-real-option"},
+        )
+        assert outcome.output.startswith("ERROR")
+        await db.refresh(approval)
+        assert approval.status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_decide_approval_is_offered_only_to_the_assistant() -> None:
+    lead = _agent(is_team_lead=True)
+    lead.is_tenant_assistant = False
+    assert "decide_approval" not in [
+        t.name
+        for t in offered_tools(lead, assigned_skills=[], active_skills=[], mcp_tools=MCP_TOOLS)
+    ]
+    lead.is_tenant_assistant = True
+    assert "decide_approval" in [
+        t.name
+        for t in offered_tools(lead, assigned_skills=[], active_skills=[], mcp_tools=MCP_TOOLS)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_decide_approval_dispatch_is_refused_for_a_non_assistant_agent(
+    app_session: Any,
+) -> None:
+    """Withholding the tool from the offer list only hides it -- the dispatch
+    has to refuse it too, or any agent that guesses the name could decide."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        agent, task = await _dept_agent_task(db, tenant, is_team_lead=True)
+        approval = await _pending_approval(db, tenant, department_id=task.department_id)
+        outcome = await _decide(
+            db, tenant, agent, task, {"approval_id": str(approval.id), "decision": "approve"}
+        )
+        assert outcome.output.startswith("ERROR")
+        assert "Assistant" in outcome.output
+
+
+# --------------------------------------------- the 5 status tools' offer gate
+
+
+@pytest.mark.asyncio
+async def test_status_tools_need_assistant_and_the_permission() -> None:
+    """Two independent gates, both required: is_tenant_assistant (existing
+    precedent, same as decide_approval), and the specific permission in
+    copilot_permissions (new to these 5 tools -- unlike decide_approval,
+    which has no permission gate of its own)."""
+    lead = _agent(is_team_lead=True)
+    lead.is_tenant_assistant = False
+    names = [
+        t.name
+        for t in offered_tools(
+            lead,
+            assigned_skills=[],
+            active_skills=[],
+            mcp_tools=MCP_TOOLS,
+            copilot_permissions=frozenset(
+                {"approval:view", "department:view", "agent:view", "budget:view", "statistics:view"}
+            ),
+        )
+    ]
+    assert "list_pending_approvals" not in names
+    assert "department_status" not in names
+    assert "agent_status" not in names
+    assert "budget_overview" not in names
+    assert "kpi_overview" not in names
+
+    lead.is_tenant_assistant = True
+    names = [
+        t.name
+        for t in offered_tools(
+            lead, assigned_skills=[], active_skills=[], mcp_tools=MCP_TOOLS
+        )
+    ]
+    assert "list_pending_approvals" not in names, (
+        "no copilot_permissions given, so nothing is offered"
+    )
+
+    names = [
+        t.name
+        for t in offered_tools(
+            lead,
+            assigned_skills=[],
+            active_skills=[],
+            mcp_tools=MCP_TOOLS,
+            copilot_permissions=frozenset({"approval:view"}),
+        )
+    ]
+    assert "list_pending_approvals" in names
+    assert "department_status" not in names
+    assert "agent_status" not in names
+    assert "budget_overview" not in names
+    assert "kpi_overview" not in names
+
+
+# ------------------------------------------------------ list_pending_approvals
+
+
+async def _list_approvals(
+    db: Any, tenant: uuid.UUID, assistant: m.Agent, task: m.Task, arguments: dict[str, Any]
+) -> ControlOutcome:
+    outcome = await execute_control_tool(
+        db,
+        tenant_id=tenant,
+        agent=assistant,
+        task=task,
+        tc=ToolCall(id="c1", name="list_pending_approvals", arguments=arguments),
+        decision=Decision(Effect.ALLOW),
+        assigned_skills=[],
+        active_skills=[],
+        mcp_conn=None,
+        originating_operator=None,
+    )
+    assert outcome is not None
+    return outcome
+
+
+@pytest.mark.asyncio
+async def test_list_pending_approvals_returns_only_what_the_human_could_see(
+    app_session: Any,
+) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        await _human_behind(db, tenant, task, all_departments=True)
+        approval = await _pending_approval(db, tenant, department_id=task.department_id)
+
+        outcome = await _list_approvals(db, tenant, assistant, task, {})
+        assert str(approval.id) in outcome.output
+
+
+@pytest.mark.asyncio
+async def test_list_pending_approvals_refuses_without_approval_view(app_session: Any) -> None:
+    """Parity with `GET /approvals`'s `require_departmental(APPROVAL_VIEW)`
+    403: a member with neither a tenant-wide grant nor a departmental seat
+    gets an explicit refusal, not a silently empty list."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        await _human_behind(db, tenant, task)  # no seat, no all_departments
+        await _pending_approval(db, tenant, department_id=task.department_id)
+
+        outcome = await _list_approvals(db, tenant, assistant, task, {})
+        assert outcome.output.startswith("ERROR")
+
+
+@pytest.mark.asyncio
+async def test_list_pending_approvals_is_visible_to_a_seat_only_member(
+    app_session: Any,
+) -> None:
+    """The corrected gating formula's whole point: a member with ONLY a
+    departmental seat grant (no tenant role at all) still sees their
+    department's approvals -- `holds_anywhere` reads the seat directly,
+    `authority.tenant_wide` alone would have refused this."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        await _human_behind(db, tenant, task, seat_in=task.department_id)
+        approval = await _pending_approval(db, tenant, department_id=task.department_id)
+
+        outcome = await _list_approvals(db, tenant, assistant, task, {})
+        assert str(approval.id) in outcome.output
+
+
+@pytest.mark.asyncio
+async def test_list_pending_approvals_dispatch_is_refused_for_a_non_assistant_agent(
+    app_session: Any,
+) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        agent, task = await _dept_agent_task(db, tenant, is_team_lead=True)
+        outcome = await _list_approvals(db, tenant, agent, task, {})
+        assert outcome.output.startswith("ERROR")
+
+
+# --------------------------------------------------------- department_status
+
+
+async def _department_status(
+    db: Any, tenant: uuid.UUID, assistant: m.Agent, task: m.Task, arguments: dict[str, Any]
+) -> ControlOutcome:
+    outcome = await execute_control_tool(
+        db,
+        tenant_id=tenant,
+        agent=assistant,
+        task=task,
+        tc=ToolCall(id="c1", name="department_status", arguments=arguments),
+        decision=Decision(Effect.ALLOW),
+        assigned_skills=[],
+        active_skills=[],
+        mcp_conn=None,
+        originating_operator=None,
+    )
+    assert outcome is not None
+    return outcome
+
+
+@pytest.mark.asyncio
+async def test_department_status_lists_only_visible_departments(app_session: Any) -> None:
+    """`all_departments` alone does not carry `perm(DEPARTMENT, VIEW)`
+    tenant-wide (that flag's only effect is `DepartmentScope.is_unrestricted`,
+    which `visible_departments` deliberately does not read -- see that
+    module's docstring and `agents.repo.visible_agents`'s identical note).
+    A real tenant-wide view needs an assigned role that actually grants it."""
+    from oc8.authz.permissions import ORG_ADMIN
+
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        member = await _human_behind(db, tenant, task)
+        member.role_id = (await _builtin_role(db, tenant, ORG_ADMIN)).id
+        await db.flush()
+        outcome = await _department_status(db, tenant, assistant, task, {})
+        assert "Vertrieb" in outcome.output
+
+
+@pytest.mark.asyncio
+async def test_department_status_by_id_404s_for_a_foreign_department(app_session: Any) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        other = m.Department(tenant_id=tenant, name="Buchhaltung", frame={})
+        db.add(other)
+        await db.flush()
+        await _human_behind(db, tenant, task, seat_in=task.department_id)
+        outcome = await _department_status(
+            db, tenant, assistant, task, {"department_id": str(other.id)}
+        )
+        assert outcome.output.startswith("ERROR")
+        assert "not found" in outcome.output.lower()
+
+
+@pytest.mark.asyncio
+async def test_department_status_refuses_without_department_view(app_session: Any) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        await _human_behind(db, tenant, task)
+        outcome = await _department_status(db, tenant, assistant, task, {})
+        assert outcome.output.startswith("ERROR")
+
+
+@pytest.mark.asyncio
+async def test_department_status_is_visible_to_a_seat_only_member(app_session: Any) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        await _human_behind(db, tenant, task, seat_in=task.department_id)
+        outcome = await _department_status(db, tenant, assistant, task, {})
+        assert "Vertrieb" in outcome.output
+
+
+@pytest.mark.asyncio
+async def test_department_status_dispatch_is_refused_for_a_non_assistant_agent(
+    app_session: Any,
+) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        agent, task = await _dept_agent_task(db, tenant, is_team_lead=True)
+        outcome = await _department_status(db, tenant, agent, task, {})
+        assert outcome.output.startswith("ERROR")
+
+
+# -------------------------------------------------------------- agent_status
+
+
+async def _agent_status(
+    db: Any, tenant: uuid.UUID, assistant: m.Agent, task: m.Task, arguments: dict[str, Any]
+) -> ControlOutcome:
+    outcome = await execute_control_tool(
+        db,
+        tenant_id=tenant,
+        agent=assistant,
+        task=task,
+        tc=ToolCall(id="c1", name="agent_status", arguments=arguments),
+        decision=Decision(Effect.ALLOW),
+        assigned_skills=[],
+        active_skills=[],
+        mcp_conn=None,
+        originating_operator=None,
+    )
+    assert outcome is not None
+    return outcome
+
+
+@pytest.mark.asyncio
+async def test_agent_status_lists_only_visible_agents(app_session: Any) -> None:
+    from oc8.authz.permissions import ORG_ADMIN
+
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        # Create a regular agent (not the tenant assistant) in the same department
+        other_agent = m.Agent(
+            tenant_id=tenant,
+            department_id=assistant.department_id,
+            name="Nora",
+            status="idle",
+            definition={},
+            presentation={},
+        )
+        db.add(other_agent)
+        await db.flush()
+        member = await _human_behind(db, tenant, task)
+        member.role_id = (await _builtin_role(db, tenant, ORG_ADMIN)).id
+        await db.flush()
+        outcome = await _agent_status(db, tenant, assistant, task, {})
+        assert "Nora" in outcome.output
+
+
+@pytest.mark.asyncio
+async def test_agent_status_by_id_404s_for_a_foreign_agent(app_session: Any) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        other = m.Department(tenant_id=tenant, name="Buchhaltung", frame={})
+        db.add(other)
+        await db.flush()
+        stranger = m.Agent(
+            tenant_id=tenant,
+            department_id=other.id,
+            name="Fremd",
+            status="idle",
+            definition={},
+            presentation={},
+        )
+        db.add(stranger)
+        await db.flush()
+        await _human_behind(db, tenant, task, seat_in=task.department_id)
+        outcome = await _agent_status(db, tenant, assistant, task, {"agent_id": str(stranger.id)})
+        assert outcome.output.startswith("ERROR")
+
+
+@pytest.mark.asyncio
+async def test_agent_status_refuses_without_agent_view(app_session: Any) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        await _human_behind(db, tenant, task)
+        outcome = await _agent_status(db, tenant, assistant, task, {})
+        assert outcome.output.startswith("ERROR")
+
+
+@pytest.mark.asyncio
+async def test_agent_status_is_visible_to_a_seat_only_member(app_session: Any) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        # Create a regular agent (not the tenant assistant) in the same department
+        other_agent = m.Agent(
+            tenant_id=tenant,
+            department_id=assistant.department_id,
+            name="Nora",
+            status="idle",
+            definition={},
+            presentation={},
+        )
+        db.add(other_agent)
+        await db.flush()
+        await _human_behind(db, tenant, task, seat_in=task.department_id)
+        outcome = await _agent_status(db, tenant, assistant, task, {})
+        assert "Nora" in outcome.output
+
+
+@pytest.mark.asyncio
+async def test_agent_status_dispatch_is_refused_for_a_non_assistant_agent(app_session: Any) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        agent, task = await _dept_agent_task(db, tenant, is_team_lead=True)
+        outcome = await _agent_status(db, tenant, agent, task, {})
+        assert outcome.output.startswith("ERROR")
+
+
+# ------------------------------------------------------------ budget_overview
+
+
+async def _budget_overview(
+    db: Any, tenant: uuid.UUID, assistant: m.Agent, task: m.Task, arguments: dict[str, Any]
+) -> ControlOutcome:
+    outcome = await execute_control_tool(
+        db,
+        tenant_id=tenant,
+        agent=assistant,
+        task=task,
+        tc=ToolCall(id="c1", name="budget_overview", arguments=arguments),
+        decision=Decision(Effect.ALLOW),
+        assigned_skills=[],
+        active_skills=[],
+        mcp_conn=None,
+        originating_operator=None,
+    )
+    assert outcome is not None
+    return outcome
+
+
+@pytest.mark.asyncio
+async def test_budget_overview_reports_the_tenant_wide_budget(app_session: Any) -> None:
+    from oc8.authz.permissions import ORG_ADMIN
+
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        role = await _builtin_role(db, tenant, ORG_ADMIN)
+        member = await _human_behind(db, tenant, task)
+        member.role_id = role.id
+        await db.flush()
+        db.add(
+            m.Budget(
+                tenant_id=tenant, department_id=None, soft_limit_tokens=1000, hard_limit_tokens=2000
+            )
+        )
+        await db.flush()
+
+        outcome = await _budget_overview(db, tenant, assistant, task, {})
+        assert "1000" in outcome.output
+        assert "2000" in outcome.output
+
+
+@pytest.mark.asyncio
+async def test_budget_overview_refuses_a_department_seat_alone(app_session: Any) -> None:
+    """BUDGET_VIEW is not seat-grantable at all -- a seat that grants every
+    other status tool must still refuse this one, with no
+    scope.holds_anywhere fallback."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        await _human_behind(db, tenant, task, all_departments=True)
+        outcome = await _budget_overview(db, tenant, assistant, task, {})
+        assert outcome.output.startswith("ERROR")
+
+
+@pytest.mark.asyncio
+async def test_budget_overview_dispatch_is_refused_for_a_non_assistant_agent(
+    app_session: Any,
+) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        agent, task = await _dept_agent_task(db, tenant, is_team_lead=True)
+        outcome = await _budget_overview(db, tenant, agent, task, {})
+        assert outcome.output.startswith("ERROR")
+
+
+# ---------------------------------------------------------------- kpi_overview
+
+
+async def _kpi_overview(
+    db: Any, tenant: uuid.UUID, assistant: m.Agent, task: m.Task, arguments: dict[str, Any]
+) -> ControlOutcome:
+    outcome = await execute_control_tool(
+        db,
+        tenant_id=tenant,
+        agent=assistant,
+        task=task,
+        tc=ToolCall(id="c1", name="kpi_overview", arguments=arguments),
+        decision=Decision(Effect.ALLOW),
+        assigned_skills=[],
+        active_skills=[],
+        mcp_conn=None,
+        originating_operator=None,
+    )
+    assert outcome is not None
+    return outcome
+
+
+@pytest.mark.asyncio
+async def test_kpi_overview_for_one_agent(app_session: Any) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        # A separate, non-assistant agent: _assistant_and_task's own agent has
+        # been flipped to is_tenant_assistant=True, and visible_agent excludes
+        # the assistant by design (same as agent_status's Task 5 fixture fix).
+        other_agent = m.Agent(
+            tenant_id=tenant,
+            department_id=assistant.department_id,
+            name="Nora",
+            status="idle",
+            definition={},
+            presentation={},
+        )
+        db.add(other_agent)
+        await db.flush()
+        await _human_behind(db, tenant, task, seat_in=task.department_id)
+        outcome = await _kpi_overview(
+            db, tenant, assistant, task, {"agent_id": str(other_agent.id)}
+        )
+        assert outcome.output.startswith("KPIs for agent Nora")
+
+
+@pytest.mark.asyncio
+async def test_kpi_overview_refuses_both_agent_and_department_at_once(
+    app_session: Any,
+) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        await _human_behind(db, tenant, task, all_departments=True)
+        outcome = await _kpi_overview(
+            db,
+            tenant,
+            assistant,
+            task,
+            {"agent_id": str(task.assigned_agent_id), "department_id": str(task.department_id)},
+        )
+        assert outcome.output.startswith("ERROR")
+
+
+@pytest.mark.asyncio
+async def test_kpi_overview_tenant_wide_refuses_a_department_seat_alone(
+    app_session: Any,
+) -> None:
+    """STATISTICS_VIEW is not seat-grantable, same reasoning as
+    budget_overview -- a seat with every other status permission still
+    cannot read the tenant-wide figures."""
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        await _human_behind(db, tenant, task, all_departments=True)
+        outcome = await _kpi_overview(db, tenant, assistant, task, {})
+        assert outcome.output.startswith("ERROR")
+
+
+@pytest.mark.asyncio
+async def test_kpi_overview_tenant_wide_reports_when_granted(app_session: Any) -> None:
+    from oc8.authz.permissions import ORG_ADMIN
+
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        assistant, task = await _assistant_and_task(db, tenant)
+        role = await _builtin_role(db, tenant, ORG_ADMIN)
+        member = await _human_behind(db, tenant, task)
+        member.role_id = role.id
+        await db.flush()
+        outcome = await _kpi_overview(db, tenant, assistant, task, {})
+        assert outcome.output.startswith("KPIs for the whole tenant")
+
+
+@pytest.mark.asyncio
+async def test_kpi_overview_dispatch_is_refused_for_a_non_assistant_agent(
+    app_session: Any,
+) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        agent, task = await _dept_agent_task(db, tenant, is_team_lead=True)
+        outcome = await _kpi_overview(db, tenant, agent, task, {})
+        assert outcome.output.startswith("ERROR")

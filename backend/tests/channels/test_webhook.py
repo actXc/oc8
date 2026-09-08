@@ -37,7 +37,7 @@ class FakeChannel:
     def capabilities(self) -> ChannelCapabilities:
         return ChannelCapabilities(max_classification="internal")
 
-    def verify_inbound(self, *, headers: dict[str, str], body: bytes) -> bool:
+    async def verify_inbound(self, *, headers: dict[str, str], body: bytes) -> bool:
         return self.verifies
 
     def parse_inbound(self, update: dict[str, Any]) -> Any:

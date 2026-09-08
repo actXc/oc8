@@ -33,6 +33,7 @@ from oc8.authz.permissions import (
     AUDIT_VERIFY,
     BUILTIN_ROLE_PERMISSIONS,
     CLARIFICATION_ANSWER,
+    COPILOT_USE,
     DELEGATABLE_PERMISSIONS,
     DEPARTMENT_SCOPABLE,
     MANAGE,
@@ -120,16 +121,23 @@ def test_a_delegatable_permission_changes_no_configuration() -> None:
     """The escalation ceiling, stated as set arithmetic rather than as a promise.
 
     Look, start work, answer, decide, verify -- and nothing else. A permission
-    that is neither a `:view` nor one of these five verbs has appeared in the
-    delegatable set, and whatever it is, it is not one of the five things the
+    that is neither a `:view` nor one of these six verbs has appeared in the
+    delegatable set, and whatever it is, it is not one of the six things the
     design says a tenant role may ever be.
     """
-    verbs = {RUN_START, RUN_CONTROL, APPROVAL_DECIDE, CLARIFICATION_ANSWER, AUDIT_VERIFY}
+    verbs = {
+        RUN_START,
+        RUN_CONTROL,
+        APPROVAL_DECIDE,
+        CLARIFICATION_ANSWER,
+        AUDIT_VERIFY,
+        COPILOT_USE,
+    }
     strange = sorted(
         p for p in DELEGATABLE_PERMISSIONS if not p.endswith(f":{VIEW}") and p not in verbs
     )
     assert not strange, (
-        f"these are offerable but are neither a read nor one of the five verbs: {strange}"
+        f"these are offerable but are neither a read nor one of the six verbs: {strange}"
     )
 
 

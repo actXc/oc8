@@ -216,7 +216,7 @@ class TelegramChannel:
         self._max_classification = max_classification
         self._webhook_secret = webhook_secret
 
-    def verify_inbound(self, *, headers: Mapping[str, str], body: bytes) -> bool:
+    async def verify_inbound(self, *, headers: Mapping[str, str], body: bytes) -> bool:
         """Telegram's own scheme: a secret this deployment chose, echoed back in
         `X-Telegram-Bot-Api-Secret-Token` on every call.
 

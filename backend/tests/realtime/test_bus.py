@@ -91,7 +91,7 @@ async def test_publish_event_triggers_push_for_approval_created(
         assert calls[0]["payload"] == {
             "title": "Neue Freigabe",
             "body": "Ein Agent wartet auf deine Entscheidung.",
-            "url": f"/workspace?item={approval_id}",
+            "url": "/workspace",
         }
     finally:
         await bus.close()
@@ -134,7 +134,7 @@ async def test_publish_event_pushes_from_envelope_without_a_committed_row(
         assert calls[0]["payload"] == {
             "title": "Nora wants to call crm_create_lead",
             "body": "Betrag über 3000 €",
-            "url": f"/workspace?item={approval_id}",
+            "url": "/workspace",
         }
     finally:
         await bus.close()

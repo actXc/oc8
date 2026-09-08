@@ -184,15 +184,17 @@ async def send_message(
     attachment_ids: list[uuid.UUID] | None = None,
     originating_operator: str | None,
     operator_role: str | None = None,
-    telegram_external_id: str | None = None,
+    chat_channel: str | None = None,
+    chat_channel_external_id: str | None = None,
 ) -> tuple[m.ChatMessage, m.AgentRun | None]:
     """Record the user's turn and enqueue the run that answers it.
 
     `operator_role` is the acting token's `role` claim, recorded on the run so
     that code running LATER -- inside the run, with no request and no token --
     can still resolve what the human behind this chat could reach. See
-    `control_tools._acting_token_role`. None for a Telegram sender: that door
-    carries no token, and its authority is the binding row.
+    `control_tools._acting_token_role`. None for a channel sender (Telegram,
+    Teams, ...): that door carries no token, and its authority is the
+    binding row.
 
     `attachment_ids` are `FileAttachment` rows uploaded via
     `POST /chat/sessions/{id}/attachments` while still owned by this
@@ -311,8 +313,9 @@ async def send_message(
         context["originating_operator"] = originating_operator
     if operator_role is not None:
         context["operator_role"] = operator_role
-    if telegram_external_id is not None:
-        context["telegram_external_id"] = telegram_external_id
+    if chat_channel is not None and chat_channel_external_id is not None:
+        context["chat_channel"] = chat_channel
+        context["chat_channel_external_id"] = chat_channel_external_id
 
     # Open the session's Task HERE, on turn one, rather than letting the engine
     # open one implicitly when the run starts.

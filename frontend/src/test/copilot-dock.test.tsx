@@ -5,23 +5,33 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const {
   canMock,
   assistantMock,
+  authMock,
   sessionsMock,
   createSessionMock,
   messagesMock,
   sendMessageMock,
+  renameSessionMock,
+  deleteSessionMock,
   proposalsMock,
   applyProposalMock,
   rejectProposalMock,
+  runActivityMock,
+  liveStatusMock,
 } = vi.hoisted(() => ({
   canMock: vi.fn(() => true),
   assistantMock: vi.fn(),
+  authMock: vi.fn(),
   sessionsMock: vi.fn(),
   createSessionMock: vi.fn(),
   messagesMock: vi.fn(),
   sendMessageMock: vi.fn(),
+  renameSessionMock: vi.fn(),
+  deleteSessionMock: vi.fn(),
   proposalsMock: vi.fn(),
   applyProposalMock: vi.fn(),
   rejectProposalMock: vi.fn(),
+  runActivityMock: vi.fn(),
+  liveStatusMock: vi.fn(),
 }));
 
 vi.mock("@/lib/governance-hooks", async (importOriginal) => {
@@ -34,18 +44,33 @@ vi.mock("@/lib/hooks", async (importOriginal) => {
   return {
     ...actual,
     useAssistant: () => assistantMock(),
-    useCopilotProposals: () => proposalsMock(),
+    useAuth: () => authMock(),
+    useCopilotProposals: (options?: unknown) => proposalsMock(options),
     useApplyCopilotProposal: () => ({ mutate: applyProposalMock, isPending: false }),
     useRejectCopilotProposal: () => ({ mutate: rejectProposalMock, isPending: false }),
   };
 });
 
 vi.mock("@/lib/hooks-chat", () => ({
-  useChatSessions: () => sessionsMock(),
+  // Forwarding the real args (instead of ignoring them) lets a test give
+  // different tabs -- now genuinely distinct CopilotChatTab instances, each
+  // with its own sessionId -- different mocked data via mockImplementation;
+  // every existing test still works unchanged since they configure these
+  // with mockReturnValue, which answers the same value regardless of args.
+  useChatSessions: (agentId?: string) => sessionsMock(agentId),
   useCreateChatSession: () => ({ mutate: createSessionMock, isPending: false }),
-  useChatMessages: () => messagesMock(),
+  useChatMessages: (sessionId: string | null) => messagesMock(sessionId),
   useSendChatMessage: () => ({ mutate: sendMessageMock, isPending: false }),
+  useRenameChatSession: () => ({ mutate: renameSessionMock, isPending: false }),
+  useDeleteChatSession: () => ({ mutate: deleteSessionMock, isPending: false }),
+  useCopilotRunActivity: (sessionId: string | null, runId: string | null) =>
+    runActivityMock(sessionId, runId),
 }));
+
+vi.mock("@/lib/live/provider", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/live/provider")>();
+  return { ...actual, useLiveConnectionStatus: () => liveStatusMock() };
+});
 
 import { CopilotDock } from "@/components/copilot-dock";
 
@@ -65,30 +90,46 @@ function openDock() {
 
 describe("CopilotDock", () => {
   beforeEach(() => {
+    // Tabs are now persisted to localStorage (scoped by member id) -- clear
+    // it so one test's open tabs can't leak into the next test's initial
+    // render. useAuth resolves synchronously to a fixed member here so every
+    // test's tabs/bootstrap logic activates on the very first render, same
+    // as before memberId depended on useAuth actually resolving; the one
+    // test below that needs the real pending-then-resolved race overrides
+    // this itself.
+    localStorage.clear();
     canMock.mockReset();
     canMock.mockImplementation(() => true);
     assistantMock.mockReset();
     assistantMock.mockReturnValue({ data: { agentId: "assistant-1" } });
+    authMock.mockReset();
+    authMock.mockReturnValue({ data: { memberId: "member-1" } });
     sessionsMock.mockReset();
     sessionsMock.mockReturnValue({ data: [] });
     createSessionMock.mockReset();
     messagesMock.mockReset();
     messagesMock.mockReturnValue({ data: undefined });
     sendMessageMock.mockReset();
+    renameSessionMock.mockReset();
+    deleteSessionMock.mockReset();
     proposalsMock.mockReset();
     proposalsMock.mockReturnValue({ data: [] });
     applyProposalMock.mockReset();
     rejectProposalMock.mockReset();
+    runActivityMock.mockReset();
+    runActivityMock.mockReturnValue({ data: null });
+    liveStatusMock.mockReset();
+    liveStatusMock.mockReturnValue("connected");
   });
 
-  it("renders nothing for a caller without copilot:manage, and never even calls the chat-pipeline hooks", () => {
+  it("renders nothing for a caller without copilot:use, and never even calls the chat-pipeline hooks", () => {
     canMock.mockImplementation(() => false);
     renderDock();
     expect(screen.queryByRole("button", { name: /oc8 copilot/i })).not.toBeInTheDocument();
     // The permission check has to happen BEFORE useAssistant/useChatSessions
     // are called, not just before their result is rendered -- otherwise
     // every signed-in user fires a GET /assistant + GET /chat/sessions (a
-    // 403 for anyone without copilot:manage) on every page load.
+    // 403 for anyone without copilot:use) on every page load.
     expect(assistantMock).not.toHaveBeenCalled();
     expect(sessionsMock).not.toHaveBeenCalled();
   });
@@ -389,6 +430,24 @@ describe("CopilotDock", () => {
     expect(screen.queryByRole("region", { name: /pending proposals/i })).not.toBeInTheDocument();
   });
 
+  it("does not fetch or poll pending proposals for a caller who only holds copilot:use", () => {
+    canMock.mockImplementation((p: string) => p === "copilot:use");
+    renderDock();
+    openDock();
+    expect(proposalsMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
+  });
+
+  it("shows pending proposals but hides Apply/Reject for a caller without copilot:manage", () => {
+    canMock.mockImplementation((p: string) => p === "copilot:use" || p === "copilot:view");
+    proposalsMock.mockReturnValue({ data: [draft] });
+    renderDock();
+    openDock();
+    expect(screen.getByRole("region", { name: /pending proposals/i })).toBeInTheDocument();
+    expect(screen.getByText("agent.mission.set")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^apply$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^reject$/i })).not.toBeInTheDocument();
+  });
+
   it("closing and reopening the dock keeps the same session (no reset on remount-free toggle)", () => {
     sessionsMock.mockReturnValue({
       data: [{ id: "s1", agentId: "assistant-1", title: "", createdAt: "t", lastMessageAt: null }],
@@ -425,5 +484,426 @@ describe("CopilotDock", () => {
     // not in local component state.
     openDock();
     expect(screen.getByText("Hallo")).toBeInTheDocument();
+  });
+
+  it("shows the session picker once more than one session exists, and switches on selection", () => {
+    sessionsMock.mockReturnValue({
+      data: [
+        {
+          id: "s1",
+          agentId: "assistant-1",
+          title: "Erste Frage",
+          createdAt: "2026-01-01T00:00:00Z",
+          lastMessageAt: null,
+        },
+        {
+          id: "s2",
+          agentId: "assistant-1",
+          title: "Zweite Frage",
+          createdAt: "2026-01-02T00:00:00Z",
+          lastMessageAt: null,
+        },
+      ],
+    });
+    renderDock();
+    openDock();
+    // The picker's trigger renders the current session's title in a
+    // `span.truncate` -- scope to that so this doesn't also match the menu
+    // item once the dropdown is open (its own row also carries the title).
+    expect(screen.getByText("Erste Frage", { selector: "span.truncate" })).toBeInTheDocument();
+    fireEvent.pointerDown(screen.getByText("Erste Frage", { selector: "span.truncate" }), {
+      button: 0,
+    });
+    fireEvent.click(screen.getByText("Zweite Frage"));
+    // The picker's trigger now shows the newly-selected session's title.
+    expect(screen.getByText("Zweite Frage", { selector: "span.truncate" })).toBeInTheDocument();
+    expect(
+      screen.queryByText("Erste Frage", { selector: "span.truncate" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("a new chat button resets to the lazy-creation state even when other sessions exist", () => {
+    // One existing session, auto-selected on mount -- the exact case where,
+    // without this button, there was previously no way back to a blank,
+    // not-yet-created session at all.
+    sessionsMock.mockReturnValue({
+      data: [
+        {
+          id: "s1",
+          agentId: "assistant-1",
+          title: "Erste Frage",
+          createdAt: "t",
+          lastMessageAt: null,
+        },
+      ],
+    });
+    createSessionMock.mockImplementation(
+      (agentId: string, opts?: { onSuccess?: (s: unknown) => void }) => {
+        opts?.onSuccess?.({
+          id: "new-session",
+          agentId,
+          title: "",
+          createdAt: "t",
+          lastMessageAt: null,
+        });
+      },
+    );
+    renderDock();
+    openDock();
+
+    fireEvent.click(screen.getByRole("button", { name: /new chat/i }));
+
+    // Same shape as "with no existing session, sending a first message
+    // creates one and then sends the message" -- proving the button put the
+    // dock back into that same lazy-creation state, rather than the reset
+    // being silently clobbered by the bootstrap effect that auto-selects
+    // the existing session.
+    const textarea = screen.getByPlaceholderText(/configure or ask oc8/i);
+    fireEvent.change(textarea, { target: { value: "Fresh question" } });
+    fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+
+    expect(createSessionMock).toHaveBeenCalledWith("assistant-1", expect.anything());
+    expect(sendMessageMock).toHaveBeenCalledWith("Fresh question", expect.anything());
+  });
+
+  it("a new chat button still works right after a tenant's very first session is created lazily", () => {
+    // No sessions at all until the first message creates one -- the bootstrap
+    // effect never runs (sessions.length is 0 the whole time), so it's
+    // send()'s own onSuccess, not the effect, that has to arm the ref.
+    // sessionsMock is stateful here to mimic the query-invalidation refetch
+    // that lands the new session in `sessions` shortly after creation.
+    let sessions: Array<{
+      id: string;
+      agentId: string;
+      title: string;
+      createdAt: string;
+      lastMessageAt: string | null;
+    }> = [];
+    sessionsMock.mockImplementation(() => ({ data: sessions }));
+    createSessionMock.mockImplementation(
+      (agentId: string, opts?: { onSuccess?: (s: unknown) => void }) => {
+        const created = {
+          id: "new-session",
+          agentId,
+          title: "",
+          createdAt: "t",
+          lastMessageAt: null,
+        };
+        sessions = [created];
+        opts?.onSuccess?.(created);
+      },
+    );
+    renderDock();
+    openDock();
+
+    fireEvent.change(screen.getByPlaceholderText(/configure or ask oc8/i), {
+      target: { value: "First message" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+    expect(createSessionMock).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /new chat/i }));
+    fireEvent.change(screen.getByPlaceholderText(/configure or ask oc8/i), {
+      target: { value: "Second message" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+
+    // Without arming the ref in send()'s onSuccess, the bootstrap effect
+    // would silently re-select the just-created session on this click,
+    // making this a plain send instead of a new lazy creation.
+    expect(createSessionMock).toHaveBeenCalledTimes(2);
+  });
+
+  // --- Task 16: a persisted tab bar, replacing the single-session dock -----
+
+  it("opens a new blank tab without disturbing the currently active tab's session", () => {
+    sessionsMock.mockReturnValue({
+      data: [
+        {
+          id: "s1",
+          agentId: "assistant-1",
+          title: "Erste Frage",
+          createdAt: "t",
+          lastMessageAt: null,
+        },
+      ],
+    });
+    // The two tabs will have distinct sessionId props (s1 vs null) -- key
+    // the mock off that (like the real hook would key its query off it)
+    // instead of a single mockReturnValue, or both tabs would show the same
+    // transcript regardless of which session they're actually on.
+    messagesMock.mockImplementation((sessionId: string | null) =>
+      sessionId === "s1"
+        ? {
+            data: [
+              {
+                id: "m1",
+                sessionId: "s1",
+                role: "user",
+                content: "Hallo",
+                runId: null,
+                renderedComponents: [],
+                createdAt: "t",
+              },
+              {
+                id: "m2",
+                sessionId: "s1",
+                role: "assistant",
+                content: "Hi, wie kann ich helfen?",
+                runId: "r1",
+                renderedComponents: [],
+                createdAt: "t",
+              },
+            ],
+          }
+        : { data: undefined },
+    );
+    renderDock();
+    openDock();
+    expect(screen.getByText("Hallo")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^new tab$/i }));
+
+    // The new tab is blank and active -- the first tab's transcript is not
+    // rendered while it isn't the active one.
+    expect(screen.queryByText("Hallo")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/configure or ask oc8/i)).toBeInTheDocument();
+
+    // Switching back to the first tab shows its session is untouched.
+    fireEvent.click(screen.getByRole("button", { name: /erste frage tab/i }));
+    expect(screen.getByText("Hallo")).toBeInTheDocument();
+  });
+
+  it("switching tabs preserves each tab's own composer draft text", () => {
+    renderDock();
+    openDock();
+    fireEvent.change(screen.getByPlaceholderText(/configure or ask oc8/i), {
+      target: { value: "Draft in tab one" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /^new tab$/i }));
+    fireEvent.change(screen.getByPlaceholderText(/configure or ask oc8/i), {
+      target: { value: "Draft in tab two" },
+    });
+
+    // Both tabs are still session-less, so both pills fall back to the same
+    // "untitled" label -- index into DOM order (tab creation order) rather
+    // than by name to tell them apart.
+    const tabButtons = screen.getAllByRole("button", { name: /untitled chat tab/i });
+    expect(tabButtons).toHaveLength(2);
+
+    fireEvent.click(tabButtons[0]);
+    expect(screen.getByPlaceholderText(/configure or ask oc8/i)).toHaveValue("Draft in tab one");
+
+    fireEvent.click(tabButtons[1]);
+    expect(screen.getByPlaceholderText(/configure or ask oc8/i)).toHaveValue("Draft in tab two");
+  });
+
+  it("selecting a session via ChatSessionPicker focuses its existing tab instead of duplicating it", () => {
+    sessionsMock.mockReturnValue({
+      data: [
+        {
+          id: "s1",
+          agentId: "assistant-1",
+          title: "Erste Frage",
+          createdAt: "2026-01-01T00:00:00Z",
+          lastMessageAt: null,
+        },
+        {
+          id: "s2",
+          agentId: "assistant-1",
+          title: "Zweite Frage",
+          createdAt: "2026-01-02T00:00:00Z",
+          lastMessageAt: null,
+        },
+      ],
+    });
+    renderDock();
+    openDock();
+    // Bootstrap opens a first tab on the most recent session, s1.
+    expect(screen.getByText("Erste Frage", { selector: "span.truncate" })).toBeInTheDocument();
+    // Counted via the DOM structure (not getByRole) since the tab pills sit
+    // outside the still-open dropdown's content and Radix marks the rest of
+    // the page aria-hidden while it's open -- getByRole would incorrectly
+    // see zero tabs whenever the picker's dropdown is open.
+    expect(document.querySelectorAll("[data-copilot-tab]")).toHaveLength(1);
+
+    // Pick s2 via the picker -- opens it into a second tab.
+    fireEvent.pointerDown(screen.getByText("Erste Frage", { selector: "span.truncate" }), {
+      button: 0,
+    });
+    fireEvent.click(screen.getByText("Zweite Frage"));
+    expect(screen.getByText("Zweite Frage", { selector: "span.truncate" })).toBeInTheDocument();
+    expect(document.querySelectorAll("[data-copilot-tab]")).toHaveLength(2);
+
+    // Pick s1 again via the picker -- must focus the FIRST tab, not open a
+    // third one.
+    fireEvent.pointerDown(screen.getByText("Zweite Frage", { selector: "span.truncate" }), {
+      button: 0,
+    });
+    fireEvent.click(screen.getByText("Erste Frage", { selector: "button" }));
+
+    expect(screen.getByText("Erste Frage", { selector: "span.truncate" })).toBeInTheDocument();
+    expect(document.querySelectorAll("[data-copilot-tab]")).toHaveLength(2);
+  });
+
+  it("closing a tab removes it and activates the previous tab", () => {
+    renderDock();
+    openDock();
+    // Tab 1 (bootstrapped, blank). Open two more.
+    fireEvent.click(screen.getByRole("button", { name: /^new tab$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^new tab$/i }));
+    let tabButtons = screen.getAllByRole("button", { name: /untitled chat tab/i });
+    expect(tabButtons).toHaveLength(3);
+
+    // Tab 3 is active; close it via its own "close" button.
+    const closeButtons = screen.getAllByRole("button", { name: /^close untitled chat$/i });
+    fireEvent.click(closeButtons[closeButtons.length - 1]);
+
+    tabButtons = screen.getAllByRole("button", { name: /untitled chat tab/i });
+    expect(tabButtons).toHaveLength(2);
+    // The previous tab (tab 2) is now the active one -- its composer is the
+    // one rendered.
+    expect(screen.getByPlaceholderText(/configure or ask oc8/i)).toBeInTheDocument();
+  });
+
+  it("persists open tabs across a remount, scoped to the current member", () => {
+    sessionsMock.mockReturnValue({
+      data: [
+        {
+          id: "s1",
+          agentId: "assistant-1",
+          title: "Erste Frage",
+          createdAt: "t",
+          lastMessageAt: null,
+        },
+      ],
+    });
+    const { unmount } = renderDock();
+    openDock();
+    fireEvent.click(screen.getByRole("button", { name: /^new tab$/i }));
+    expect(screen.getAllByRole("button", { name: /frage tab|untitled chat tab/i })).toHaveLength(2);
+
+    unmount();
+
+    expect(localStorage.getItem("oc8-copilot-tabs-member-1")).not.toBeNull();
+
+    renderDock();
+    openDock();
+    expect(screen.getAllByRole("button", { name: /frage tab|untitled chat tab/i })).toHaveLength(2);
+  });
+
+  it("does not clobber a real member's persisted tabs while useAuth is still resolving", () => {
+    // Pre-seed localStorage as if this member already had two tabs open from
+    // a previous visit.
+    localStorage.setItem(
+      "oc8-copilot-tabs-member-1",
+      JSON.stringify([
+        { uiId: "existing-1", sessionId: null },
+        { uiId: "existing-2", sessionId: null },
+      ]),
+    );
+
+    // Simulate the exact race the bug depended on: useAuth's query is still
+    // pending (`data: undefined`) on the first render, and only resolves to
+    // the real member afterwards. authMock is a plain vi.fn() rather than a
+    // real async query, so changing its return value alone doesn't trigger a
+    // re-render -- the toggle clicks below force CopilotDockPanel to
+    // re-render and read the new value, the same way a real query settling
+    // would.
+    authMock.mockReturnValue({ data: undefined });
+
+    renderDock();
+    openDock();
+    // While useAuth is still pending, memberId is unknown -- no tabs should
+    // have loaded or bootstrapped yet (no composer for a tab).
+    expect(screen.queryByPlaceholderText(/configure or ask oc8/i)).not.toBeInTheDocument();
+
+    authMock.mockReturnValue({ data: { memberId: "member-1" } });
+    // Force a re-render so the new mock return value is actually read.
+    fireEvent.click(screen.getByRole("button", { name: /oc8 copilot/i }));
+    fireEvent.click(screen.getByRole("button", { name: /oc8 copilot/i }));
+
+    expect(JSON.parse(localStorage.getItem("oc8-copilot-tabs-member-1") ?? "[]")).toHaveLength(2);
+  });
+
+  it("preserves an unsent draft across closing and reopening the dock", () => {
+    renderDock();
+    openDock();
+    fireEvent.change(screen.getByPlaceholderText(/configure or ask oc8/i), {
+      target: { value: "unsent draft" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /oc8 copilot/i })); // close
+    expect(screen.queryByPlaceholderText(/configure or ask oc8/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /oc8 copilot/i })); // reopen
+    expect(screen.getByPlaceholderText(/configure or ask oc8/i)).toHaveValue("unsent draft");
+  });
+
+  it("falls back to a working composer when useAuth fails outright, instead of staying blocked forever", () => {
+    authMock.mockReturnValue({ data: undefined, isError: true });
+    renderDock();
+    openDock();
+    expect(screen.getByPlaceholderText(/configure or ask oc8/i)).toBeInTheDocument();
+  });
+
+  it("keeps tracking a run's activity after the message poll clears the persisted user turn's runId", () => {
+    sessionsMock.mockReturnValue({
+      data: [{ id: "s1", agentId: "assistant-1", title: "", createdAt: "t", lastMessageAt: null }],
+    });
+    messagesMock.mockReturnValue({ data: [] });
+    sendMessageMock.mockImplementation(
+      (text: string, opts?: { onSuccess?: (message: unknown) => void }) =>
+        opts?.onSuccess?.({
+          id: "m1",
+          sessionId: "s1",
+          role: "user",
+          content: text,
+          runId: "run-1",
+          renderedComponents: [],
+          createdAt: "t",
+        }),
+    );
+    renderDock();
+    openDock();
+
+    const textarea = screen.getByPlaceholderText(/configure or ask oc8/i) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "Cost this month?" } });
+    fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+
+    expect(runActivityMock).toHaveBeenLastCalledWith("s1", "run-1");
+
+    // Simulate the 2s poll replacing the cache with the persisted row -- the
+    // backend never sets run_id on the user's own ChatMessage (only on the
+    // assistant's terminal reply), so this is what a real poll looks like.
+    messagesMock.mockReturnValue({
+      data: [
+        {
+          id: "m1",
+          sessionId: "s1",
+          role: "user",
+          content: "Cost this month?",
+          runId: null,
+          renderedComponents: [],
+          createdAt: "t",
+        },
+      ],
+    });
+    fireEvent.change(textarea, { target: { value: "x" } });
+
+    expect(runActivityMock).toHaveBeenLastCalledWith("s1", "run-1");
+  });
+
+  it("shows a reconnecting notice while the WS connection is down", () => {
+    liveStatusMock.mockReturnValue("disconnected");
+    renderDock();
+    openDock();
+    expect(screen.getByText(/reconnecting/i)).toBeInTheDocument();
+  });
+
+  it("hides the reconnecting notice once the WS connection is back", () => {
+    liveStatusMock.mockReturnValue("connected");
+    renderDock();
+    openDock();
+    expect(screen.queryByText(/reconnecting/i)).not.toBeInTheDocument();
   });
 });

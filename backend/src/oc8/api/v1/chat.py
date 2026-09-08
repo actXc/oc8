@@ -14,8 +14,9 @@ from oc8 import models as m
 from oc8.agent.assistant import get_or_create_assistant
 from oc8.agents.repo import visible_agent
 from oc8.api.deps import CurrentPrincipal, DbSession, require_departmental, require_permission
+from oc8.api.v1.run import run_to_dto
 from oc8.authz.authority import Authority, authority_for_principal, tenant_wide_read
-from oc8.authz.permissions import AGENT, COPILOT, MANAGE, RUN_START, VIEW, perm
+from oc8.authz.permissions import AGENT, COPILOT, COPILOT_USE, MANAGE, RUN_START, VIEW, perm
 from oc8.authz.scope import HumanActor
 from oc8.chat.service import (
     create_session,
@@ -27,7 +28,7 @@ from oc8.chat.service import (
     send_message,
 )
 from oc8.schemas.base import CamelModel
-from oc8.schemas.dto import ChatMessageDTO, ChatSessionDTO, FileAttachmentDTO
+from oc8.schemas.dto import ChatMessageDTO, ChatSessionDTO, FileAttachmentDTO, RunDTO
 from oc8.schemas.requests import (
     CreateChatSessionRequest,
     RenameChatSessionRequest,
@@ -87,7 +88,7 @@ class AssistantDTO(CamelModel):
 @router.get(
     "/assistant",
     response_model=AssistantDTO,
-    dependencies=[Depends(require_permission(perm(COPILOT, MANAGE)))],
+    dependencies=[Depends(require_permission(COPILOT_USE))],
 )
 async def get_assistant(db: DbSession, principal: CurrentPrincipal) -> AssistantDTO:
     agent = await get_or_create_assistant(db, tenant_id=principal.tenant_id)
@@ -96,12 +97,25 @@ async def get_assistant(db: DbSession, principal: CurrentPrincipal) -> Assistant
 
 
 async def _assistant_visible(
-    db: DbSession, *, tenant_id: uuid.UUID, authority: Authority, agent_id: uuid.UUID
+    db: DbSession,
+    *,
+    tenant_id: uuid.UUID,
+    authority: Authority,
+    agent_id: uuid.UUID,
+    permission: str = COPILOT_USE,
 ) -> bool:
-    """The one exception to department-scoped chat visibility: the tenant's
-    singleton Assistant is reachable by anyone holding copilot:manage,
-    regardless of which department they otherwise see."""
-    if perm(COPILOT, MANAGE) not in authority.tenant_wide:
+    """Whether `agent_id` is the tenant's singleton Assistant AND the caller
+    holds `permission` tenant-wide.
+
+    Two callers, two different questions: `create_chat_session` asks "can this
+    caller open THEIR OWN Assistant session at all" (default `COPILOT_USE`,
+    held by every human role) while `_owned_session`'s foreign-session branch
+    asks "can this caller read/reply in SOMEONE ELSE's Assistant session"
+    (explicit `perm(COPILOT, MANAGE)`, held only by org_admin) -- the same
+    function, two different bars, so a caller holding only `copilot:use`
+    cannot walk through the second, stricter door.
+    """
+    if permission not in authority.tenant_wide:
         return False
     assistant = await get_or_create_assistant(db, tenant_id=tenant_id)
     return assistant.id == agent_id
@@ -110,7 +124,10 @@ async def _assistant_visible(
 @router.get("/chat/sessions", response_model=list[ChatSessionDTO])
 async def get_sessions(
     db: DbSession,
-    actor: Annotated[HumanActor, Depends(require_departmental(perm(AGENT, VIEW)))],
+    actor: Annotated[
+        HumanActor,
+        Depends(require_departmental(perm(AGENT, VIEW), or_tenant_wide=COPILOT_USE)),
+    ],
     agent_id: Annotated[uuid.UUID | None, Query(alias="agentId")] = None,
 ) -> list[ChatSessionDTO]:
     sessions = await list_sessions(
@@ -127,7 +144,10 @@ async def create_chat_session(
     request: Request,
     body: CreateChatSessionRequest,
     db: DbSession,
-    actor: Annotated[HumanActor, Depends(require_departmental(perm(AGENT, VIEW)))],
+    actor: Annotated[
+        HumanActor,
+        Depends(require_departmental(perm(AGENT, VIEW), or_tenant_wide=COPILOT_USE)),
+    ],
 ) -> ChatSessionDTO:
     authority = await authority_for_principal(request, db, actor.principal)
     is_assistant = await _assistant_visible(
@@ -142,7 +162,7 @@ async def create_chat_session(
         # `visible_agents`/`visible_agent` hide the Assistant from every screen
         # that browses agents, so this -- the one door that is deliberately
         # ABOUT the Assistant -- has to say so. `_assistant_visible` has already
-        # established both halves: this caller holds copilot:manage, and this id
+        # established both halves: this caller holds copilot:use, and this id
         # is the tenant's Assistant and nothing else.
         include_tenant_assistant=is_assistant,
     )
@@ -173,6 +193,7 @@ async def _owned_session(
             tenant_id=actor.principal.tenant_id,
             authority=authority,
             agent_id=session.agent_id,
+            permission=perm(COPILOT, MANAGE),
         )
     if session is None or not owned:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "chat session not found")
@@ -184,7 +205,10 @@ async def get_messages(
     request: Request,
     session_id: uuid.UUID,
     db: DbSession,
-    actor: Annotated[HumanActor, Depends(require_departmental(perm(AGENT, VIEW)))],
+    actor: Annotated[
+        HumanActor,
+        Depends(require_departmental(perm(AGENT, VIEW), or_tenant_wide=COPILOT_USE)),
+    ],
 ) -> list[ChatMessageDTO]:
     await _owned_session(request, session_id, db, actor)
     messages = await list_messages(db, tenant_id=actor.principal.tenant_id, session_id=session_id)
@@ -197,7 +221,10 @@ async def rename_chat_session(
     session_id: uuid.UUID,
     body: RenameChatSessionRequest,
     db: DbSession,
-    actor: Annotated[HumanActor, Depends(require_departmental(perm(AGENT, VIEW)))],
+    actor: Annotated[
+        HumanActor,
+        Depends(require_departmental(perm(AGENT, VIEW), or_tenant_wide=COPILOT_USE)),
+    ],
 ) -> ChatSessionDTO:
     session = await _owned_session(request, session_id, db, actor)
     await rename_session(db, session=session, title=body.title)
@@ -210,7 +237,10 @@ async def delete_chat_session(
     request: Request,
     session_id: uuid.UUID,
     db: DbSession,
-    actor: Annotated[HumanActor, Depends(require_departmental(perm(AGENT, VIEW)))],
+    actor: Annotated[
+        HumanActor,
+        Depends(require_departmental(perm(AGENT, VIEW), or_tenant_wide=COPILOT_USE)),
+    ],
 ) -> None:
     session = await _owned_session(request, session_id, db, actor)
     await delete_session(db, tenant_id=actor.principal.tenant_id, session=session)
@@ -221,23 +251,31 @@ async def delete_chat_session(
     "/chat/sessions/{session_id}/messages",
     response_model=ChatMessageDTO,
     status_code=status.HTTP_201_CREATED,
-    # RUN_START is a tenant-wide permission, not a departmental one -- it must
-    # go through require_permission, never require_departmental (which would
-    # silently grant it to anyone holding ANY department seat; see
-    # DepartmentScope.holds_anywhere's own warning against exactly this).
-    # `actor` below still resolves via require_departmental(AGENT, VIEW) for
-    # its `member`/`scope`, since ownership of this session is checked against
-    # that member id.
-    dependencies=[Depends(require_permission(RUN_START))],
 )
 async def post_message(
     request: Request,
     session_id: uuid.UUID,
     body: SendChatMessageRequest,
     db: DbSession,
-    actor: Annotated[HumanActor, Depends(require_departmental(perm(AGENT, VIEW)))],
+    actor: Annotated[
+        HumanActor,
+        Depends(require_departmental(perm(AGENT, VIEW), or_tenant_wide=COPILOT_USE)),
+    ],
 ) -> ChatMessageDTO:
     session = await _owned_session(request, session_id, db, actor)
+    authority = await authority_for_principal(request, db, actor.principal)
+    is_assistant_session = await _assistant_visible(
+        db, tenant_id=actor.principal.tenant_id, authority=authority, agent_id=session.agent_id
+    )
+    # RUN_START is a tenant-wide permission a bare copilot:use member does not
+    # hold, and rightly so for every OTHER agent's chat -- starting a run
+    # against a departmental agent is real work, gated the same as any other
+    # RUN_START-gated door. The Assistant is the one exception: `copilot:use`
+    # alone is enough to talk to it, which is the entire point of this slice.
+    if not is_assistant_session and RUN_START not in authority.tenant_wide:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=f"requires permission: {RUN_START}"
+        )
     user_message, run = await send_message(
         db,
         session=session,
@@ -268,3 +306,31 @@ async def post_message(
         # runId matches, regardless of what else lands in between.
         dto = dto.model_copy(update={"run_id": str(run.id)})
     return dto
+
+
+@router.get("/chat/sessions/{session_id}/runs/{run_id}", response_model=RunDTO)
+async def get_session_run(
+    request: Request,
+    session_id: uuid.UUID,
+    run_id: uuid.UUID,
+    db: DbSession,
+    actor: Annotated[
+        HumanActor,
+        Depends(require_departmental(perm(AGENT, VIEW), or_tenant_wide=COPILOT_USE)),
+    ],
+) -> RunDTO:
+    """One run's live state, for the frontend's `useCopilotRunActivity` poll.
+
+    Ownership-scoped through `_owned_session`, exactly as `get_messages` is:
+    the caller must own the chat session (or hold `copilot:manage` and be
+    reading a colleague's Assistant session, per that function's oversight
+    carve-out). The run itself must additionally belong to THIS session --
+    checked via the run's own `context["chat_session_id"]`, written when the
+    run is enqueued (`chat/service.send_message`) -- so a caller who owns
+    some OTHER session cannot read a run by guessing its id.
+    """
+    await _owned_session(request, session_id, db, actor)
+    run_row = await db.get(m.AgentRun, run_id)
+    if run_row is None or (run_row.context or {}).get("chat_session_id") != str(session_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "run not found")
+    return run_to_dto(run_row)

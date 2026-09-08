@@ -7,9 +7,9 @@ import { publicPost } from "@/lib/api";
 
 export const Route = createFileRoute("/reset-password")({
   component: ResetPasswordPage,
-  // Same shape as `/workspace`'s `?item=` search validator: read the one
-  // query param this route cares about and drop anything else, so a stale or
-  // tampered link cannot smuggle extra state in through the URL.
+  // Read the one query param this route cares about and drop anything
+  // else, so a stale or tampered link cannot smuggle extra state in
+  // through the URL.
   validateSearch: (search: Record<string, unknown>): { token: string } => ({
     token: typeof search.token === "string" ? search.token : "",
   }),

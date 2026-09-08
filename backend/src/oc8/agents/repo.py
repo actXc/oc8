@@ -23,7 +23,6 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 
-from oc8.api.v1._listquery import apply_group_order, apply_search, paginate
 from oc8.models.core import Agent
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -73,6 +72,13 @@ async def visible_agents(
     """
     if not tenant_wide and not scope.viewable:
         return [], 0
+
+    # Deferred import: oc8.api.v1._listquery lives under the api package, whose
+    # __init__ aggregates oc8.api.v1.agents, which imports this module --
+    # a top-level import here would be a circular import on any entry point
+    # that reaches this module before oc8.api.v1 (e.g. the Copilot control
+    # tools). Resolved once, at first call.
+    from oc8.api.v1._listquery import apply_group_order, apply_search, paginate
 
     stmt = select(Agent).where(Agent.is_tenant_assistant.is_(False))
     if not include_archived:

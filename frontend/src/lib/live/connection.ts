@@ -8,11 +8,17 @@ const MAX_BACKOFF = 15_000;
 /** The close code the backend uses for every refusal on this socket. */
 const POLICY_VIOLATION = 1008;
 
-export function useLiveConnection(onEvent: (e: RealtimeEvent) => void, onOpen: () => void): void {
+export function useLiveConnection(
+  onEvent: (e: RealtimeEvent) => void,
+  onOpen: () => void,
+  onClose?: () => void,
+): void {
   const onEventRef = useRef(onEvent);
   const onOpenRef = useRef(onOpen);
+  const onCloseRef = useRef(onClose);
   onEventRef.current = onEvent;
   onOpenRef.current = onOpen;
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     let ws: WebSocket | null = null;
@@ -43,6 +49,7 @@ export function useLiveConnection(onEvent: (e: RealtimeEvent) => void, onOpen: (
           };
           ws.onclose = (ev) => {
             if (closed) return;
+            onCloseRef.current?.();
             // 1008 is the server saying "not you": the socket carries the
             // activity feed and is gated on `run:view`, which an employee whose
             // authority is a seat does not hold. Retrying that once a second for

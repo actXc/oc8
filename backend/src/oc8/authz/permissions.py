@@ -79,8 +79,10 @@ COPILOT: Final = "copilot"
 #: The word collides with the token ROLE `member` -- the empty role an employee is
 #: minted with -- and the collision is harmless because the two are different
 #: namespaces: a resource name here, a role name in `BUILTIN_ROLE_PERMISSIONS`,
-#: and `permissions_for("member")` is the empty set either way, which is the whole
-#: point of that role.
+#: and `permissions_for("member")` (the role) now returns the tenant-wide
+#: `copilot:use` default every human role gets, not the empty set -- the
+#: collision stays harmless because a resource name and a role name are
+#: different namespaces regardless of what either resolves to.
 MEMBER: Final = "member"
 #: A named subset of this catalogue that a tenant's IT admin authored, and the
 #: assignment of it to a person. `role:view` is what makes the tenant's own role
@@ -163,6 +165,15 @@ AUDIT_VERIFY: Final = perm(AUDIT, "verify")
 CLARIFICATION_VIEW: Final = perm(CLARIFICATION, VIEW)
 CLARIFICATION_ANSWER: Final = perm(CLARIFICATION, "answer")
 
+#: The one door every human in the tenant gets by default: the tenant-wide
+#: Assistant chat (`GET /assistant`, `POST /chat/sessions` against its
+#: agent id). Tenant-wide only -- there is no department-scoped "use the
+#: Copilot in Vertrieb only" -- and delegatable, so a tenant-defined role
+#: can also carry it. Granted to every built-in human role by default,
+#: including the otherwise-empty `MEMBER_ROLE`: opening the Copilot to
+#: everyone is the whole point of this permission existing.
+COPILOT_USE: Final = perm(COPILOT, "use")
+
 #: A readable copy of the whole tenant (transcripts, knowledge, and with a
 #: passphrase every credential) and the ability to replace it wholesale from
 #: an uploaded one. Neither is a `:view`/`:manage` pair -- `backup:view`
@@ -232,6 +243,7 @@ ALL_PERMISSIONS: Final[frozenset[str]] = frozenset(
         APPROVAL_DECIDE_ANY,
         CLARIFICATION_VIEW,
         CLARIFICATION_ANSWER,
+        COPILOT_USE,
         AUDIT_VERIFY,
         TOOL_READ,
         TOOL_WRITE,
@@ -278,6 +290,7 @@ DELEGATABLE_PERMISSIONS: Final[frozenset[str]] = frozenset(
         APPROVAL_DECIDE,
         CLARIFICATION_VIEW,
         CLARIFICATION_ANSWER,
+        COPILOT_USE,
         RUN_START,
         RUN_CONTROL,
         AUDIT_VERIFY,
@@ -538,6 +551,7 @@ _OPERATOR: Final[frozenset[str]] = _VIEW_EVERYTHING | {
     RUN_CONTROL,
     APPROVAL_DECIDE,
     CLARIFICATION_ANSWER,
+    COPILOT_USE,
 }
 
 #: Everything an operator has, plus authority over the department's own shape:
@@ -567,6 +581,7 @@ _AUDITOR: Final[frozenset[str]] = _VIEW_EVERYTHING | {
     perm(AUDIT, VIEW),
     AUDIT_VERIFY,
     APPROVAL_VIEW_ANY,
+    COPILOT_USE,
 }
 
 #: An agent token is refused by the operator API as a whole
@@ -587,10 +602,11 @@ BUILTIN_ROLE_PERMISSIONS: Final[dict[str, frozenset[str]]] = {
     OPERATOR: _OPERATOR,
     AUDITOR: _AUDITOR,
     AGENT_DEFAULT: _AGENT_DEFAULT,
-    # Empty, and DEFINED. See `MEMBER_ROLE`: the difference between an empty
-    # entry and a missing one is not authorization, it is whether the screen that
-    # explains a refusal can tell a real role from a typo.
-    MEMBER_ROLE: frozenset(),
+    # Every human role, including this one, holds copilot:use by default --
+    # see COPILOT_USE's own docstring. This is the one thing that keeps
+    # `member` from being the empty set: a bare member still holds nothing
+    # that lets them see or change the OFFICE, but they can talk to it.
+    MEMBER_ROLE: frozenset({COPILOT_USE}),
 }
 
 
@@ -603,9 +619,11 @@ def permissions_for(role: str) -> frozenset[str]:
     the safe direction. A role name that is a typo therefore 403s loudly instead
     of quietly admitting someone.
 
-    `member` returns the empty set through the dict rather than through the
-    default, and the two are indistinguishable here on purpose: a role that is
-    KNOWN to grant nothing must gate exactly like one nobody mapped.
+    An unmapped role name and a role mapped to the empty set are
+    indistinguishable here on purpose: a role KNOWN to grant nothing must gate
+    exactly like one nobody mapped. (`member` itself no longer grants nothing
+    -- see `BUILTIN_ROLE_PERMISSIONS[MEMBER_ROLE]` -- but the principle still
+    holds for any role that does.)
     """
     return BUILTIN_ROLE_PERMISSIONS.get(role, frozenset())
 

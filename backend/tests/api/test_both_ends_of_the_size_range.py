@@ -50,6 +50,7 @@ from oc8.authz.permissions import (
     BUILTIN_ROLE_PERMISSIONS,
     CLARIFICATION_ANSWER,
     CLARIFICATION_VIEW,
+    COPILOT_USE,
     DEPT_MANAGER,
     MEMBER_ROLE,
     OPERATOR,
@@ -441,8 +442,8 @@ async def test_a_promotion_is_two_writes_and_neither_touches_the_identity_provid
 async def test_a_joiner_who_holds_nothing_is_not_locked_out_of_the_explanation(
     app_session: AppSessionFactory,
 ) -> None:
-    """The 500-person tenant's default floor is `MEMBER_ROLE`, which holds the
-    empty set tenant-wide.
+    """The 500-person tenant's default floor is `MEMBER_ROLE`, which holds only
+    the tenant-wide `copilot:use` default -- nothing else.
 
     Between a person's first sign-in and being given a role and a seat, that
     person sees every screen empty. `/governance` is the one page that can tell
@@ -456,7 +457,7 @@ async def test_a_joiner_who_holds_nothing_is_not_locked_out_of_the_explanation(
         explained = await http.get("/api/v1/governance", headers=hers)
         assert explained.status_code == 200, explained.text
         body = explained.json()
-        assert body["callerPermissions"] == []
+        assert body["callerPermissions"] == ["copilot:use"]
         assert body["seats"] == []
         assert body["callerRoleSource"] == "token"
         # Known, not a typo -- and those must be distinguishable, or the panel
@@ -467,6 +468,6 @@ async def test_a_joiner_who_holds_nothing_is_not_locked_out_of_the_explanation(
         assert (await http.get("/api/v1/capas", headers=hers)).status_code == 403
 
     # And nothing about the built-in ladder moved to make that possible.
-    assert permissions_for(MEMBER_ROLE) == frozenset()
+    assert permissions_for(MEMBER_ROLE) == frozenset({COPILOT_USE})
     assert permissions_for(OPERATOR) < permissions_for(DEPT_MANAGER) < permissions_for(ORG_ADMIN)
     assert permissions_for(AUDITOR) < permissions_for(ORG_ADMIN)

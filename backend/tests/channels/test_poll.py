@@ -39,7 +39,7 @@ class FakePollChannel:
     def capabilities(self) -> ChannelCapabilities:
         return ChannelCapabilities(max_classification="public")
 
-    def verify_inbound(self, *, headers: dict[str, str], body: bytes) -> bool:
+    async def verify_inbound(self, *, headers: dict[str, str], body: bytes) -> bool:
         return True
 
     def parse_inbound(self, update: dict[str, Any]) -> Any:
@@ -150,7 +150,7 @@ async def test_a_channel_with_no_poll_method_is_skipped(app_session: AppSessionF
         def capabilities(self) -> ChannelCapabilities:
             return ChannelCapabilities(max_classification="public")
 
-        def verify_inbound(self, *, headers: dict[str, str], body: bytes) -> bool:
+        async def verify_inbound(self, *, headers: dict[str, str], body: bytes) -> bool:
             return True
 
         def parse_inbound(self, update: dict[str, Any]) -> Any:
@@ -184,7 +184,7 @@ async def test_one_channel_erroring_does_not_stop_a_sibling_channel(
         def capabilities(self) -> ChannelCapabilities:
             return ChannelCapabilities(max_classification="public")
 
-        def verify_inbound(self, *, headers: dict[str, str], body: bytes) -> bool:
+        async def verify_inbound(self, *, headers: dict[str, str], body: bytes) -> bool:
             return True
 
         def parse_inbound(self, update: dict[str, Any]) -> Any:

@@ -279,6 +279,12 @@ _PROSE: Final[dict[str, tuple[str, str, str, str]]] = {
         "Use the configuration Copilot",
         "Chats with the Copilot and applies its proposals -- tenant-wide, across every department.",
     ),
+    "copilot:use": (
+        "Assistenten-Chat öffnen",
+        "Öffnet den oc8-Assistenten und nutzt ihn zum Chatten -- mandantenweit.",
+        "Open the assistant chat",
+        "Opens the oc8 Assistant and uses it for chatting -- tenant-wide.",
+    ),
     "copilot:view": (
         "Copilot-Vorschläge ansehen",
         "Liest einen vorbereiteten Copilot-Vorschlag, bevor er angewendet wird.",

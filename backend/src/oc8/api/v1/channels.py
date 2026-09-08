@@ -233,7 +233,7 @@ async def webhook(channel: str, tenant_id: uuid.UUID, request: Request) -> Webho
             # id should look identical from outside.
             raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
 
-        if not impl.verify_inbound(headers=dict(request.headers), body=body):
+        if not await impl.verify_inbound(headers=dict(request.headers), body=body):
             logger.warning("rejected an unsigned %s webhook for %s", channel, tenant_id)
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "not found")
 

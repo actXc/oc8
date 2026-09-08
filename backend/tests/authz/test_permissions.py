@@ -16,6 +16,7 @@ from oc8.authz.permissions import (
     AUDIT_VERIFY,
     AUDITOR,
     BUILTIN_ROLE_PERMISSIONS,
+    COPILOT_USE,
     DEPT_MANAGER,
     OPERATOR,
     ORG_ADMIN,
@@ -39,27 +40,27 @@ def test_an_unknown_role_holds_nothing() -> None:
     """Fail-closed, and deliberately the OPPOSITE of `required_right`, which
     resolves an unknown TOOL to the more dangerous right. There the unknown
     thing is the action; here it is the caller."""
-    assert permissions_for("member") == frozenset()
     assert permissions_for("") == frozenset()
     assert not role_has("typo_admin", APPROVAL_DECIDE)
 
 
-def test_the_role_that_guarded_a_route_still_grants_nothing_tenant_wide() -> None:
+def test_the_role_that_guarded_a_route_still_grants_nothing_operationally() -> None:
     """`require_role("org_admin", "member")` guarded GET /agents/{id}/skills.
     That route was org_admin-only while reading as though it welcomed two roles,
-    because `member` granted nothing -- the fact that makes naming permissions
-    instead of roles worth the change.
+    because `member` granted nothing operational -- the fact that makes naming
+    permissions instead of roles worth the change.
 
     `member` is a DEFINED role now, and issued: `oc8 tenant invite --role member`
-    mints the employee whose authority is his seats. What must not change is the
-    only thing that route depended on -- that it grants nothing tenant-wide -- and
-    that is asserted here rather than through the dict's shape, because the shape
-    is what moved. Two spellings of the empty set had to answer identically at
-    every gate, and the ONE place they differ is `GET /governance`, which can now
-    tell `member` from `menber`.
+    mints the employee whose authority is his seats. Since the copilot-access
+    slice, `member` also holds `copilot:use` tenant-wide (see COPILOT_USE) --
+    that is the ONE exception to "grants nothing", and it is asserted here
+    explicitly rather than silently allowed to slip in. What must not change is
+    everything else that route depended on: `member` still holds no seat-bearing
+    or `:manage` permission tenant-wide, and `menber` (a typo) still resolves to
+    truly nothing.
     """
-    assert BUILTIN_ROLE_PERMISSIONS["member"] == frozenset()
-    assert permissions_for("member") == frozenset()
+    assert BUILTIN_ROLE_PERMISSIONS["member"] == frozenset({COPILOT_USE})
+    assert permissions_for("member") == frozenset({COPILOT_USE})
     assert permissions_for("menber") == frozenset()
     assert not role_has("member", APPROVAL_DECIDE)
 

@@ -2385,8 +2385,11 @@ export function useRestoreBackup() {
 
 // --- oc8 Copilot (backend/src/oc8/api/v1/copilot.py) ---
 // `copilot:manage` is tenant-wide and org_admin-only (a prepared proposal can
-// name any agent in any department), so every hook here is gated by the
-// caller already holding that permission — see CopilotDock's useCan() check.
+// name any agent in any department); `copilot:view` gates reading the list.
+// CopilotDock itself only requires `copilot:use`, so callers of these hooks
+// must gate them individually — see PendingProposals in copilot-dock.tsx for
+// both the `enabled: can("copilot:view")` query gate and the
+// `can("copilot:manage")` gate on the Apply/Reject buttons.
 
 export interface CopilotOperationRef {
   label: string;
@@ -2562,5 +2565,53 @@ export function useTenantKpis(params?: TenantKPIFilterParams) {
       if (error instanceof ApiError && error.status === 422) return false;
       return failureCount < 3;
     },
+  });
+}
+
+// ---- Widget-based "My Work" dashboard (§ My Work Widget Dashboard plan) ----
+
+export type WidgetType = "chat" | "approvals" | "reports" | "budget" | "activity";
+
+export interface WidgetInstance {
+  id: string;
+  type: WidgetType;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  config: Record<string, unknown>;
+}
+
+export interface DashboardLayoutDTO {
+  widgets: WidgetInstance[];
+  templateId: string | null;
+}
+
+export interface DashboardTemplateDTO {
+  id: string;
+  name: { en: string; de: string };
+  widgets: WidgetInstance[];
+}
+
+export function useDashboardLayout() {
+  return useQuery({
+    queryKey: ["dashboard", "layout"],
+    queryFn: () => api.get<DashboardLayoutDTO | null>("/dashboard/layout"),
+  });
+}
+
+export function useSaveDashboardLayout() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: DashboardLayoutDTO) =>
+      api.put<DashboardLayoutDTO>("/dashboard/layout", body),
+    onSuccess: (data) => qc.setQueryData(["dashboard", "layout"], data),
+  });
+}
+
+export function useDashboardTemplates() {
+  return useQuery({
+    queryKey: ["dashboard", "templates"],
+    queryFn: () => api.get<DashboardTemplateDTO[]>("/dashboard/templates"),
   });
 }

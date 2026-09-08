@@ -18,6 +18,15 @@ if (!Element.prototype.releasePointerCapture) {
 if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => {};
 }
+if (!("ResizeObserver" in window)) {
+  class ResizeObserverStub {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  // @ts-expect-error -- jsdom has no real ResizeObserver
+  window.ResizeObserver = ResizeObserverStub;
+}
 
 afterEach(() => {
   cleanup();

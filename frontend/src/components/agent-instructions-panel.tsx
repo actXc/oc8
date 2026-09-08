@@ -361,10 +361,10 @@ export function AgentInstructionsPanel({
 
   // Same permission the floating oc8 Copilot dock (copilot-dock.tsx) already
   // gates on -- this reuses that dock's chat pipeline against the same
-  // tenant-wide Assistant agent, so anyone who can't see the dock can't
-  // reach it from here either.
+  // tenant-wide Assistant agent, so anyone who can see the dock can also
+  // reach it from here.
   const can = useCan();
-  const mayUseCopilot = can("copilot:manage");
+  const mayUseCopilot = can("copilot:use");
   const [assistOpen, setAssistOpen] = useState(false);
   const [rough, setRough] = useState("");
 

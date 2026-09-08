@@ -744,11 +744,13 @@ class _RecordingChannels:
         tenant: uuid.UUID,
         run_id: uuid.UUID,
         *,
+        channel: str = "telegram",
         max_classification: str = "internal",
     ) -> None:
         self._app_session = app_session
         self._tenant = tenant
         self._run_id = run_id
+        self._channel = channel
         self.observed_states: list[str | None] = []
         self.said: list[tuple[str, str]] = []
         self.raise_on_say = False
@@ -763,7 +765,7 @@ class _RecordingChannels:
         async with self._app_session(self._tenant) as check:
             run = await check.get(m.AgentRun, self._run_id)
             self.observed_states.append(run.state if run is not None else None)
-        return {"telegram": self}
+        return {self._channel: self}
 
     def capabilities(self) -> ChannelCapabilities:
         return ChannelCapabilities(max_classification=self._max_classification)
@@ -775,7 +777,11 @@ class _RecordingChannels:
 
 
 async def _make_chat_run(
-    app_session: AppSessionFactory, tenant: uuid.UUID, *, telegram_external_id: str | None
+    app_session: AppSessionFactory,
+    tenant: uuid.UUID,
+    *,
+    chat_channel: str | None,
+    chat_channel_external_id: str | None,
 ) -> tuple[uuid.UUID, uuid.UUID]:
     """A `source="chat"` run against a real `ChatSession`, the same shape
     `oc8.channels.dispatch.bind_from_free_text` and the ordinary web chat
@@ -789,8 +795,10 @@ async def _make_chat_run(
         await s.flush()
         session_id = session.id
         context: dict[str, Any] = {"task": "hi", "chat_session_id": str(session_id)}
-        if telegram_external_id is not None:
-            context["telegram_external_id"] = telegram_external_id
+        if chat_channel is not None:
+            context["chat_channel"] = chat_channel
+        if chat_channel_external_id is not None:
+            context["chat_channel_external_id"] = chat_channel_external_id
         repo = RunRepository(s)
         created = await repo.create(
             tenant_id=tenant, agent_id=agent.id, context=context, source="chat"
@@ -802,7 +810,9 @@ async def test_a_terminal_chat_run_with_telegram_context_gets_the_reply_after_co
     app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     tenant = uuid.UUID(str(ACME_TENANT_ID))
-    run_id, _session_id = await _make_chat_run(app_session, tenant, telegram_external_id="555")
+    run_id, _session_id = await _make_chat_run(
+        app_session, tenant, chat_channel="telegram", chat_channel_external_id="555"
+    )
     fake = _RecordingChannels(app_session, tenant, run_id)
     monkeypatch.setattr("oc8.channels.registry.channels_for_tenant", fake._channels_for_tenant)
 
@@ -828,6 +838,38 @@ async def test_a_terminal_chat_run_with_telegram_context_gets_the_reply_after_co
     )
 
 
+async def test_a_terminal_chat_run_on_a_non_telegram_channel_gets_the_reply_on_that_channel(
+    app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The whole point of the generalization: the reply must go to whatever
+    channel the run's own context names, not to a channel hardcoded in
+    executor.py. Uses "teams" specifically so a regression that quietly
+    re-hardcodes "telegram" fails loudly here."""
+    tenant = uuid.UUID(str(ACME_TENANT_ID))
+    run_id, _session_id = await _make_chat_run(
+        app_session, tenant, chat_channel="teams", chat_channel_external_id="tg-777"
+    )
+    fake = _RecordingChannels(app_session, tenant, run_id, channel="teams")
+    monkeypatch.setattr("oc8.channels.registry.channels_for_tenant", fake._channels_for_tenant)
+
+    async def fake_runner(db: Any, **kw: Any) -> RunResult:
+        return RunResult(
+            task_id=uuid.uuid4(),
+            agent_id=kw["agent"].id,
+            status="done",
+            output="Es sind 3 offen.",
+            tool_calls=[],
+            steps=1,
+        )
+
+    await execute_run(
+        RunMessage(run_id=str(run_id), tenant_id=str(tenant), entry_id="0-0", redelivered=False),
+        runtime=_FnRuntime(fake_runner),
+    )
+
+    assert fake.said == [("tg-777", "Es sind 3 offen.")]
+
+
 async def test_a_terminal_chat_runs_reply_is_withheld_on_a_channel_left_at_the_default(
     app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -842,7 +884,9 @@ async def test_a_terminal_chat_runs_reply_is_withheld_on_a_channel_left_at_the_d
     from oc8.channels.dispatch import _CONTENT_WITHHELD
 
     tenant = uuid.UUID(str(ACME_TENANT_ID))
-    run_id, _session_id = await _make_chat_run(app_session, tenant, telegram_external_id="555")
+    run_id, _session_id = await _make_chat_run(
+        app_session, tenant, chat_channel="telegram", chat_channel_external_id="555"
+    )
     fake = _RecordingChannels(app_session, tenant, run_id, max_classification="public")
     monkeypatch.setattr("oc8.channels.registry.channels_for_tenant", fake._channels_for_tenant)
 
@@ -868,7 +912,9 @@ async def test_a_telegram_send_failure_does_not_fail_the_run(
     app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     tenant = uuid.UUID(str(ACME_TENANT_ID))
-    run_id, _session_id = await _make_chat_run(app_session, tenant, telegram_external_id="555")
+    run_id, _session_id = await _make_chat_run(
+        app_session, tenant, chat_channel="telegram", chat_channel_external_id="555"
+    )
     fake = _RecordingChannels(app_session, tenant, run_id)
     fake.raise_on_say = True
     monkeypatch.setattr("oc8.channels.registry.channels_for_tenant", fake._channels_for_tenant)
@@ -894,7 +940,9 @@ async def test_an_ordinary_chat_run_without_telegram_context_never_touches_teleg
     app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     tenant = uuid.UUID(str(ACME_TENANT_ID))
-    run_id, session_id = await _make_chat_run(app_session, tenant, telegram_external_id=None)
+    run_id, session_id = await _make_chat_run(
+        app_session, tenant, chat_channel=None, chat_channel_external_id=None
+    )
     calls: list[uuid.UUID] = []
 
     async def must_not_be_called(db: Any, *, tenant_id: uuid.UUID) -> dict[str, Any]:
@@ -914,7 +962,7 @@ async def test_an_ordinary_chat_run_without_telegram_context_never_touches_teleg
         runtime=_FnRuntime(fake_runner),
     )
 
-    assert calls == [], "no telegram_external_id in context -> channels_for_tenant must never run"
+    assert calls == [], "no chat_channel in context -> channels_for_tenant must never run"
     # The ordinary (non-Telegram) reply path is unaffected either way.
     async with app_session(tenant) as s:
         messages = (
@@ -941,7 +989,9 @@ async def test_a_chat_run_that_parks_for_clarification_tells_the_telegram_sender
     a Clarification the sender has no screen for, and nothing ever told them
     anything was expected of them."""
     tenant = uuid.UUID(str(ACME_TENANT_ID))
-    run_id, _session_id = await _make_chat_run(app_session, tenant, telegram_external_id="556")
+    run_id, _session_id = await _make_chat_run(
+        app_session, tenant, chat_channel="telegram", chat_channel_external_id="556"
+    )
     fake = _RecordingChannels(app_session, tenant, run_id)
     monkeypatch.setattr("oc8.channels.registry.channels_for_tenant", fake._channels_for_tenant)
 
@@ -975,7 +1025,9 @@ async def test_a_chat_run_parked_on_an_approval_tells_the_telegram_sender(
     """The other silent park: the run is sitting in somebody's approval queue,
     which the sender has no way to find out about from Telegram."""
     tenant = uuid.UUID(str(ACME_TENANT_ID))
-    run_id, _session_id = await _make_chat_run(app_session, tenant, telegram_external_id="557")
+    run_id, _session_id = await _make_chat_run(
+        app_session, tenant, chat_channel="telegram", chat_channel_external_id="557"
+    )
     fake = _RecordingChannels(app_session, tenant, run_id)
     monkeypatch.setattr("oc8.channels.registry.channels_for_tenant", fake._channels_for_tenant)
 
@@ -1011,7 +1063,9 @@ async def test_a_crashed_chat_run_still_records_a_reply_and_tells_telegram(
     on the run's `context["error"]` for an operator, and a chat transcript is
     the wrong place to show it."""
     tenant = uuid.UUID(str(ACME_TENANT_ID))
-    run_id, session_id = await _make_chat_run(app_session, tenant, telegram_external_id="558")
+    run_id, session_id = await _make_chat_run(
+        app_session, tenant, chat_channel="telegram", chat_channel_external_id="558"
+    )
     fake = _RecordingChannels(app_session, tenant, run_id)
     monkeypatch.setattr("oc8.channels.registry.channels_for_tenant", fake._channels_for_tenant)
 

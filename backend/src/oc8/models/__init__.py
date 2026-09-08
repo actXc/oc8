@@ -19,7 +19,12 @@ from oc8.models.core import (
 )
 from oc8.models.credentials import Credential
 from oc8.models.flow import Flow, FlowRun, FlowVersion
-from oc8.models.identity import OrgMember, OrgMemberDepartment, TotpCredential
+from oc8.models.identity import (
+    MemberDashboardLayout,
+    OrgMember,
+    OrgMemberDepartment,
+    TotpCredential,
+)
 from oc8.models.knowledge import (
     DataSource,
     IngestionJob,
@@ -93,6 +98,7 @@ __all__ = [
     "KnowledgeBase",
     "KnowledgeGrant",
     "McpConnection",
+    "MemberDashboardLayout",
     "MemoryRecord",
     "MemoryStore",
     "ModelConfig",

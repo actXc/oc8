@@ -12,6 +12,7 @@ connection's tools stay entirely the connection's business.
 
 from __future__ import annotations
 
+import datetime as dt
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -24,12 +25,28 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from oc8 import models as m
 from oc8.agent.components import COMPONENT_CATALOG
-from oc8.approvals import raise_approval
+from oc8.agents.repo import visible_agent, visible_agents
+from oc8.approvals import (
+    AlreadyDecided,
+    NotYourDepartment,
+    NotYourSayAtAll,
+    UnknownDecision,
+    UnknownOption,
+    decide_approval,
+    raise_approval,
+)
+from oc8.approvals.repo import load_for_actor, visible_approvals
 from oc8.audit import append_event
+from oc8.authz.authority import authority_for_member, tenant_wide_read
 from oc8.authz.pdp import Decision, Effect
+from oc8.authz.permissions import AGENT, APPROVAL, BUDGET, DEPARTMENT, STATISTICS, VIEW, perm
+from oc8.authz.scope import AgentActor, scope_for_member
 from oc8.capas.discovery import find_plugin
+from oc8.departments.repo import visible_department, visible_departments
 from oc8.knowledge.retrieval import retrieve_kb_context
+from oc8.kpis.aggregate import compute_kpis
 from oc8.memory.router import retrieve_context, write_memory
+from oc8.metering.budget import current_month_tokens, get_budget
 from oc8.modelrouter import NeutralTool, ToolCall
 from oc8.realtime.emit import record_activity
 from oc8.runtime.repository import RunRepository
@@ -346,6 +363,177 @@ PROPOSE_CHANGE = NeutralTool(
     },
 )
 
+DECIDE_APPROVAL = NeutralTool(
+    name="decide_approval",
+    description=(
+        "Approve or reject a pending approval request on behalf of the human "
+        "you are talking to. You may only decide approvals that human could "
+        "decide themselves -- this is checked the same way it would be if "
+        "they clicked Approve/Reject in oc8 directly, so a call outside "
+        "their own reach is refused, not silently narrowed."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "approval_id": {
+                "type": "string",
+                "description": "The uuid of the approval request, as seen in context.",
+            },
+            "decision": {"type": "string", "enum": ["approve", "reject"]},
+            "reason": {
+                "type": "string",
+                "description": "Optional: why you (on the human's behalf) decided this way.",
+            },
+            "option": {
+                "type": "string",
+                "description": (
+                    "Optional: for a 'decision' approval that offers named options, "
+                    "which one was chosen."
+                ),
+            },
+        },
+        "required": ["approval_id", "decision"],
+    },
+)
+
+LIST_PENDING_APPROVALS = NeutralTool(
+    name="list_pending_approvals",
+    description=(
+        "List approval requests waiting for a decision, scoped to what the "
+        "human you are talking to could see themselves -- this is checked "
+        "the same way their own Approvals tab is, so a department outside "
+        "their reach is refused, not silently narrowed."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "status": {
+                "type": "string",
+                "enum": ["pending", "approved", "rejected"],
+                "description": "Which status to list. Defaults to 'pending'.",
+            },
+            "department_id": {
+                "type": "string",
+                "description": (
+                    "Optional: the uuid of one department, as seen in context, "
+                    "to narrow the list to."
+                ),
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Optional: how many to return (default 20, max 50).",
+            },
+        },
+        "required": [],
+    },
+)
+
+DEPARTMENT_STATUS = NeutralTool(
+    name="department_status",
+    description=(
+        "Look up one department by id, or list the departments visible to "
+        "the human you are talking to -- the same departments their own "
+        "Departments page would show, never more."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "department_id": {
+                "type": "string",
+                "description": (
+                    "Optional: the uuid of one department, as seen in context. "
+                    "Omit to list every visible department."
+                ),
+            },
+            "search": {
+                "type": "string",
+                "description": "Optional: filter the list by name.",
+            },
+        },
+        "required": [],
+    },
+)
+
+AGENT_STATUS = NeutralTool(
+    name="agent_status",
+    description=(
+        "Look up one agent by id, or list the agents visible to the human "
+        "you are talking to -- the same agents their own Agents page would "
+        "show, never more."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "agent_id": {
+                "type": "string",
+                "description": "Optional: the uuid of one agent, as seen in context.",
+            },
+            "department_id": {
+                "type": "string",
+                "description": "Optional: narrow the list to one department.",
+            },
+            "status": {
+                "type": "string",
+                "description": "Optional: filter the list by status.",
+            },
+        },
+        "required": [],
+    },
+)
+
+BUDGET_OVERVIEW = NeutralTool(
+    name="budget_overview",
+    description=(
+        "Read the tenant's (or one department's) token budget limits and how "
+        "many tokens it has used this calendar month. Requires tenant-wide "
+        "budget visibility -- unlike approvals/agents/departments, this is "
+        "never granted by a department seat alone."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "department_id": {
+                "type": "string",
+                "description": "Optional: one department's budget instead of the whole tenant.",
+            },
+        },
+        "required": [],
+    },
+)
+
+KPI_OVERVIEW = NeutralTool(
+    name="kpi_overview",
+    description=(
+        "Read run-count and timing KPIs (duration, approval wait time, "
+        "response time) for one agent, one department, or the whole tenant. "
+        "Pass at most one of agent_id/department_id; passing neither reads "
+        "the tenant-wide figures, which require tenant-wide statistics "
+        "visibility."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "agent_id": {
+                "type": "string",
+                "description": "Optional: one agent's KPIs. Mutually exclusive with department_id.",
+            },
+            "department_id": {
+                "type": "string",
+                "description": "Optional: one department's KPIs. Mutually exclusive with agent_id.",
+            },
+            "date_from": {
+                "type": "string",
+                "description": "Optional: ISO 8601 start of the window.",
+            },
+            "date_to": {
+                "type": "string",
+                "description": "Optional: ISO 8601 end of the window.",
+            },
+        },
+        "required": [],
+    },
+)
+
 CONTROL_TOOL_SCHEMAS: dict[str, NeutralTool] = {
     MEMORY_WRITE.name: MEMORY_WRITE,
     ASK_USER.name: ASK_USER,
@@ -355,8 +543,14 @@ CONTROL_TOOL_SCHEMAS: dict[str, NeutralTool] = {
     SEARCH_MEMORY.name: SEARCH_MEMORY,
     RENDER_COMPONENT.name: RENDER_COMPONENT,
     PROPOSE_CHANGE.name: PROPOSE_CHANGE,
+    DECIDE_APPROVAL.name: DECIDE_APPROVAL,
     READ_REFERENCE_FILE.name: READ_REFERENCE_FILE,
     READ_INSTRUCTION_FILE.name: READ_INSTRUCTION_FILE,
+    LIST_PENDING_APPROVALS.name: LIST_PENDING_APPROVALS,
+    DEPARTMENT_STATUS.name: DEPARTMENT_STATUS,
+    AGENT_STATUS.name: AGENT_STATUS,
+    BUDGET_OVERVIEW.name: BUDGET_OVERVIEW,
+    KPI_OVERVIEW.name: KPI_OVERVIEW,
 }
 CONTROL_TOOL_NAMES: frozenset[str] = frozenset(CONTROL_TOOL_SCHEMAS)
 
@@ -379,6 +573,7 @@ def offered_tools(
     mcp_tools: Sequence[NeutralTool],
     has_knowledge: bool = False,
     has_instruction_files: bool = False,
+    copilot_permissions: frozenset[str] = frozenset(),
 ) -> list[NeutralTool]:
     """The full tool list to offer the model this step.
 
@@ -407,7 +602,8 @@ def offered_tools(
     # same "does your tenant have someone for this?" question repeated on
     # every subsequent turn instead of ever calling delegate_task. Withheld
     # here (also matches this file's own "Read-only + delegate_task +
-    # propose_change ONLY" scope, in assistant.py's module docstring), the
+    # propose_change + decide_approval" scope, in assistant.py's module
+    # docstring), the
     # Assistant must answer with what it knows, delegate, or say plainly that
     # it cannot help -- never leave a human of ANY door waiting on a question
     # that door cannot answer.
@@ -421,6 +617,24 @@ def offered_tools(
         # refuses the call for anyone else regardless -- this just keeps the
         # tool out of a list where it could never succeed.
         offered.append(PROPOSE_CHANGE)
+        # Same reasoning: only the Assistant sits in a 1:1 chat with a human
+        # who might be looking at their own pending approvals right now.
+        offered.append(DECIDE_APPROVAL)
+        # The read-mostly status tools: gated a second time, per-permission,
+        # on top of the is_tenant_assistant gate above -- a member whose
+        # assigned role or department seat does not grant the underlying
+        # permission must not even see the tool, or the model reaches for
+        # it and gets an ERROR string it cannot act on.
+        if perm(APPROVAL, VIEW) in copilot_permissions:
+            offered.append(LIST_PENDING_APPROVALS)
+        if perm(DEPARTMENT, VIEW) in copilot_permissions:
+            offered.append(DEPARTMENT_STATUS)
+        if perm(AGENT, VIEW) in copilot_permissions:
+            offered.append(AGENT_STATUS)
+        if perm(BUDGET, VIEW) in copilot_permissions:
+            offered.append(BUDGET_OVERVIEW)
+        if perm(STATISTICS, VIEW) in copilot_permissions:
+            offered.append(KPI_OVERVIEW)
     if has_knowledge:
         offered.append(SEARCH_KNOWLEDGE)
     # Same reasoning as has_knowledge above: offering read_reference_file to
@@ -473,6 +687,26 @@ class ControlOutcome:
     rendered_component: dict[str, Any] | None = None
 
 
+async def _member_behind_task(
+    db: AsyncSession, *, tenant_id: uuid.UUID, task: m.Task
+) -> m.OrgMember | None:
+    """The human whose chat session opened `task`, or None if there isn't one
+    (a delegated or scheduled run with nobody behind it).
+
+    Shared by `_member_may_reach_department` (cross-department delegation) and
+    `_resolve_agent_actor` (the Copilot write-tool seam) -- both need exactly
+    this lookup and neither should re-implement it.
+    """
+    session = await db.scalar(
+        select(m.ChatSession).where(
+            m.ChatSession.tenant_id == tenant_id, m.ChatSession.task_id == task.id
+        )
+    )
+    if session is None:
+        return None
+    return await db.get(m.OrgMember, session.member_id)
+
+
 async def _member_may_reach_department(
     db: AsyncSession,
     *,
@@ -493,32 +727,43 @@ async def _member_may_reach_department(
     Returns False (fail closed) when the task has no chat session at all,
     e.g. a delegated or scheduled run with nobody behind it. "Nobody to
     check" is not "anybody may".
-
-    The answer comes from `authz.scope.scope_for_member` -- the same
-    `DepartmentScope` every HTTP route and the messenger door already resolve --
-    rather than from a fourth hand-rolled reading of the seat tables. The
-    hand-rolled one asked "all_departments, or a live seat here?", which is the
-    ROW term alone: `_upsert_member` mints a member with NEITHER, so on a fresh
-    tenant this refused everybody, including the administrator whose reach comes
-    entirely from their role. It only ever worked in the dev tenant because that
-    one member happened to carry `all_departments=True`.
     """
-    session = await db.scalar(
-        select(m.ChatSession).where(
-            m.ChatSession.tenant_id == tenant_id, m.ChatSession.task_id == task.id
-        )
-    )
-    if session is None:
-        return False
-    member = await db.get(m.OrgMember, session.member_id)
+    member = await _member_behind_task(db, tenant_id=tenant_id, task=task)
     if member is None:
         return False
-    from oc8.authz.scope import scope_for_member
-
     scope = await scope_for_member(
         db, member, token_role=await _acting_token_role(db, tenant_id=tenant_id, run_id=run_id)
     )
     return scope.may_view(department_id)
+
+
+async def _resolve_agent_actor(
+    db: AsyncSession, *, tenant_id: uuid.UUID, task: m.Task, run_id: uuid.UUID | None
+) -> AgentActor | None:
+    """The `AgentActor` a write-capable Copilot tool acts through -- the human
+    behind this chat-driven task, resolved to the SAME `DepartmentScope` any
+    other door would resolve for them. Returns None (fail closed) when there
+    is no chat session behind the task, no resolvable member, or when this
+    run was posted into the session by someone OTHER than the session's own
+    member -- the `copilot:manage` oversight carve-out in `_owned_session`
+    (chat.py) lets an org_admin read and reply in a colleague's Assistant
+    session, but a write this tool performs must be attributed to, and
+    scoped as, the actual human on the other end of the conversation, never
+    the operator who merely viewed or replied in it.
+    """
+    member = await _member_behind_task(db, tenant_id=tenant_id, task=task)
+    if member is None:
+        return None
+    if run_id is not None:
+        run = await db.get(m.AgentRun, run_id)
+        if run is not None and run.tenant_id == tenant_id and run.source == "chat":
+            operator = (run.context or {}).get("originating_operator")
+            if isinstance(operator, str) and operator and operator != member.subject:
+                return None
+    scope = await scope_for_member(
+        db, member, token_role=await _acting_token_role(db, tenant_id=tenant_id, run_id=run_id)
+    )
+    return AgentActor(member=member, scope=scope)
 
 
 async def _acting_token_role(
@@ -621,17 +866,19 @@ async def _delegate(
     # context, one hop at a time). Without this a chat-originated delegation's
     # eventual answer was created with source="delegation" and never reached
     # record_assistant_reply's `if run.source == "chat"` gate at all -- the
-    # lead's real conclusion sat in the run row forever, unseen on web or
-    # Telegram, while the human was told only "I've delegated this."
+    # lead's real conclusion sat in the run row forever, unseen on web or on
+    # whichever channel the human was using.
     if run_id is not None:
         executing_run = await db.get(m.AgentRun, run_id)
         if executing_run is not None and executing_run.context:
             chat_session_id = executing_run.context.get("chat_session_id")
             if chat_session_id:
                 context["chat_session_id"] = chat_session_id
-                telegram_external_id = executing_run.context.get("telegram_external_id")
-                if telegram_external_id:
-                    context["telegram_external_id"] = telegram_external_id
+                chat_channel = executing_run.context.get("chat_channel")
+                chat_channel_external_id = executing_run.context.get("chat_channel_external_id")
+                if chat_channel and chat_channel_external_id:
+                    context["chat_channel"] = chat_channel
+                    context["chat_channel_external_id"] = chat_channel_external_id
     # Deferred import: oc8.runtime.executor reaches oc8.runtime.adapter, which
     # imports this module's own importer (oc8.agent.engine) at module level, so
     # importing it at the top would be a cycle. Resolved once, at first call.
@@ -695,6 +942,19 @@ async def _has_component_grant(db: AsyncSession, *, agent: m.Agent, component_ke
         .limit(1)
     )
     return result.scalar_one_or_none() is not None
+
+
+def _parse_iso(value: object) -> dt.datetime | None:
+    """A tool argument's date string, tolerantly. `kpis.py`'s own
+    `_parse_bound` raises `HTTPException` on a bad value, which has no
+    meaning inside a tool dispatch -- an unparseable date here is simply
+    ignored (treated as "no bound"), since the model can always ask again."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return dt.datetime.fromisoformat(value.strip())
+    except ValueError:
+        return None
 
 
 async def execute_control_tool(
@@ -867,9 +1127,7 @@ async def execute_control_tool(
             capa_name, _, skill_subpath = skill.definition.reference_root.partition("/")
             plugin = find_plugin(capa_name)
             if plugin is None or not plugin.valid:
-                return ControlOutcome(
-                    output=f"ERROR: '{skill_name}'s capa is not installed here"
-                )
+                return ControlOutcome(output=f"ERROR: '{skill_name}'s capa is not installed here")
             base = (Path(plugin.path) / skill_subpath).resolve()
             target = (base / normalized).resolve()
             try:
@@ -1171,6 +1429,330 @@ async def execute_control_tool(
             output=(
                 f"Vorschlag erstellt (Proposal {proposal.id}). Ein Mensch muss ihn "
                 "in oc8 bestätigen, bevor er wirksam wird."
+            )
+        )
+
+    if tc.name == DECIDE_APPROVAL.name:
+        if not agent.is_tenant_assistant:
+            return ControlOutcome(output="ERROR: only the oc8 Assistant can decide approvals")
+        approval_id_raw = str(tc.arguments.get("approval_id", "")).strip()
+        verdict = str(tc.arguments.get("decision", "")).strip()
+        if not approval_id_raw or verdict not in ("approve", "reject"):
+            return ControlOutcome(
+                output="ERROR: decide_approval requires approval_id and decision (approve/reject)"
+            )
+        try:
+            approval_id = uuid.UUID(approval_id_raw)
+        except ValueError:
+            return ControlOutcome(output="ERROR: approval_id is not a valid id")
+
+        # Named agent_actor, not actor: this function's earlier PROPOSE_CHANGE
+        # branch already binds `actor` to a `Principal` in this same function
+        # scope (there is no per-if scoping in Python) -- reusing that name
+        # here for an unrelated `AgentActor | None` is exactly the kind of
+        # same-name-different-type hazard this file's `verdict` naming already
+        # guards against for `Decision`, so it gets its own name too.
+        agent_actor = await _resolve_agent_actor(db, tenant_id=tenant_id, task=task, run_id=run_id)
+        if agent_actor is None:
+            return ControlOutcome(output="ERROR: could not resolve who you are acting for")
+
+        # Named approval_row, not approval: REQUEST_DECISION's branch above
+        # already binds `approval` (non-optional) to raise_approval()'s
+        # result in this same function scope; load_for_actor's Optional
+        # return is a different type for the same name.
+        approval_row = await load_for_actor(db, approval_id, actor=agent_actor)
+        if approval_row is None:
+            return ControlOutcome(output="ERROR: approval not found")
+
+        reason = tc.arguments.get("reason")
+        option = tc.arguments.get("option")
+        try:
+            result = await decide_approval(
+                db,
+                approval_row,
+                decision=verdict,
+                tenant_id=tenant_id,
+                actor=agent_actor,
+                reason=str(reason) if reason is not None else None,
+                option=str(option) if option is not None else None,
+            )
+        except NotYourDepartment:
+            return ControlOutcome(output="ERROR: approval not found")
+        except NotYourSayAtAll as exc:
+            return ControlOutcome(output=f"ERROR: {exc}")
+        except UnknownDecision:
+            return ControlOutcome(output="ERROR: unknown decision")
+        except AlreadyDecided as exc:
+            return ControlOutcome(output=f"ERROR: {exc}")
+        except UnknownOption as exc:
+            return ControlOutcome(output=f"ERROR: {exc}")
+
+        return ControlOutcome(
+            output=f"Approval {approval_row.id} {result.approval.status}.",
+            pending_run=result.resumed_run_id,
+        )
+
+    if tc.name == LIST_PENDING_APPROVALS.name:
+        if not agent.is_tenant_assistant:
+            return ControlOutcome(output="ERROR: only the oc8 Assistant can list approvals")
+        agent_actor = await _resolve_agent_actor(db, tenant_id=tenant_id, task=task, run_id=run_id)
+        if agent_actor is None:
+            return ControlOutcome(output="ERROR: could not resolve who you are acting for")
+        authority = await authority_for_member(
+            db,
+            agent_actor.member,
+            token_role=await _acting_token_role(db, tenant_id=tenant_id, run_id=run_id),
+        )
+        view_perm = perm(APPROVAL, VIEW)
+        admitted = view_perm in authority.tenant_wide or agent_actor.scope.holds_anywhere(view_perm)
+        if not admitted:
+            return ControlOutcome(output="ERROR: you don't have permission to view approvals")
+        status = str(tc.arguments.get("status") or "pending").strip()
+        department_id: uuid.UUID | None = None
+        department_id_raw = tc.arguments.get("department_id")
+        if department_id_raw:
+            try:
+                department_id = uuid.UUID(str(department_id_raw))
+            except ValueError:
+                return ControlOutcome(output="ERROR: department_id is not a valid id")
+        limit_raw = tc.arguments.get("limit")
+        limit = min(int(limit_raw), 50) if isinstance(limit_raw, int) else 20
+        rows = await visible_approvals(
+            db, actor=agent_actor, status=status, department_id=department_id, limit=limit
+        )
+        if not rows:
+            return ControlOutcome(output=f"No {status} approvals.")
+        lines = [
+            f"- {r.id} | {r.title} | {r.action_type} | department {r.department_id}"
+            for r in rows
+        ]
+        return ControlOutcome(output="\n".join(lines))
+
+    if tc.name == DEPARTMENT_STATUS.name:
+        if not agent.is_tenant_assistant:
+            return ControlOutcome(output="ERROR: only the oc8 Assistant can read department status")
+        agent_actor = await _resolve_agent_actor(db, tenant_id=tenant_id, task=task, run_id=run_id)
+        if agent_actor is None:
+            return ControlOutcome(output="ERROR: could not resolve who you are acting for")
+        authority = await authority_for_member(
+            db,
+            agent_actor.member,
+            token_role=await _acting_token_role(db, tenant_id=tenant_id, run_id=run_id),
+        )
+        view_perm = perm(DEPARTMENT, VIEW)
+        admitted = view_perm in authority.tenant_wide or agent_actor.scope.holds_anywhere(view_perm)
+        if not admitted:
+            return ControlOutcome(output="ERROR: you don't have permission to view departments")
+        tenant_wide = tenant_wide_read(authority, view_perm)
+        department_id_raw = tc.arguments.get("department_id")
+        if department_id_raw:
+            try:
+                department_id = uuid.UUID(str(department_id_raw))
+            except ValueError:
+                return ControlOutcome(output="ERROR: department_id is not a valid id")
+            dept = await visible_department(
+                db, scope=agent_actor.scope, tenant_wide=tenant_wide, department_id=department_id
+            )
+            if dept is None:
+                return ControlOutcome(output="ERROR: department not found")
+            goal = dept.goal or "(none)"
+            return ControlOutcome(
+                output=f"{dept.name} | id {dept.id} | goal: {goal}"
+            )
+        search = tc.arguments.get("search")
+        search_str = str(search) if search else None
+        rows, _total = await visible_departments(
+            db, scope=agent_actor.scope, tenant_wide=tenant_wide, search=search_str
+        )
+        if not rows:
+            return ControlOutcome(output="No departments visible.")
+        return ControlOutcome(output="\n".join(f"- {d.name} | id {d.id}" for d in rows))
+
+    if tc.name == AGENT_STATUS.name:
+        if not agent.is_tenant_assistant:
+            return ControlOutcome(output="ERROR: only the oc8 Assistant can read agent status")
+        agent_actor = await _resolve_agent_actor(db, tenant_id=tenant_id, task=task, run_id=run_id)
+        if agent_actor is None:
+            return ControlOutcome(output="ERROR: could not resolve who you are acting for")
+        authority = await authority_for_member(
+            db,
+            agent_actor.member,
+            token_role=await _acting_token_role(db, tenant_id=tenant_id, run_id=run_id),
+        )
+        view_perm = perm(AGENT, VIEW)
+        admitted = view_perm in authority.tenant_wide or agent_actor.scope.holds_anywhere(view_perm)
+        if not admitted:
+            return ControlOutcome(output="ERROR: you don't have permission to view agents")
+        tenant_wide = tenant_wide_read(authority, view_perm)
+        agent_id_raw = tc.arguments.get("agent_id")
+        if agent_id_raw:
+            try:
+                target_id = uuid.UUID(str(agent_id_raw))
+            except ValueError:
+                return ControlOutcome(output="ERROR: agent_id is not a valid id")
+            target = await visible_agent(
+                db, scope=agent_actor.scope, tenant_wide=tenant_wide, agent_id=target_id
+            )
+            if target is None:
+                return ControlOutcome(output="ERROR: agent not found")
+            output = f"{target.name} | id {target.id} | status {target.status}"
+            return ControlOutcome(output=output)
+        department_id_raw = tc.arguments.get("department_id")
+        department_id: uuid.UUID | None = None
+        if department_id_raw:
+            try:
+                department_id = uuid.UUID(str(department_id_raw))
+            except ValueError:
+                return ControlOutcome(output="ERROR: department_id is not a valid id")
+        status_filter = tc.arguments.get("status")
+        rows, _total = await visible_agents(
+            db,
+            scope=agent_actor.scope,
+            tenant_wide=tenant_wide,
+            department_id=department_id,
+            status=str(status_filter) if status_filter else None,
+        )
+        if not rows:
+            return ControlOutcome(output="No agents visible.")
+        lines = [f"- {a.name} | id {a.id} | status {a.status}" for a in rows]
+        return ControlOutcome(output="\n".join(lines))
+
+    if tc.name == BUDGET_OVERVIEW.name:
+        if not agent.is_tenant_assistant:
+            return ControlOutcome(output="ERROR: only the oc8 Assistant can read the budget")
+        agent_actor = await _resolve_agent_actor(db, tenant_id=tenant_id, task=task, run_id=run_id)
+        if agent_actor is None:
+            return ControlOutcome(output="ERROR: could not resolve who you are acting for")
+        authority = await authority_for_member(
+            db,
+            agent_actor.member,
+            token_role=await _acting_token_role(db, tenant_id=tenant_id, run_id=run_id),
+        )
+        # BUDGET_VIEW is not in SEAT_PERMISSIONS -- no department seat can ever
+        # grant it, so there is deliberately no scope.holds_anywhere fallback
+        # here, unlike list_pending_approvals/department_status/agent_status.
+        if perm(BUDGET, VIEW) not in authority.tenant_wide:
+            return ControlOutcome(output="ERROR: you don't have permission to view the budget")
+        department_id: uuid.UUID | None = None
+        department_id_raw = tc.arguments.get("department_id")
+        if department_id_raw:
+            try:
+                department_id = uuid.UUID(str(department_id_raw))
+            except ValueError:
+                return ControlOutcome(output="ERROR: department_id is not a valid id")
+        budget = await get_budget(db, tenant_id=tenant_id, department_id=department_id)
+        used = await current_month_tokens(db, tenant_id=tenant_id, department_id=department_id)
+        scope_label = f"department {department_id}" if department_id else "the whole tenant"
+        if budget is None:
+            return ControlOutcome(
+                output=f"No budget configured for {scope_label}. Used this month: {used} tokens."
+            )
+        return ControlOutcome(
+            output=(
+                f"Budget for {scope_label}: soft limit {budget.soft_limit_tokens}, "
+                f"hard limit {budget.hard_limit_tokens}. Used this month: {used} tokens."
+            )
+        )
+
+    if tc.name == KPI_OVERVIEW.name:
+        if not agent.is_tenant_assistant:
+            return ControlOutcome(output="ERROR: only the oc8 Assistant can read KPIs")
+        agent_id_raw = tc.arguments.get("agent_id")
+        department_id_raw = tc.arguments.get("department_id")
+        if agent_id_raw and department_id_raw:
+            return ControlOutcome(
+                output="ERROR: pass at most one of agent_id/department_id"
+            )
+        agent_actor = await _resolve_agent_actor(
+            db, tenant_id=tenant_id, task=task, run_id=run_id
+        )
+        if agent_actor is None:
+            return ControlOutcome(output="ERROR: could not resolve who you are acting for")
+        authority = await authority_for_member(
+            db,
+            agent_actor.member,
+            token_role=await _acting_token_role(
+                db, tenant_id=tenant_id, run_id=run_id
+            ),
+        )
+        date_from = _parse_iso(tc.arguments.get("date_from"))
+        date_to = _parse_iso(tc.arguments.get("date_to"))
+        target_agent_id: uuid.UUID | None = None
+        target_department_id: uuid.UUID | None = None
+        scope_label = "the whole tenant"
+        if agent_id_raw:
+            view_perm = perm(AGENT, VIEW)
+            admitted = (
+                view_perm in authority.tenant_wide
+                or agent_actor.scope.holds_anywhere(view_perm)
+            )
+            if not admitted:
+                return ControlOutcome(
+                    output="ERROR: you don't have permission to view this agent"
+                )
+            try:
+                target_agent_id = uuid.UUID(str(agent_id_raw))
+            except ValueError:
+                return ControlOutcome(output="ERROR: agent_id is not a valid id")
+            tenant_wide = tenant_wide_read(authority, view_perm)
+            target = await visible_agent(
+                db,
+                scope=agent_actor.scope,
+                tenant_wide=tenant_wide,
+                agent_id=target_agent_id,
+            )
+            if target is None:
+                return ControlOutcome(output="ERROR: agent not found")
+            scope_label = f"agent {target.name}"
+        elif department_id_raw:
+            view_perm = perm(DEPARTMENT, VIEW)
+            admitted = (
+                view_perm in authority.tenant_wide
+                or agent_actor.scope.holds_anywhere(view_perm)
+            )
+            if not admitted:
+                return ControlOutcome(
+                    output=(
+                        "ERROR: you don't have permission to view this department"
+                    )
+                )
+            try:
+                target_department_id = uuid.UUID(str(department_id_raw))
+            except ValueError:
+                return ControlOutcome(output="ERROR: department_id is not a valid id")
+            tenant_wide = tenant_wide_read(authority, view_perm)
+            dept = await visible_department(
+                db,
+                scope=agent_actor.scope,
+                tenant_wide=tenant_wide,
+                department_id=target_department_id,
+            )
+            if dept is None:
+                return ControlOutcome(output="ERROR: department not found")
+            scope_label = f"department {dept.name}"
+        else:
+            # Tenant-wide figures: STATISTICS_VIEW is not in SEAT_PERMISSIONS,
+            # same reasoning as budget_overview -- no seat fallback.
+            if perm(STATISTICS, VIEW) not in authority.tenant_wide:
+                return ControlOutcome(
+                    output=(
+                        "ERROR: you don't have permission to view "
+                        "tenant-wide statistics"
+                    )
+                )
+        result = await compute_kpis(
+            db,
+            tenant_id=tenant_id,
+            agent_id=target_agent_id,
+            department_id=target_department_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        return ControlOutcome(
+            output=(
+                f"KPIs for {scope_label}: {result.run_count} runs, "
+                f"avg response time {result.response_time_ms} ms, "
+                f"avg approval wait {result.approval_wait_ms} ms."
             )
         )
 

@@ -300,6 +300,7 @@ async def step(
             if model_config is not None
             else False
         )
+        task_row = await db.get(m.Task, run.task_id) if run.task_id is not None else None
         preamble = await build_run_preamble(
             db,
             agent=agent,
@@ -309,6 +310,8 @@ async def step(
             model_locality=model_locality,
             task_images=task_images,
             supports_vision=supports_vision,
+            task=task_row,
+            run_id=run_id,
         )
         transcript = [_from_message(msg) for msg in preamble.messages]
         assigned_skills = preamble.assigned_skills
@@ -319,6 +322,7 @@ async def step(
         ctx["contains_restricted"] = preamble.contains_restricted
         ctx["has_knowledge"] = preamble.has_knowledge
         ctx["has_instruction_files"] = preamble.has_instruction_files
+        ctx["copilot_permissions"] = sorted(preamble.copilot_permissions)
         if conn is not None and not tool_schemas_raw:
             cfg = _mcp_params(conn)
             env = await _mcp_env(conn, db, run.tenant_id)
@@ -347,6 +351,7 @@ async def step(
     contains_restricted = bool(ctx.get("contains_restricted", False))
     has_knowledge = bool(ctx.get("has_knowledge", False))
     has_instruction_files = bool(ctx.get("has_instruction_files", False))
+    copilot_permissions = frozenset(ctx.get("copilot_permissions", []))
 
     tools = offered_tools(
         agent,
@@ -355,6 +360,7 @@ async def step(
         mcp_tools=mcp_tools,
         has_knowledge=has_knowledge,
         has_instruction_files=has_instruction_files,
+        copilot_permissions=copilot_permissions,
     )
 
     resolved_messages = _to_messages(transcript)

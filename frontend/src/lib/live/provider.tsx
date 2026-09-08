@@ -1,14 +1,27 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useRef, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react";
 
 import { applyEvent, liveQueryKeys } from "@/lib/live/apply-event";
 import { useLiveConnection } from "@/lib/live/connection";
 import { toastForEvent } from "@/lib/live/toast-for-event";
 import type { RealtimeEvent } from "@/lib/live/types";
 
+type LiveConnectionStatus = "connected" | "disconnected";
+
+const LiveConnectionStatusContext = createContext<LiveConnectionStatus>("connected");
+
+/** Whether the realtime socket is currently up. "disconnected" the moment a
+ * close/error fires, "connected" again the moment it reopens -- distinct
+ * from the reconnect backoff itself, which callers of this hook don't need
+ * to know the timing of, only the current yes/no. */
+export function useLiveConnectionStatus(): LiveConnectionStatus {
+  return useContext(LiveConnectionStatusContext);
+}
+
 export function LiveUpdatesProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
   const seen = useRef<Set<string>>(new Set());
+  const [status, setStatus] = useState<LiveConnectionStatus>("connected");
 
   const onEvent = useCallback(
     (e: RealtimeEvent) => {
@@ -25,12 +38,19 @@ export function LiveUpdatesProvider({ children }: { children: ReactNode }) {
   );
 
   const onOpen = useCallback(() => {
+    setStatus("connected");
     // reconnect-resync: refetch the live queries so any pub/sub gap is closed
     for (const key of liveQueryKeys) {
       qc.invalidateQueries({ queryKey: key });
     }
   }, [qc]);
 
-  useLiveConnection(onEvent, onOpen);
-  return <>{children}</>;
+  const onClose = useCallback(() => setStatus("disconnected"), []);
+
+  useLiveConnection(onEvent, onOpen, onClose);
+  return (
+    <LiveConnectionStatusContext.Provider value={status}>
+      {children}
+    </LiveConnectionStatusContext.Provider>
+  );
 }

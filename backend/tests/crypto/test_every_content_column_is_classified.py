@@ -169,6 +169,8 @@ EXEMPT: dict[str, str] = {
     "mcp_connection.scopes": "authorization/policy input read directly by the permission decision point, design spec §6c",
     "mcp_connection.config": "content column to encrypt as-is, not yet migrated, design spec §6a",
     "mcp_connection.health": "not individually named in spec section 6; structural/config/identifier column, not customer free text -- see design spec §6",
+    "member_dashboard_layout.widgets": "structural/config-shaped JSON describing a member's own widget grid arrangement (ids/types/positions/sizes), not customer free text, same rationale as chat_message.rendered_components",
+    "member_dashboard_layout.template_id": "dispatch-matched identifier (a fixed template key), not customer content, design spec §6c",
     "memory_record.content": "content column to encrypt as-is, not yet migrated, design spec §6a",
     "memory_record.metadata": "content column to encrypt as-is, not yet migrated, design spec §6a",
     "memory_record.status": "structural enum-like column (status/state/kind/classification/...), CHECK-constrained, not content, design spec §6c",

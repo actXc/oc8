@@ -352,10 +352,30 @@ class ChannelActor:
     via: str
 
 
+@dataclass(frozen=True)
+class AgentActor:
+    """Somebody a Copilot tool is acting FOR -- resolved from the chat run
+    behind the call, with no live Principal and no channel binding.
+
+    The third door `decide_approval` (and any future write-capable Copilot
+    tool) is called through: not a token (`HumanActor`), not a messenger
+    binding (`ChannelActor`), but the human on the other end of a chat
+    session the tool call is running inside of. `scope` is resolved the
+    same way `control_tools._member_may_reach_department` already resolves
+    it for `delegate_task` -- `scope_for_member`, off the SAME member row --
+    so a Copilot tool can never see or decide more than the human behind it
+    could through any other door.
+    """
+
+    member: OrgMember
+    scope: DepartmentScope
+    via: str = "copilot"
+
+
 #: What every human funnel takes. `decide_approval(..., *, actor: DecisionActor)`
 #: is a required keyword with no default, so a door written next year is a
 #: TypeError at call time and a mypy error in CI rather than a silent bypass.
-DecisionActor = HumanActor | ChannelActor
+DecisionActor = HumanActor | ChannelActor | AgentActor
 
 
 # ---------------------------------------------------------------- the resolvers

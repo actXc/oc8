@@ -65,7 +65,7 @@ from oc8.authz.permissions import (
     perm,
     permissions_for,
 )
-from oc8.authz.scope import scope_for_principal, subject_uuid_for
+from oc8.authz.scope import scope_for_member, scope_for_principal, subject_uuid_for
 from tests.conftest import AppSessionFactory
 
 pytestmark = pytest.mark.asyncio
@@ -622,3 +622,105 @@ async def test_a_soft_deleted_member_reads_the_same_way_at_both_doors(
         "row for this subject, so the two doors now answer differently. Close "
         "both, in the offboarding slice, or neither."
     )
+
+
+# ------------------------------------------------------- authority_for_member
+
+
+async def authority_for_member(
+    db: AsyncSession, member: m.OrgMember, *, token_role: str | None = None
+) -> Any:
+    """`oc8.authz.authority.authority_for_member`; see `authority_for_principal`
+    above for why this is imported at call time rather than at module level."""
+    from oc8.authz.authority import authority_for_member as _resolve
+
+    return await _resolve(db, member, token_role=token_role)
+
+
+async def test_authority_for_member_with_an_assigned_role_matches_resolve_authority(
+    app_session: AppSessionFactory,
+) -> None:
+    """The off-request resolver must agree with `resolve_authority` byte for
+    byte on the assigned-role path -- it is the same tail logic, reached from
+    a member row instead of a principal."""
+    tenant = uuid.uuid4()
+    subject = f"anna-{uuid.uuid4()}"
+    async with app_session(tenant) as db:
+        role_id = await _role(db, tenant, "Freigabe Vertrieb", FREIGABE)
+        member = await _member(db, tenant, subject, role_id=role_id)
+        via_principal = await authority_for_principal(
+            _request(), db, _principal(tenant, subject=subject, role=ORG_ADMIN)
+        )
+        via_member = await authority_for_member(db, member, token_role=ORG_ADMIN)
+
+    assert via_member.tenant_wide == via_principal.tenant_wide == FREIGABE
+    assert via_member.source == via_principal.source == "assigned"
+    assert via_member.unrestricted == via_principal.unrestricted is False
+
+
+async def test_authority_for_member_with_no_role_and_no_token_role_grants_nothing(
+    app_session: AppSessionFactory,
+) -> None:
+    """A member with neither an assigned role nor a token claim to fall back
+    to (a Telegram-bound or scheduled/delegated origin, per
+    `_acting_token_role`'s own None cases) resolves to the empty set rather
+    than raising or guessing -- the fail-closed direction for a caller this
+    function cannot place on any floor."""
+    tenant = uuid.uuid4()
+    subject = f"anna-{uuid.uuid4()}"
+    async with app_session(tenant) as db:
+        member = await _member(db, tenant, subject)
+        assert member.role_id is None
+        authority = await authority_for_member(db, member)
+
+    assert authority.tenant_wide == frozenset()
+    assert authority.source == "token"
+    assert authority.unrestricted is False
+
+
+async def test_authority_for_member_with_no_role_falls_back_to_the_given_token_role(
+    app_session: AppSessionFactory,
+) -> None:
+    """No assigned role, but a token role WAS recorded on the run
+    (`_acting_token_role`'s ordinary case) -- resolves to that role's code-table
+    permissions, exactly as `_authority_of_member` does for a live principal."""
+    tenant = uuid.uuid4()
+    subject = f"anna-{uuid.uuid4()}"
+    async with app_session(tenant) as db:
+        member = await _member(db, tenant, subject)
+        authority = await authority_for_member(db, member, token_role=OPERATOR)
+
+    assert authority.tenant_wide == permissions_for(OPERATOR)
+    assert authority.source == "token"
+
+
+async def test_authority_for_member_does_not_take_a_seat_away(
+    app_session: AppSessionFactory,
+) -> None:
+    """Same invariant as `test_an_assigned_role_does_not_take_a_seat_away`
+    above, for the off-request resolver: a tenant-wide role of `Mitarbeiter`
+    (no grants) must not be read as "no authority anywhere" -- a seat is a
+    different row, read by `DepartmentScope.holds_anywhere`, never by this
+    function."""
+    tenant = uuid.uuid4()
+    subject = f"anna-{uuid.uuid4()}"
+    async with app_session(tenant) as db:
+        dept = m.Department(tenant_id=tenant, name="Vertrieb")
+        db.add(dept)
+        await db.flush()
+        role_id = await _role(db, tenant, "Mitarbeiter", frozenset())
+        member = await _member(db, tenant, subject, role_id=role_id)
+        db.add(
+            m.OrgMemberDepartment(
+                tenant_id=tenant,
+                member_id=member.id,
+                department_id=dept.id,
+                seat_role=SEAT_APPROVER,
+            )
+        )
+        await db.flush()
+        authority = await authority_for_member(db, member)
+        scope = await scope_for_member(db, member)
+
+    assert authority.tenant_wide == frozenset()
+    assert scope.holds_anywhere(APPROVAL_DECIDE) is True

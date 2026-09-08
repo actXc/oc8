@@ -237,6 +237,15 @@ def _authorize(
         # should be for a tool that can only ever produce a draft a human has
         # to approve before anything changes.
         return Decision(Effect.ALLOW)
+    if tc.name == "decide_approval":
+        # Like propose_change and ask_user: it belongs to no connection, so
+        # the department frame has nothing to decide it against. Real
+        # authorisation for a decision happens where it must, inside
+        # `decide_approval` (approvals/service.py) via `_may_apply_the_effect`
+        # and `_resolve_agent_actor`'s scope -- this ALLOW only keeps a
+        # successful call from being audited as a denial for a tool that was
+        # never going to be enforced by this frame in the first place.
+        return Decision(Effect.ALLOW)
     if tc.name == "delegate_task":
         if not agent.is_team_lead:
             return Decision(Effect.DENY, "only a team lead can delegate tasks")
@@ -504,6 +513,8 @@ async def run_agent(
             model_locality=model_locality,
             task_images=task_images,
             supports_vision=supports_vision,
+            task=task,
+            run_id=run_id,
         )
         messages: list[NeutralMessage] = list(preamble.messages)
         assigned_skills = preamble.assigned_skills
@@ -511,6 +522,7 @@ async def run_agent(
         contains_restricted = preamble.contains_restricted
         has_knowledge = preamble.has_knowledge
         has_instruction_files = preamble.has_instruction_files
+        copilot_permissions = preamble.copilot_permissions
         tool_trace: list[dict[str, Any]] = []
         # Sub-runs created by delegate_task. run_agent must not publish them (see
         # _delegate); every return below hands them to execute_run instead.
@@ -568,6 +580,7 @@ async def run_agent(
                     mcp_tools=tools,
                     has_knowledge=has_knowledge,
                     has_instruction_files=has_instruction_files,
+                    copilot_permissions=copilot_permissions,
                 )
 
             steps = 0

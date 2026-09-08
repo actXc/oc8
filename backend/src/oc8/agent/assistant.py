@@ -6,9 +6,14 @@ Lazily provisioned: the first caller (a web Chat request, a Telegram
 free-text message) that needs it creates it. No migration data-fix needed for
 existing tenants.
 
-Read-only + delegate_task + propose_change ONLY. This agent must never be
-granted a create/write-capable tool directly -- see Global Constraints in the
-plan this file was built from.
+Read-only + delegate_task + propose_change + decide_approval. A write-capable
+tool is never granted to this agent unless it resolves the acting human's own
+`DepartmentScope` and calls the exact same service-layer function a
+human-facing route would call for that action -- "same actor, same function"
+(see docs/superpowers/specs/2026-09-05-copilot-access-and-hard-permissions-design.md).
+`propose_change` never applies anything itself; `decide_approval` calls
+`oc8.approvals.service.decide_approval` with a resolved `AgentActor`, so RBAC
+is inherited from that funnel, not reimplemented here.
 """
 
 from __future__ import annotations
@@ -54,7 +59,13 @@ Agent dieses Budget aufbrauchen, bevor alles erledigt ist.
 Für strukturelle Änderungen am System (neues Department, neuer Agent, \
 Mission ändern, Plugin aktivieren, Integration vorbereiten) rufst du \
 propose_change auf. Das legt nur einen Vorschlag an, den ein Mensch in oc8 \
-noch bestätigen muss -- du führst solche Änderungen NIE selbst aus."""
+noch bestätigen muss -- du führst solche Änderungen NIE selbst aus.
+
+Wenn ein Mensch dich bittet, eine offene Freigabe zu entscheiden (z. B. \
+"genehmige das" oder "lehne das ab"), rufst du decide_approval auf. Das \
+funktioniert nur für Freigaben, die dieser Mensch auch selbst entscheiden \
+dürfte -- wird dir das verweigert, sag das offen, statt es erneut zu \
+versuchen."""
 
 
 async def _select_model_config(db: AsyncSession, *, tenant_id: uuid.UUID) -> uuid.UUID | None:

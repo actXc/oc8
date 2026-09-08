@@ -338,7 +338,8 @@ async def test_a_linked_authorized_sender_gets_an_ack_and_a_session_is_created(
             .all()
         )
         assert len(runs) == 1
-        assert runs[0].context["telegram_external_id"] == "999"
+        assert runs[0].context["chat_channel"] == "telegram"
+        assert runs[0].context["chat_channel_external_id"] == "999"
         assert runs[0].context["chat_session_id"] == str(session.id)
 
         messages = (

@@ -1,0 +1,27 @@
+name = "teams_bot"
+display_name = "Teams bot"
+validate_entry_point = "channel.setup:validate"
+
+[[fields]]
+key = "app_id"
+label = "Microsoft App ID"
+kind = "text"
+required = true
+help = "From the Azure Bot resource's registration, a GUID."
+
+[[fields]]
+key = "app_password"
+label = "App password"
+kind = "password"
+help = "The client secret generated for the Bot resource's app registration."
+# Deliberately no `default` -- an app password has no sensible one, and a
+# credential-type field with kind="password" is always implicitly
+# required=True (manifest.py's SetupFieldSpec default). Same reasoning as
+# telegram_bot.toml's identical comment on its own bot_token field.
+
+[[fields]]
+key = "tenant_id"
+label = "Tenant ID (optional)"
+kind = "text"
+required = false
+help = "Only for a single-tenant App registration. Leave empty for the default multi-tenant Bot Framework login."

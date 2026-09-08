@@ -92,7 +92,7 @@ class EventBus:
             return {
                 "title": str(data.get("title") or "") or DEFAULT_PUSH_TITLE,
                 "body": data.get("detail"),
-                "url": f"/workspace?item={approval_id}",
+                "url": "/workspace",
             }
         row = await db.get(m.ApprovalRequest, uuid.UUID(approval_id))
         if row is None:
@@ -105,7 +105,7 @@ class EventBus:
         return {
             "title": row.title or DEFAULT_PUSH_TITLE,
             "body": row.detail,
-            "url": f"/workspace?item={approval_id}",
+            "url": "/workspace",
         }
 
     async def close(self) -> None:

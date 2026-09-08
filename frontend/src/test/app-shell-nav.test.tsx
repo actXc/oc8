@@ -35,3 +35,17 @@ describe("app-shell nav: strict-hide for not-viewable-by-default items", () => {
     expect(entryFor("/audit")).toContain("strict: true");
   });
 });
+
+describe("app-shell nav: TP3 restructuring", () => {
+  const src = readFileSync(join(process.cwd(), "src/components/app-shell.tsx"), "utf-8");
+
+  it("no longer has a /chat nav entry", () => {
+    expect(src).not.toContain('to: "/chat"');
+  });
+
+  it("hides <CopilotDock /> specifically on /workspace", () => {
+    const idx = src.indexOf("<CopilotDock");
+    const context = src.slice(Math.max(0, idx - 80), idx + 40);
+    expect(context).toContain('"/workspace"');
+  });
+});
