@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
   ArrowLeft,
   AlertTriangle,
@@ -46,6 +46,7 @@ import {
   useCancelRun,
   useCreateAgentTrigger,
   useCreateGrant,
+  useDeleteAgent,
   useDeleteAgentMemory,
   useDeleteAgentTrigger,
   useKnowledgeBases,
@@ -105,6 +106,7 @@ import { formatMs } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import { useMayManageAgent } from "@/lib/governance-hooks";
+import { useConfirm } from "@/hooks/use-confirm";
 
 // Mirrors mapAgentStatus in src/lib/live/apply-event.ts (not exported there).
 // Handles BOTH vocabularies: the WS "agent.status" event carries the raw
@@ -306,6 +308,7 @@ function AgentDetail() {
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <StatusPill status={status} />
+            <DeleteAgentButton agent={agent} mayManage={mayManage} />
             <button
               type="button"
               onClick={() => setRunPickerOpen(true)}
@@ -498,6 +501,65 @@ function AgentDetail() {
         <AgentSkillsTab agentId={agent.id} agentName={agent.name} mayManage={mayManage} />
       )}
     </div>
+  );
+}
+
+// Own component (rather than inline in AgentDetail) for the same reason as
+// OverviewTab/AgentSkillsTab below: reachable from a test without standing
+// up the whole routed page.
+export function DeleteAgentButton({
+  agent,
+  mayManage,
+}: {
+  agent: AgentDetailData;
+  mayManage: boolean;
+}) {
+  const t = useT();
+  const navigate = useNavigate();
+  const { confirm, ConfirmDialog } = useConfirm();
+  const deleteAgent = useDeleteAgent();
+
+  if (!mayManage) return null;
+
+  async function handleDelete() {
+    const ok = await confirm({
+      title: t("Delete this agent?", "Diesen Agenten löschen?"),
+      description: t(
+        `Delete ${agent.name}? Agents with past runs are archived instead and can be restored later; agents with no runs are removed permanently.`,
+        `${agent.name} löschen? Agenten mit bisherigen Läufen werden stattdessen archiviert und können später wiederhergestellt werden; Agenten ohne Läufe werden endgültig entfernt.`,
+      ),
+      confirmLabel: t("Delete", "Löschen"),
+      cancelLabel: t("Cancel", "Abbrechen"),
+    });
+    if (!ok) return;
+    deleteAgent.mutate(agent.id, {
+      onSuccess: (data) => {
+        toast.success(
+          data.outcome === "archived"
+            ? t("Agent archived", "Agent archiviert")
+            : t("Agent deleted", "Agent gelöscht"),
+          { description: agent.name },
+        );
+        navigate({ to: "/agents" });
+      },
+      onError: () =>
+        toast.error(t("Couldn't delete the agent", "Agent konnte nicht gelöscht werden")),
+    });
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={handleDelete}
+        disabled={deleteAgent.isPending}
+        title={t("Delete agent", "Agent löschen")}
+        className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-2 text-sm text-muted-foreground transition hover:border-[color:var(--status-error)]/50 hover:text-[color:var(--status-error)] disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <Trash2 className="h-4 w-4" />
+      </button>
+      {ConfirmDialog}
+    </>
   );
 }
 

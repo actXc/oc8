@@ -870,6 +870,17 @@ export function useRestoreAgent() {
   });
 }
 
+/** Backend decides hard-delete vs. archive based on whether the agent has
+ * any runs (see `DELETE /agents/{id}`) -- the caller doesn't need to know
+ * which one happened, just that the agent is gone from the default list. */
+export function useDeleteAgent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete<{ outcome: "deleted" | "archived" }>(`/agents/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.agents }),
+  });
+}
+
 export function useCreateDepartment() {
   const qc = useQueryClient();
   return useMutation({
