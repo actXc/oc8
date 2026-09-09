@@ -19,6 +19,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Panel, StatusPill } from "@/components/app-shell";
+import { InlineRename } from "@/components/inline-rename";
 import { NewAgentDialog } from "@/components/new-agent-dialog";
 import { MemoryEditor } from "@/components/memory-editor";
 import { KnowledgeAssignment } from "@/components/knowledge-assignment";
@@ -105,6 +106,7 @@ function DepartmentDetail() {
   const allBases = allBasesPage?.items ?? [];
   const [tab, setTab] = useState<"overview" | "guardrails" | "collab" | "settings">("overview");
   const [hireOpen, setHireOpen] = useState(false);
+  const updateDepartment = useUpdateDepartment(id);
 
   const taskState = board?.tasks ?? [];
   const boardTotals = board?.totals ?? {};
@@ -218,7 +220,25 @@ function DepartmentDetail() {
               <Icon className="h-7 w-7" />
             </div>
             <div>
-              <h2 className="font-serif text-3xl leading-tight">{dept.name}</h2>
+              <InlineRename
+                value={dept.name}
+                label={t("Rename department", "Abteilung umbenennen")}
+                headingClassName="font-serif text-3xl leading-tight"
+                onSave={(name) =>
+                  updateDepartment.mutateAsync(
+                    { name },
+                    {
+                      onError: () =>
+                        toast.error(
+                          t(
+                            "Couldn't rename the department",
+                            "Abteilung konnte nicht umbenannt werden",
+                          ),
+                        ),
+                    },
+                  )
+                }
+              />
               <p className="mt-1 text-sm text-muted-foreground">{dept.goal}</p>
               <p className="mt-1 text-xs text-muted-foreground">
                 {t("Goal", "Ziel")}: {dept.okr}

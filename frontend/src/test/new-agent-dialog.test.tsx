@@ -52,6 +52,7 @@ const createTriggerMock = vi.fn().mockResolvedValue({});
 const credentialTypesMock = vi.fn().mockReturnValue({ data: [] });
 const credentialsMock = vi.fn().mockReturnValue({ data: [] });
 const connectionsMock = vi.fn().mockReturnValue({ data: connections });
+const useMcpLoginsMock = vi.fn().mockReturnValue({ data: logins });
 const createLoginMock = vi.fn();
 const createCredentialMock = vi.fn();
 const departmentToolsMock = vi.fn().mockReturnValue({
@@ -62,7 +63,7 @@ vi.mock("@/lib/hooks", () => ({
   useModels: () => ({ data: [{ id: "m1", name: "GPT", provider: "OpenAI" }] }),
   useModelProviders: () => ({ data: [] }),
   useMcpConnections: () => connectionsMock(),
-  useMcpLogins: () => ({ data: logins }),
+  useMcpLogins: () => useMcpLoginsMock(),
   useCredentialTypes: () => credentialTypesMock(),
   useCredentials: () => credentialsMock(),
   useCreateCredential: () => ({ mutateAsync: createCredentialMock, isPending: false }),
@@ -107,6 +108,8 @@ beforeEach(() => {
   credentialsMock.mockReturnValue({ data: [] });
   connectionsMock.mockReset();
   connectionsMock.mockReturnValue({ data: connections });
+  useMcpLoginsMock.mockReset();
+  useMcpLoginsMock.mockReturnValue({ data: logins });
   createLoginMock.mockReset();
   createCredentialMock.mockReset();
   departmentToolsMock.mockReset();
@@ -234,6 +237,41 @@ describe("NewAgentDialog: inline credential picker", () => {
     });
   });
 
+  it("does not reuse a login scoped to a different department, even if it shares the tool key and credential", async () => {
+    // Agent tool login selection design's department-scoping extension:
+    // "login-1" belongs to dept-b, this agent is hired into dept-a
+    // (departments[0], the default preselection) -- picking the same
+    // credential must mint a NEW, dept-a-scoped login instead of silently
+    // reusing dept-b's.
+    connectionsMock.mockReturnValue({
+      data: [{ ...connections[0], credentialType: "odoo_login" }],
+    });
+    credentialsMock.mockReturnValue({
+      data: [{ id: "cred-1", name: "oc8-local", credentialType: "odoo_login" }],
+    });
+    useMcpLoginsMock.mockReturnValue({
+      data: [{ ...logins[0], departmentId: "dept-b" }],
+    });
+    createLoginMock.mockResolvedValue({ id: "new-login-2", name: "Odoo" });
+
+    renderDialog();
+    await screen.findByText("Hire a new agent");
+    fillIdentityAndGoToTools();
+    fireEvent.click(screen.getByRole("button", { name: "Add tool" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "cred-1" } });
+    await waitFor(() =>
+      expect(createLoginMock).toHaveBeenCalledWith({
+        name: "Odoo",
+        credentialType: "odoo_login",
+        credentialId: "cred-1",
+        scopes: [],
+        departmentId: "dept-a",
+      }),
+    );
+  });
+
   it("creates a new credential inline and pins its login immediately -- no separate modal, no free-text tool scopes", async () => {
     // Live user feedback: a stacked modal asking for raw tool-call names
     // "das bekommt doch kein mitarbeiter hin" -- creating a credential now
@@ -292,6 +330,7 @@ describe("NewAgentDialog: inline credential picker", () => {
         credentialType: "odoo_login",
         credentialId: "new-cred-1",
         scopes: [],
+        departmentId: "dept-a",
       }),
     );
 

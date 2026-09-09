@@ -76,7 +76,7 @@ async def test_runtimes_always_has_exactly_two_builtins_with_one_default(
     independently selectable now -- not one entry whose behavior is a hidden
     tenant-wide toggle. Exactly one of the two carries `isDefault=True`: the
     one an agent with no explicit `runtime_ref` actually gets (mirrors
-    `agent_isolation`, default False -> in-process)."""
+    `agent_isolation`, default True -> isolated)."""
     tenant = uuid.uuid4()
     async with app_session(tenant):
         pass
@@ -94,7 +94,7 @@ async def test_runtimes_always_has_exactly_two_builtins_with_one_default(
 
             defaults = [r for r in body if r["isDefault"]]
             assert len(defaults) == 1
-            assert defaults[0]["id"] == "builtin:in-process"
+            assert defaults[0]["id"] == "builtin:isolated"
 
 
 async def test_runtimes_lists_enabled_plugin_for_owning_tenant_only(

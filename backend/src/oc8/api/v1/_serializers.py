@@ -31,14 +31,17 @@ from oc8.schemas.dto import (
     SeatDTO,
     SimilarChunkDTO,
     SkillDTO,
+    TaskBoardRowDTO,
     TaskDTO,
 )
+from oc8.workspace import tasks as _workspace_tasks
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from oc8.workspace.members import MemberRow, Seat
     from oc8.workspace.queue import ClarificationRow
+    from oc8.workspace.tasks import TaskRow
 
 # Backend lifecycle status -> the five UI states the office view renders.
 # "idle" is enabled-but-not-executing (distinct from "running", which is
@@ -53,14 +56,8 @@ AGENT_STATUS_TO_UI = {
     "stopped": "paused",
     "error": "error",
 }
-TASK_STATE_TO_COLUMN = {
-    "backlog": "backlog",
-    "in_progress": "in_progress",
-    "waiting_for_approval": "waiting",
-    "budget_exceeded": "waiting",
-    "done": "done",
-    "failed": "done",
-}
+#: Re-exported from `workspace.tasks`, which owns it -- see that module for why.
+TASK_STATE_TO_COLUMN = _workspace_tasks.TASK_STATE_TO_COLUMN
 
 
 def agent_to_dto(a: m.Agent) -> AgentDTO:
@@ -235,6 +232,25 @@ def clarification_to_dto(row: ClarificationRow) -> ClarificationDTO:
         department_name=row.department_name,
         question=row.question,
         status=row.status,
+        created_at=row.created_at.isoformat() if row.created_at else "",
+    )
+
+
+def task_row_to_dto(row: TaskRow) -> TaskBoardRowDTO:
+    return TaskBoardRowDTO(
+        id=str(row.id),
+        title=row.title,
+        state=row.state,
+        column=row.column,
+        department_id=str(row.department_id),
+        department_name=row.department_name,
+        agent_id=str(row.agent_id) if row.agent_id else None,
+        agent_name=row.agent_name,
+        requested_by_member_id=(
+            str(row.requested_by_member_id) if row.requested_by_member_id else None
+        ),
+        parent_task_id=str(row.parent_task_id) if row.parent_task_id else None,
+        delegation_depth=row.delegation_depth,
         created_at=row.created_at.isoformat() if row.created_at else "",
     )
 

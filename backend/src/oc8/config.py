@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     claude_code_agent_image: str = "oc8-agent-claude-code:latest"
     codex_agent_image: str = "oc8-agent-codex:latest"
     opencode_agent_image: str = "oc8-agent-opencode:latest"
-    agent_isolation: bool = False
+    agent_isolation: bool = True
     # oc8_agents, NOT oc8_default: agent containers must land on their own
     # isolated network, which cannot reach the database or the internet.
     # oc8_default is the network the CONTROL PLANE (and postgres) sit on --

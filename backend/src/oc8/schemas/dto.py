@@ -163,6 +163,26 @@ class ClarificationDTO(CamelModel):
     created_at: str = ""
 
 
+class TaskBoardRowDTO(CamelModel):
+    """One card on the My Work task board -- the cross-department view, unlike
+    `TaskDTO`/`BoardDTO` which are already scoped to one known department and
+    so never needed a department name of their own.
+    """
+
+    id: str
+    title: str
+    state: str
+    column: str  # backlog | in_progress | waiting | done
+    department_id: str
+    department_name: str = ""
+    agent_id: str | None = None
+    agent_name: str | None = None
+    requested_by_member_id: str | None = None
+    parent_task_id: str | None = None
+    delegation_depth: int = 0
+    created_at: str = ""
+
+
 class ClarificationAnswerDTO(CamelModel):
     """What answering one gives back.
 
@@ -696,10 +716,11 @@ class GuardrailDTO(CamelModel):
 
 
 class McpLoginDTO(CamelModel):
-    """A Credential-backed McpConnection -- name, department_id (always None
-    for this flow), scopes, and connection health, never the credential's own
-    field values (those are visible via GET /credentials, per that
-    framework's own write-only-secrets discipline)."""
+    """A Credential-backed McpConnection -- name, department_id (None for a
+    tenant-wide login, set when the login is scoped to one department),
+    scopes, and connection health, never the credential's own field values
+    (those are visible via GET /credentials, per that framework's own
+    write-only-secrets discipline)."""
 
     id: str
     name: str
@@ -1129,7 +1150,7 @@ class WidgetInstanceDTO(CamelModel):
     """
 
     id: str
-    type: Literal["chat", "approvals", "reports", "budget", "activity"]
+    type: Literal["chat", "approvals", "reports", "budget", "activity", "tasks"]
     x: int
     y: int
     w: int

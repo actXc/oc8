@@ -106,8 +106,14 @@ export function NewAgentDialog({
   // access via `narrowing` at creation time, instead of only decorating the
   // profile card the way it did before.
   const logins = useMcpLogins();
+  // Only logins this agent could actually use: tenant-wide ones
+  // (departmentId === null, the pre-existing default) plus ones scoped to
+  // this agent's own department -- never another department's login, even
+  // if it happens to share this tool key (agent tool login selection
+  // design's department-scoping extension).
   const loginsByKey: Record<string, McpLoginDTO[]> = {};
   for (const login of logins.data ?? []) {
+    if (login.departmentId !== null && login.departmentId !== identity.departmentId) continue;
     (loginsByKey[login.name] ??= []).push(login);
   }
   const { data: deptTools } = useDepartmentTools(identity.departmentId);
@@ -117,9 +123,10 @@ export function NewAgentDialog({
   // the same "select or create new" control the Capa setup form uses, not
   // a stacked modal, and no free-text scopes field (live user feedback:
   // asking for raw tool-call names "das bekommt doch kein mitarbeiter hin").
-  // A login is a Credential paired 1:1 with a tenant-global McpConnection
-  // (POST /mcp/logins), so picking a credential still needs one created/
-  // reused behind the scenes -- pinCredential below does that.
+  // A login is a Credential paired 1:1 with a McpConnection (POST
+  // /mcp/logins), department-scoped by default here, so picking a
+  // credential still needs one created/reused behind the scenes --
+  // pinCredential below does that.
   const createLogin = useCreateMcpLogin();
 
   // Default the model / department selection once the lists load.
@@ -194,6 +201,11 @@ export function NewAgentDialog({
         credentialType,
         credentialId,
         scopes: [],
+        // Scoped to this agent's own department, not tenant-wide: lets a
+        // second department pin a different login under the same tool key
+        // (e.g. two distinct Odoo logins) instead of hitting the "already
+        // exists" conflict a tenant-wide login would.
+        departmentId: identity.departmentId || undefined,
       });
       setConnectionId((s) => ({ ...s, [toolKey]: login.id }));
     } catch (err) {
@@ -236,6 +248,16 @@ export function NewAgentDialog({
         return;
       }
     }
+
+    // A tool picked here only becomes real access once the department's own
+    // frame already enables it -- buildNarrowing() silently leaves these out
+    // of the request, matching "narrowing can only tighten, never widen"
+    // (see its own comment). Silent is the bug: a login was still picked and
+    // pinned for it, so without this the agent looks fully configured and
+    // simply can't reach the tool the first time it tries -- surfaced live
+    // when a freshly hired agent had an Odoo login pinned in this dialog but
+    // no access at run time, department frame not enabled for it.
+    const notInDeptFrame = tools.filter((key) => !frameTools[key]?.enabled);
 
     try {
       const agent = await createAgent.mutateAsync({
@@ -289,6 +311,12 @@ export function NewAgentDialog({
       toast.success("Agent hired", {
         description: `${identity.name || "New hire"} is ready — ${tools.length} tools, ${model?.name ?? ""}.`,
       });
+      if (notInDeptFrame.length > 0) {
+        toast.warning("Some tools need department approval first", {
+          description: `${notInDeptFrame.join(", ")} — not yet enabled in this department's tool settings, so ${identity.name || "the agent"} cannot use ${notInDeptFrame.length === 1 ? "it" : "them"} yet. Enable it under the department's Settings tab.`,
+          duration: 10000,
+        });
+      }
       reset();
       onOpenChange(false);
       // The webhook URL only exists on the agent's own page (TriggerEditor)

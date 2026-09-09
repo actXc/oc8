@@ -119,7 +119,7 @@ async def test_resolve_runtime_defaults_to_first_party(app_session: AppSessionFa
 
         assert await resolve_runtime_plugin(db, tenant_id=tenant, agent=agent) is None
         runtime = await resolve_runtime(db, tenant_id=tenant, agent=agent)
-        assert isinstance(runtime, Oc8AgentRuntime)
+        assert isinstance(runtime, DockerIsolatedRuntime)
 
 
 async def test_resolve_runtime_returns_stub_when_assigned(app_session: AppSessionFactory) -> None:

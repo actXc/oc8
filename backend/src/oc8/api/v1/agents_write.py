@@ -46,6 +46,7 @@ from oc8.runtime.registry import (
 )
 from oc8.schemas.dto import AgentDetailDTO, AgentDTO, FileAttachmentDTO
 from oc8.schemas.requests import (
+    AgentRenameRequest,
     AssignSkillRequest,
     CreateAgentRequest,
     InstructionsRequest,
@@ -121,13 +122,21 @@ async def _enforce_narrowing_logins(
             policy = ToolPolicy.from_json(raw if isinstance(raw, dict) else None)
             if not policy.enabled:
                 continue
+            # `.limit(1)`: this is only an existence check ("does at least
+            # one login exist for this key"), not a resolution of which one
+            # -- a department-scoped login (agent tool login selection
+            # design) can share `name` with another login under a different
+            # department_id, and a bare `.scalar_one_or_none()` here would
+            # raise `MultipleResultsFound` once that happens.
             login_conn = (
                 await db.execute(
-                    select(m.McpConnection).where(
+                    select(m.McpConnection)
+                    .where(
                         m.McpConnection.tenant_id == tenant_id,
                         m.McpConnection.name == key,
                         m.McpConnection.credential_id.is_not(None),
                     )
+                    .limit(1)
                 )
             ).scalar_one_or_none()
             if login_conn is not None and not policy.connection_id:
@@ -575,6 +584,42 @@ async def update_instructions(
             "after": agent.mission,
             "by": principal.subject,
         },
+        principal=principal,
+    )
+    return await _agent_detail_dto(db, agent)
+
+
+@router.patch(
+    "/agents/{agent_id}/name",
+    response_model=AgentDetailDTO,
+)
+async def rename_agent(
+    agent_id: uuid.UUID,
+    body: AgentRenameRequest,
+    db: DbSession,
+    request: Request,
+    actor: Annotated[HumanActor, Depends(require_agent_write())],
+) -> AgentDetailDTO:
+    agent = await _load_agent(db, agent_id)
+    await authorize_agent_write(
+        request,
+        db,
+        actor,
+        agent.department_id,
+        not_found=HTTPException(status.HTTP_404_NOT_FOUND, "agent not found"),
+    )
+    principal = actor.principal
+    before = agent.name
+    agent.name = body.name
+    await db.flush()
+    await append_event(
+        db,
+        tenant_id=principal.tenant_id,
+        actor_type="operator",
+        actor_id=None,
+        category="admin",
+        action="agent.renamed",
+        resource={"agent_id": str(agent.id), "before": before, "after": agent.name},
         principal=principal,
     )
     return await _agent_detail_dto(db, agent)

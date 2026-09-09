@@ -69,7 +69,7 @@ x-backend-env: &backend-env
   # code is not loadable") with no indication why.
   PYTHONPATH: /app/capas/cli_harness
   # §8.5 agent isolation: route runs through a per-agent Docker container.
-  OC8_AGENT_ISOLATION: ${OC8_AGENT_ISOLATION:-false}
+  OC8_AGENT_ISOLATION: ${OC8_AGENT_ISOLATION:-true}
   OC8_INTERNAL_BASE_URL: ${OC8_INTERNAL_BASE_URL:-http://backend:8099}
   OC8_AGENT_RUNTIME_NETWORK: ${OC8_AGENT_RUNTIME_NETWORK:-oc8_agents}
   # uid:gid the sandbox/agent containers run as (see oc8.config.Settings.sandbox_user).

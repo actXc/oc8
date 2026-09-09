@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import select
 
 from oc8 import models as m
+from oc8.config import get_settings
 from oc8.modelrouter import CompletionResult, ToolCall, Usage, chunk_from_result
 from oc8.models.run import Clarification
 from oc8.runtime.clarification import resolve_clarification
@@ -57,6 +58,10 @@ async def test_waiting_run_has_open_clarification_and_pending_question(
     # run.context["pending_question"] == the question.
     router = _AsksThenWouldStop()
     monkeypatch.setattr("oc8.agent.engine.get_model_router", lambda: router)
+    # This test drives execute_run directly against an in-process router stub
+    # and asserts on router.calls -- routing the agent through the isolated
+    # (container) runtime by default would bypass that stub entirely.
+    monkeypatch.setattr(get_settings(), "agent_isolation", False, raising=False)
     tenant = uuid.uuid4()
     async with app_session(tenant) as db:
         agent = m.Agent(tenant_id=tenant, department_id=uuid.uuid4(), name="Rep")
@@ -120,6 +125,9 @@ async def test_second_leg_repeating_the_same_question_fails_instead_of_reparking
 ) -> None:
     router = _AlwaysAsksTheSameQuestion()
     monkeypatch.setattr("oc8.agent.engine.get_model_router", lambda: router)
+    # Same reason as test_waiting_run_has_open_clarification_and_pending_question:
+    # this needs the in-process router stub, not a real container runtime.
+    monkeypatch.setattr(get_settings(), "agent_isolation", False, raising=False)
     tenant = uuid.uuid4()
     async with app_session(tenant) as db:
         agent = m.Agent(tenant_id=tenant, department_id=uuid.uuid4(), name="Rep")

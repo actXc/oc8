@@ -3,10 +3,11 @@
 WHY THIS EXISTS. On 2026-08-02 the worker stopped letting go of a run's stream
 entry while it was still working it (worker._keep_claimed) -- it had to, because
 the old five-minute reclaim was killing live runs. That fix removed the only
-thing that ever ended a WEDGED in-process run, and it removed it from the
-DEFAULT runtime: `agent_isolation` is off unless a deployment turns it on, so
-`Oc8AgentRuntime` runs in the worker's own process with no container to time out
-around it.
+thing that ever ended a WEDGED in-process run, and it removed it from a runtime
+still reachable today: an agent can be assigned the in-process runtime
+explicitly even though `agent_isolation` now defaults container runs on, and
+`Oc8AgentRuntime` then runs in the worker's own process with no container to
+time out around it.
 
 The hole was exact. `ClientSession(read, write)` and `call_tool(name, args)` both
 default `read_timeout_seconds` to None -- wait for ever. A third-party MCP server

@@ -2,14 +2,15 @@
 // short, compiled lookup table, not a plugin system. A WidgetInstance whose
 // `type` is absent from this table (a future/removed type) is handled by
 // DashboardGrid's own fallback -- this registry itself only ever holds the
-// five current types.
-import { Activity, CheckCircle2, MessageSquare, PieChart, Wallet } from "lucide-react";
+// six current types.
+import { Activity, CheckCircle2, Kanban, MessageSquare, PieChart, Wallet } from "lucide-react";
 import type { ReactElement } from "react";
 import { ActivityWidget } from "@/components/dashboard/widgets/activity-widget";
 import { ApprovalsWidget } from "@/components/dashboard/widgets/approvals-widget";
 import { BudgetWidget } from "@/components/dashboard/widgets/budget-widget";
 import { ChatWidget } from "@/components/dashboard/widgets/chat-widget";
 import { ReportsWidget } from "@/components/dashboard/widgets/reports-widget";
+import { TaskBoardWidget } from "@/components/dashboard/widgets/task-board-widget";
 import type { WidgetType } from "@/lib/hooks";
 
 type WidgetComponentProps = {
@@ -58,5 +59,11 @@ export const WIDGET_REGISTRY: Record<
     component: ActivityWidget,
     defaultSize: { w: 3, h: 4 },
     icon: Activity,
+  },
+  tasks: {
+    label: (de) => (de ? "Aufgaben-Board" : "Task Board"),
+    component: TaskBoardWidget,
+    defaultSize: { w: 6, h: 5 },
+    icon: Kanban,
   },
 };

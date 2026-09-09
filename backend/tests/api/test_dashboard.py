@@ -164,7 +164,7 @@ async def test_get_layout_returns_a_retired_widget_type_instead_of_500(
             assert r.json()["widgets"][0]["type"] == "some-retired-type"
 
 
-async def test_get_templates_returns_exactly_three_with_widgets() -> None:
+async def test_get_templates_returns_exactly_four_with_widgets() -> None:
     app = create_app()
     async with LifespanManager(app):
         transport = ASGITransport(app=app)
@@ -173,10 +173,32 @@ async def test_get_templates_returns_exactly_three_with_widgets() -> None:
             r = await client.get("/api/v1/dashboard/templates", headers=headers)
             assert r.status_code == 200
             templates = r.json()
-            assert len(templates) == 3
+            assert len(templates) == 4
             for template in templates:
                 assert template["widgets"], template["id"]
                 assert set(template["name"]) == {"en", "de"}
+
+
+async def test_command_center_template_leads_with_a_dominant_chat_tile() -> None:
+    """The whole point of this template: chat is the largest tile, not one
+    among equals -- see the "Copilot as primary interface" comment on
+    `_TEMPLATES` in `dashboard.py`."""
+    app = create_app()
+    async with LifespanManager(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            headers = {"Authorization": f"Bearer {_token(subject='templates-reader')}"}
+            r = await client.get("/api/v1/dashboard/templates", headers=headers)
+            assert r.status_code == 200
+            templates = {t["id"]: t for t in r.json()}
+            command_center = templates["command-center"]
+            widgets_by_type = {w["type"]: w for w in command_center["widgets"]}
+            assert "tasks" in widgets_by_type
+            chat_area = widgets_by_type["chat"]["w"] * widgets_by_type["chat"]["h"]
+            for wtype, w in widgets_by_type.items():
+                if wtype == "chat":
+                    continue
+                assert chat_area > w["w"] * w["h"], f"chat should dominate over {wtype}"
 
 
 def _preset_body(name: str = "My layout", scope: str = "personal") -> dict:

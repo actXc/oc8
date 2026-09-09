@@ -282,6 +282,142 @@ async def test_creating_a_second_login_with_the_same_name_is_rejected() -> None:
             assert rows[0]["id"] == first_id
 
 
+async def test_two_departments_can_each_have_their_own_login_under_the_same_name(
+    app_session: AppSessionFactory,
+) -> None:
+    # Live user report: "ich habe jetzt erstmal zwei verschiedene odoo
+    # logins" -- one per department. department_id (NULL-safe) is what
+    # scopes the conflict check, so a second department's login under the
+    # same tool key no longer 409s.
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        dept_a = m.Department(tenant_id=tenant, name="Sales", frame={})
+        dept_b = m.Department(tenant_id=tenant, name="Support", frame={})
+        db.add_all([dept_a, dept_b])
+        await db.flush()
+        dept_a_id, dept_b_id = str(dept_a.id), str(dept_b.id)
+
+    app = create_app()
+    async with LifespanManager(app):
+        async with _client(app) as c:
+            first = await c.post(
+                "/api/v1/mcp/logins",
+                json={
+                    "name": "odoo",
+                    "credentialType": "odoo_login",
+                    "fieldValues": {
+                        "base_url": "https://odoo.example.com",
+                        "username": "user1",
+                        "password": "secret1",
+                    },
+                    "scopes": {},
+                    "departmentId": dept_a_id,
+                },
+                headers=_headers(tenant),
+            )
+            assert first.status_code == 201, first.text
+            assert first.json()["departmentId"] == dept_a_id
+
+            second = await c.post(
+                "/api/v1/mcp/logins",
+                json={
+                    "name": "odoo",
+                    "credentialType": "odoo_login",
+                    "fieldValues": {
+                        "base_url": "https://odoo2.example.com",
+                        "username": "user2",
+                        "password": "secret2",
+                    },
+                    "scopes": {},
+                    "departmentId": dept_b_id,
+                },
+                headers=_headers(tenant),
+            )
+            assert second.status_code == 201, second.text
+            assert second.json()["departmentId"] == dept_b_id
+
+            r = await c.get(
+                "/api/v1/mcp/logins?credentialType=odoo_login", headers=_headers(tenant)
+            )
+            assert r.status_code == 200, r.text
+            names_and_depts = {(row["id"], row["departmentId"]) for row in r.json()}
+            assert names_and_depts == {
+                (first.json()["id"], dept_a_id),
+                (second.json()["id"], dept_b_id),
+            }
+
+
+async def test_a_second_login_for_the_same_department_and_name_still_conflicts(
+    app_session: AppSessionFactory,
+) -> None:
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        dept = m.Department(tenant_id=tenant, name="Sales", frame={})
+        db.add(dept)
+        await db.flush()
+        dept_id = str(dept.id)
+
+    app = create_app()
+    async with LifespanManager(app):
+        async with _client(app) as c:
+            first = await c.post(
+                "/api/v1/mcp/logins",
+                json={
+                    "name": "odoo",
+                    "credentialType": "odoo_login",
+                    "fieldValues": {
+                        "base_url": "https://odoo.example.com",
+                        "username": "user1",
+                        "password": "secret1",
+                    },
+                    "scopes": {},
+                    "departmentId": dept_id,
+                },
+                headers=_headers(tenant),
+            )
+            assert first.status_code == 201, first.text
+
+            dup = await c.post(
+                "/api/v1/mcp/logins",
+                json={
+                    "name": "odoo",
+                    "credentialType": "odoo_login",
+                    "fieldValues": {
+                        "base_url": "https://odoo2.example.com",
+                        "username": "user2",
+                        "password": "secret2",
+                    },
+                    "scopes": {},
+                    "departmentId": dept_id,
+                },
+                headers=_headers(tenant),
+            )
+            assert dup.status_code == 409, dup.text
+
+
+async def test_creating_a_login_with_an_unknown_department_id_is_400() -> None:
+    tenant = uuid.uuid4()
+    app = create_app()
+    async with LifespanManager(app):
+        async with _client(app) as c:
+            r = await c.post(
+                "/api/v1/mcp/logins",
+                json={
+                    "name": "odoo",
+                    "credentialType": "odoo_login",
+                    "fieldValues": {
+                        "base_url": "https://odoo.example.com",
+                        "username": "user1",
+                        "password": "secret1",
+                    },
+                    "scopes": {},
+                    "departmentId": str(uuid.uuid4()),
+                },
+                headers=_headers(tenant),
+            )
+            assert r.status_code == 400, r.text
+
+
 async def test_creating_a_login_inherits_the_spawn_command_and_renames_env_keys(
     app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -67,8 +67,9 @@ async def _keep_claimed(queue: RunQueue, entry_id: str) -> AsyncIterator[None]:
     * container runtimes: `isolated.DockerIsolatedRuntime` bounds `driver.wait`
       (agent_max_steps * 60) and tears the container down; the nanoclaw plugin
       has its own deadline plus startup and heartbeat watchdogs.
-    * the in-process runtime (the DEFAULT -- agent_isolation is off unless a
-      deployment turns it on): every step is bounded, the model call by
+    * the in-process runtime (agent_isolation is on -- container is the
+      DEFAULT -- unless a deployment turns it off): every step is bounded,
+      the model call by
       modelrouter.streaming's httpx timeout and the tool call by
       `agent.mcp_client.MCP_REQUEST_TIMEOUT_SECONDS`, which existed only after
       this defect was reviewed: before it, one unanswered tool call hung the run,

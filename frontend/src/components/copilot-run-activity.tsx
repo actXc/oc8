@@ -10,6 +10,7 @@
 
 import { useCopilotRunActivity } from "@/lib/hooks-chat";
 import { useT } from "@/lib/i18n";
+import { ChatMarkdown } from "@/components/chat-markdown";
 import { ChevronDown, ChevronUp, Loader2, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 
@@ -69,6 +70,31 @@ export function CopilotRunActivity({
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+// Renders the assistant's answer as it streams in token by token, in the
+// exact spot the "waiting" typing-dots indicator used to sit alone. Reads
+// the same ["run", runId] cache CopilotRunActivity above does -- `liveAnswer`
+// only exists on it once the "run.token_delta" WS patcher has concatenated a
+// first fragment onto it (see hooks-chat.ts's RunActivityDTO), so there is a
+// dots-only gap between "user hit send" and "first token arrived" that this
+// component does not try to fill; the caller renders its own dots for that.
+export function CopilotStreamingAnswer({
+  sessionId,
+  runId,
+}: {
+  sessionId: string | null;
+  runId: string | null;
+}) {
+  const { data: run } = useCopilotRunActivity(sessionId, runId);
+  if (!run?.liveAnswer) return null;
+
+  return (
+    <div className="flex gap-2">
+      <img src="/octopus_oc8.svg" alt="" className="mt-0.5 h-6 w-6 shrink-0" draggable={false} />
+      <ChatMarkdown text={run.liveAnswer} className="max-w-[88%]" />
     </div>
   );
 }

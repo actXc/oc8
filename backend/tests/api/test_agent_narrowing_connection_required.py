@@ -181,6 +181,57 @@ async def test_get_agent_surfaces_approval_actions_and_only_in_effective_tools(
             assert effective["approvalActions"] == ["delete_record"]
 
 
+async def test_enabling_a_login_tool_when_two_departments_share_the_name_does_not_crash(
+    app_session: AppSessionFactory,
+) -> None:
+    """Two credential-backed `McpConnection` rows can now legitimately share
+    a `name` (agent tool login selection design's department-scoping
+    extension, e.g. two distinct Odoo logins, one per department). The
+    existence check this endpoint runs before requiring `connection_id` must
+    stay a bounded query (`.limit(1)`) instead of raising
+    `MultipleResultsFound` once that happens."""
+    tenant = uuid.uuid4()
+    tool_key = "Odoo"
+    agent_id = await _seed_agent_with_frame_tool(app_session, tenant, tool_key)
+    async with app_session(tenant) as db:
+        other_dept = m.Department(tenant_id=tenant, name="Support", frame={})
+        db.add(other_dept)
+        await db.flush()
+        other_cred = m.Credential(
+            tenant_id=tenant, name="Odoo User 2", credential_type="odoo_login"
+        )
+        db.add(other_cred)
+        await db.flush()
+        other_conn = m.McpConnection(
+            tenant_id=tenant,
+            department_id=other_dept.id,
+            name=tool_key,
+            server_url="",
+            transport="stdio",
+            credential_id=other_cred.id,
+        )
+        db.add(other_conn)
+        await db.flush()
+        conn = (
+            await db.execute(select(m.McpConnection).where(m.McpConnection.name == tool_key))
+        ).scalars()
+        first_conn_id = str(next(c.id for c in conn if c.department_id is None))
+
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.put(
+                f"/api/v1/agents/{agent_id}/narrowing",
+                json={
+                    "narrowing": {
+                        "tools": {tool_key: {"enabled": True, "connection_id": first_conn_id}}
+                    }
+                },
+                headers=_headers(tenant),
+            )
+            assert r.status_code == 200, r.text
+
+
 async def test_enabling_a_tool_with_no_login_connection_is_unaffected(
     app_session: AppSessionFactory,
 ) -> None:

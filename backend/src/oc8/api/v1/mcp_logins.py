@@ -1,12 +1,14 @@
-"""Create/list a login: a Credential paired 1:1 with a tenant-global
-McpConnection (agent tool login selection design). Distinct from
-`api/v1/mcp.py`'s existing department-scoped connection CRUD, which stays
-untouched for the OAuth/legacy tool packs that still use it."""
+"""Create/list a login: a Credential paired 1:1 with a McpConnection,
+tenant-global by default and optionally scoped to one department (agent tool
+login selection design). Distinct from `api/v1/mcp.py`'s existing
+department-scoped connection CRUD, which stays untouched for the OAuth/legacy
+tool packs that still use it."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from oc8 import models as m
 from oc8.api.deps import CurrentPrincipal, DbSession, require_permission
@@ -50,30 +52,47 @@ async def create_login(
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, f"unknown credential type: {exc}"
         ) from exc
+    dept: m.Department | None = None
+    if body.department_id is not None:
+        dept = await db.get(m.Department, body.department_id)
+        if dept is None or dept.deleted_at is not None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "unknown department")
     # Only conflict with another LOGIN-backed connection (credential_id IS NOT
-    # NULL) -- an existing, untouched OAuth/department-scoped connection may
-    # coincidentally share this name (a different, older mechanism this plan
-    # doesn't touch) and must not block a login from being created. Checked
+    # NULL) sharing the same NAME *and* the same department_id -- an existing,
+    # untouched OAuth/department-scoped connection may coincidentally share
+    # this name (a different, older mechanism this plan doesn't touch) and
+    # must not block a login from being created. Scoping by department_id
+    # (NULL-safe: two NULLs conflict, but NULL and a real department, or two
+    # different departments, do not) is what lets two distinct logins share a
+    # tool key -- e.g. two different Odoo logins, one per department -- while
+    # still refusing a second tenant-wide login of the same name. Checked
     # before create_credential runs, so a name collision never leaves behind
     # an orphaned Credential row with no paired connection. The DB has no
     # UniqueConstraint enforcing this (unlike Credential's own
     # uq_credential_tenant_name) because McpConnection is shared with the
     # pre-existing, unconstrained OAuth flow -- this check is what a later
     # by-name lookup (e.g. agents_write.py's login-backed connection
-    # resolution, Task 4) depends on to stay a single-row query instead of
-    # raising MultipleResultsFound.
+    # resolution, Task 4) depends on to stay a bounded query instead of
+    # silently accumulating unrelated logins under one name.
+    department_filter = (
+        m.McpConnection.department_id.is_(None)
+        if body.department_id is None
+        else m.McpConnection.department_id == body.department_id
+    )
     existing = (
         await db.execute(
             select(m.McpConnection.id).where(
                 m.McpConnection.tenant_id == principal.tenant_id,
                 m.McpConnection.name == body.name,
                 m.McpConnection.credential_id.is_not(None),
+                department_filter,
             )
         )
     ).first()
     if existing is not None:
+        scope = "for this tenant" if body.department_id is None else "for this department"
         raise HTTPException(
-            status.HTTP_409_CONFLICT, f"a login named {body.name!r} already exists for this tenant"
+            status.HTTP_409_CONFLICT, f"a login named {body.name!r} already exists {scope}"
         )
     if body.credential_id is not None:
         # Reuse a credential that already exists -- e.g. one a capa's own
@@ -92,16 +111,29 @@ async def create_login(
                 f"not a {body.credential_type!r}",
             )
     else:
+        # `Credential.name` has its own tenant-wide uniqueness constraint
+        # (uq_credential_tenant_name), independent of the McpConnection
+        # conflict check above -- department-scoping the LOGIN does nothing
+        # to relax it, so two departments both minting a brand-new "odoo"
+        # credential would otherwise collide there instead. Suffixed with
+        # the department's name (not id) so the Credentials list stays
+        # readable, and only when department-scoped: a tenant-wide login
+        # keeps the exact name it always has, since only one can ever exist.
+        cred_name = f"{body.name} ({dept.name})" if dept is not None else body.name
         try:
             cred = await create_credential(
                 db,
                 tenant_id=principal.tenant_id,
-                name=body.name,
+                name=cred_name,
                 credential_type=body.credential_type,
                 field_values=body.field_values,
             )
         except SecretStoreUnavailable as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+        except IntegrityError as exc:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, f"a credential named {cred_name!r} already exists"
+            ) from exc
         await db.flush()
     # A login is credential storage, not a spawn recipe -- the command/args/
     # focus_spec/etc. a real MCP server needs to start still only exist on
@@ -186,6 +218,7 @@ async def create_login(
     config["secret_env"] = secret_env
     conn = m.McpConnection(
         tenant_id=principal.tenant_id,
+        department_id=body.department_id,
         credential_id=cred.id,
         name=body.name,
         server_url="",

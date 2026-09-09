@@ -50,6 +50,7 @@ import {
   useDeleteAgentMemory,
   useDeleteAgentTrigger,
   useKnowledgeBases,
+  useRenameAgent,
   useRun,
   useRunAgent,
   useSetAgentSupervisor,
@@ -97,6 +98,7 @@ import { type Skill } from "@/lib/skills";
 import { AgentRuntimePanel } from "@/components/agent-runtime-panel";
 import { ChatWindow } from "@/components/chat-window";
 import { ComponentGrantPanel } from "@/components/component-grant-panel";
+import { InlineRename } from "@/components/inline-rename";
 import { AgentInstructionsPanel } from "@/components/agent-instructions-panel";
 import { KnowledgeAssignment } from "@/components/knowledge-assignment";
 import { MemoryPanel } from "@/components/memory-panel";
@@ -166,6 +168,7 @@ function AgentDetail() {
   // agent:manage-reachable controls below: the narrowing editor's Save, the
   // skill-assign button, and the model select.
   const mayManage = useMayManageAgent()(agent?.departmentId);
+  const renameAgent = useRenameAgent();
   const [tab, setTab] = useState<TabId>("overview");
   // Id of the most recently enqueued run for this agent (drives the Live Log
   // transcript below via useRun). Resets on page load — the user re-runs to
@@ -224,7 +227,7 @@ function AgentDetail() {
   const tabs: { id: TabId; label: string }[] = [
     { id: "overview", label: t("Overview", "Übersicht") },
     { id: "instructions", label: t("Instructions", "Anweisungen") },
-    { id: "guardrails", label: t("Guardrails", "Guardrails") },
+    { id: "guardrails", label: t("Tools", "Tools") },
     { id: "livelog", label: t("Live Log", "Live-Log") },
     { id: "chat", label: t("Chat", "Chat") },
     { id: "files", label: t("Files", "Dateien") },
@@ -285,7 +288,23 @@ function AgentDetail() {
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h2 className="truncate font-serif text-3xl">{agent.name}</h2>
+                <InlineRename
+                  value={agent.name}
+                  disabled={!mayManage}
+                  label={t("Rename agent", "Agent umbenennen")}
+                  headingClassName="truncate font-serif text-3xl"
+                  onSave={(name) =>
+                    renameAgent.mutateAsync(
+                      { agentId: agent.id, name },
+                      {
+                        onError: () =>
+                          toast.error(
+                            t("Couldn't rename the agent", "Agent konnte nicht umbenannt werden"),
+                          ),
+                      },
+                    )
+                  }
+                />
                 {agent.isLead && (
                   <span className="inline-flex items-center gap-1 rounded-full border border-[color:var(--status-warning)]/50 bg-[color:var(--status-warning)]/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[color:var(--status-warning)]">
                     <Crown className="h-3 w-3" fill="currentColor" />{" "}
@@ -477,8 +496,8 @@ function AgentDetail() {
       {tab === "guardrails" && !agent.departmentId && (
         <Panel className="p-5 text-sm text-muted-foreground">
           {t(
-            `${agent.name} is not assigned to a department – guardrails are defined at the department level.`,
-            `${agent.name} ist keiner Abteilung zugeordnet – Guardrails werden auf Abteilungsebene definiert.`,
+            `${agent.name} is not assigned to a department – tools are defined at the department level.`,
+            `${agent.name} ist keiner Abteilung zugeordnet – Tools werden auf Abteilungsebene definiert.`,
           )}
         </Panel>
       )}
@@ -1311,8 +1330,13 @@ export function AgentGuardrailsPanel({
   const agentOnlyKeys = Object.keys(effective).filter((k) => !(k in frame));
   const allKeys = [...frameKeys, ...agentOnlyKeys];
   const connectionByName = new Map(connections.map((c) => [c.name, c] as const));
+  // Only logins this agent's own department could use: tenant-wide
+  // (departmentId === null) plus ones scoped to this agent's department --
+  // never another department's login sharing this tool key (agent tool
+  // login selection design's department-scoping extension).
   const loginsByKey: Record<string, McpLoginDTO[]> = {};
   for (const login of logins.data ?? []) {
+    if (login.departmentId !== null && login.departmentId !== agent.departmentId) continue;
     (loginsByKey[login.name] ??= []).push(login);
   }
   const frameToolKeys = Object.keys(frame);
@@ -1443,6 +1467,11 @@ export function AgentGuardrailsPanel({
                   credentialType: connection.credentialType!,
                   credentialId,
                   scopes: [],
+                  // Scoped to this agent's own department, not tenant-wide:
+                  // lets a different department pin a different login under
+                  // the same tool key instead of hitting the "already
+                  // exists" conflict a tenant-wide login would.
+                  departmentId: agent.departmentId ?? undefined,
                 });
                 persistOne(key, own, login.id);
               } catch (err) {
@@ -1463,29 +1492,32 @@ export function AgentGuardrailsPanel({
   return (
     <Panel className="p-5">
       <ConfigSectionHeader
-        hint={t("access and guardrails", "Zugriff und Guardrails")}
-        title={t("Guardrails", "Guardrails")}
+        hint={t("access and tools", "Zugriff und Tools")}
+        title={t("Tools", "Tools")}
       />
-      {allKeys.length === 0 ? (
+      {allKeys.length === 0 && (
         <p className="mt-3 rounded-md border border-dashed border-border/70 bg-background/30 p-3 text-center text-xs text-muted-foreground">
           {t(
             "No tools yet — add one directly for this agent, or grant it to the whole department first.",
             "Noch keine Tools — direkt für diesen Agenten hinzufügen oder zuerst der ganzen Abteilung gewähren.",
           )}
         </p>
-      ) : (
-        <div className="mt-3">
-          <ToolGuardrailTable
-            level="agent"
-            rows={rows}
-            addableNames={addableNames}
-            connections={connections}
-            onSave={persistOne}
-            onAdd={addTool}
-            saving={update.isPending}
-          />
-        </div>
       )}
+      {/* Always rendered, even with zero rows: its own "Add tool" button
+          (bottom of the table) is otherwise the only way to grant this agent
+          its very first tool, and hiding the whole table for that case hid
+          the button along with it. */}
+      <div className="mt-3">
+        <ToolGuardrailTable
+          level="agent"
+          rows={rows}
+          addableNames={addableNames}
+          connections={connections}
+          onSave={persistOne}
+          onAdd={addTool}
+          saving={update.isPending}
+        />
+      </div>
     </Panel>
   );
 }

@@ -85,6 +85,10 @@ class InstructionsRequest(CamelModel):
     instructions: str = ""
 
 
+class AgentRenameRequest(CamelModel):
+    name: str = Field(min_length=1, max_length=200)
+
+
 class ModelConfigWrite(CamelModel):
     provider: str
     model: str
@@ -250,22 +254,29 @@ class ApprovalDecisionRequest(CamelModel):
 
 
 class CreateMcpLoginRequest(CamelModel):
-    """A login: a Credential paired with a tenant-global McpConnection (agent
-    tool login selection design). Distinct from `CreateMcpConnectionRequest`
-    below, which stays department-scoped and untouched for the OAuth/legacy
-    tool packs that still use it.
+    """A login: a Credential paired with a McpConnection, tenant-global by
+    default (agent tool login selection design). Distinct from
+    `CreateMcpConnectionRequest` below, which stays department-scoped and
+    untouched for the OAuth/legacy tool packs that still use it.
 
     Either `field_values` creates a brand-new Credential, or `credential_id`
     reuses one that already exists -- e.g. one a capa's own setup form
     created (Odoo's bundled "system" field) -- so the operator is not asked
     to retype values already sitting in the credential store. When
-    `credential_id` is set, `field_values` is ignored."""
+    `credential_id` is set, `field_values` is ignored.
+
+    `department_id` is `None` by default, which creates a tenant-wide login
+    (the only shape that existed before this field). Setting it scopes the
+    login to one department, letting a second login share the same `name`
+    (tool key) as long as it belongs to a different department -- e.g. two
+    distinct Odoo logins for two different departments."""
 
     name: str
     credential_type: str
     field_values: dict[str, Any] = {}
     credential_id: uuid.UUID | None = None
     scopes: list[str] | dict[str, Any] = []
+    department_id: uuid.UUID | None = None
 
 
 class CreateMcpConnectionRequest(CamelModel):
@@ -591,6 +602,16 @@ class AnswerClarificationRequest(CamelModel):
     """
 
     answer: str = Field(min_length=1)
+
+
+class CreateTaskRequest(CamelModel):
+    """A member putting new work directly on a department's team lead, from
+    the My Work task board rather than a chat session.
+    """
+
+    department_id: str
+    instructions: str = Field(min_length=1)
+    title: str | None = None
 
 
 class CreateRoleRequest(CamelModel):

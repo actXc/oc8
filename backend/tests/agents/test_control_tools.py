@@ -194,6 +194,7 @@ def test_control_tool_names_matches_the_schemas() -> None:
         "agent_status",
         "budget_overview",
         "kpi_overview",
+        "fetch_url",
     }
 
 

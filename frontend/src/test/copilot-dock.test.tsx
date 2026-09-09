@@ -563,7 +563,7 @@ describe("CopilotDock", () => {
     fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
 
     expect(createSessionMock).toHaveBeenCalledWith("assistant-1", expect.anything());
-    expect(sendMessageMock).toHaveBeenCalledWith("Fresh question", expect.anything());
+    expect(sendMessageMock).toHaveBeenCalledWith({ message: "Fresh question" }, expect.anything());
   });
 
   it("a new chat button still works right after a tenant's very first session is created lazily", () => {

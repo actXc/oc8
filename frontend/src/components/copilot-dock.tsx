@@ -2,7 +2,7 @@ import { ChevronDown, Plus, Send, Sparkles, WifiOff, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ChatMarkdown } from "@/components/chat-markdown";
-import { CopilotRunActivity } from "@/components/copilot-run-activity";
+import { CopilotRunActivity, CopilotStreamingAnswer } from "@/components/copilot-run-activity";
 import { RUN_COMPONENT_REGISTRY } from "@/components/run-record-card";
 import { useT } from "@/lib/i18n";
 import { useCan } from "@/lib/governance-hooks";
@@ -18,6 +18,7 @@ import {
   useChatSessions,
   useCreateChatSession,
   useChatMessages,
+  useCopilotRunActivity,
   useSendChatMessage,
 } from "@/lib/hooks-chat";
 import { useLiveConnectionStatus } from "@/lib/live/provider";
@@ -80,9 +81,9 @@ export function PendingProposals({ de }: { de: boolean }) {
   // nothing and believes a structural change went through that did not.
   const [failed, setFailed] = useState(false);
 
-  // Same shape the chat send below uses (`sendMessage.mutate(text, { onError:
-  // ... })`): mark optimistically, undo the mark and show a notice if the
-  // server refuses.
+  // Same shape the chat send below uses (`sendMessage.mutate({ message }, {
+  // onError: ... })`): mark optimistically, undo the mark and show a notice
+  // if the server refuses.
   function answer(id: string, run: (options: { onError: () => void }) => void) {
     setFailed(false);
     setAnswered((ids) => [...ids, id]);
@@ -582,10 +583,13 @@ export function CopilotChatTab({
     if (!sessionId || pendingSend === null) return;
     const text = pendingSend;
     setPendingSend(null);
-    sendMessage.mutate(text, {
-      onSuccess: (message) => setActiveRunId(message.runId),
-      onError: () => fail(text),
-    });
+    sendMessage.mutate(
+      { message: text },
+      {
+        onSuccess: (message) => setActiveRunId(message.runId),
+        onError: () => fail(text),
+      },
+    );
     // sendMessage/fail are fresh every render; only sessionId/pendingSend
     // should re-trigger this.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -612,6 +616,13 @@ export function CopilotChatTab({
   const waitingOnAgent =
     !!messages && messages.length > 0 && messages[messages.length - 1].role === "user";
   const busy = createSession.isPending || sendMessage.isPending || waitingOnAgent;
+  // Same ["run", runId] cache CopilotStreamingAnswer itself reads -- calling
+  // the hook again here is a cache hit, not a second request, and is what
+  // lets the typing dots above give way to that component the instant the
+  // first "run.token_delta" fragment lands instead of staying dots for the
+  // whole turn.
+  const { data: activeRun } = useCopilotRunActivity(sessionId, activeRunId);
+  const streamingAnswer = !!activeRun?.liveAnswer;
 
   function send() {
     const text = input.trim();
@@ -629,10 +640,13 @@ export function CopilotChatTab({
       });
       return;
     }
-    sendMessage.mutate(text, {
-      onSuccess: (message) => setActiveRunId(message.runId),
-      onError: () => fail(text),
-    });
+    sendMessage.mutate(
+      { message: text },
+      {
+        onSuccess: (message) => setActiveRunId(message.runId),
+        onError: () => fail(text),
+      },
+    );
   }
 
   const suggestions = de
@@ -691,20 +705,23 @@ export function CopilotChatTab({
             </div>
           ),
         )}
-        {waitingOnAgent && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <img src="/octopus_oc8.svg" alt="" className="h-6 w-6 shrink-0" draggable={false} />
-            <span className="inline-flex gap-1">
-              {[0, 1, 2].map((i) => (
-                <span
-                  key={i}
-                  className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary"
-                  style={{ animationDelay: `${i * 150}ms` }}
-                />
-              ))}
-            </span>
-          </div>
-        )}
+        {waitingOnAgent &&
+          (streamingAnswer ? (
+            <CopilotStreamingAnswer sessionId={sessionId} runId={activeRunId} />
+          ) : (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <img src="/octopus_oc8.svg" alt="" className="h-6 w-6 shrink-0" draggable={false} />
+              <span className="inline-flex gap-1">
+                {[0, 1, 2].map((i) => (
+                  <span
+                    key={i}
+                    className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary"
+                    style={{ animationDelay: `${i * 150}ms` }}
+                  />
+                ))}
+              </span>
+            </div>
+          ))}
         {sendError && (
           <div className="flex gap-2">
             <img

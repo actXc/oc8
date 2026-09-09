@@ -109,7 +109,7 @@ async def test_the_built_in_runtimes_still_resolve(app_session: AppSessionFactor
         db.add(agent)
         await db.flush()
         runtime = await resolve_runtime(db, tenant_id=tenant, agent=agent)
-    assert type(runtime).__name__ == "Oc8AgentRuntime"
+    assert type(runtime).__name__ == "DockerIsolatedRuntime"
     assert is_runtime_executable("oc8.agent-runtime")
 
 

@@ -106,6 +106,23 @@ export interface Clarification {
   createdAt: string;
 }
 
+/** One card on the My Work task board -- across every department the caller
+ * can see, unlike the department detail page's board which is scoped to one. */
+export interface TaskBoardRow {
+  id: string;
+  title: string;
+  state: string;
+  column: "backlog" | "in_progress" | "waiting" | "done";
+  departmentId: string;
+  departmentName: string;
+  agentId: string | null;
+  agentName: string | null;
+  requestedByMemberId: string | null;
+  parentTaskId: string | null;
+  delegationDepth: number;
+  createdAt: string;
+}
+
 export interface ClarificationAnswer {
   id: string;
   runId: string;
@@ -284,6 +301,7 @@ const keys = {
   activity: ["activity"] as const,
   approvals: (status: string) => ["approvals", status] as const,
   clarifications: ["clarifications"] as const,
+  tasks: (departmentId?: string) => ["tasks", departmentId ?? "all"] as const,
   mcp: ["mcp", "connections"] as const,
 };
 
@@ -809,6 +827,14 @@ export const useClarifications = () =>
     queryFn: () => api.get<Clarification[]>("/clarifications?status=open"),
   });
 
+/** The task board across every department this caller can see -- `GET /tasks`. */
+export const useTaskBoard = (departmentId?: string) =>
+  useQuery({
+    queryKey: keys.tasks(departmentId),
+    queryFn: () =>
+      api.get<TaskBoardRow[]>(`/tasks${departmentId ? `?department_id=${departmentId}` : ""}`),
+  });
+
 // `staleTime` matters here specifically: this payload carries every
 // connected plugin's full guardrail preset/library data (large for a
 // plugin like odoo_mcp -- dozens of TOML-authored entries), and the
@@ -856,7 +882,17 @@ export function useCreateAgent() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: Record<string, unknown>) => api.post<AgentDetail>("/agents", body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.agents }),
+    // `keys.agents` alone leaves a newly hired agent invisible on the
+    // department detail page's team list until a manual reload: that view
+    // reads `useDepartmentAgents` under `["departments", id, "agents"]`, a
+    // key `["agents", ...]` invalidation never touches (react-query matches
+    // by key prefix, and these two keys don't share one).
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: keys.agents });
+      if (data.departmentId) {
+        qc.invalidateQueries({ queryKey: ["departments", data.departmentId, "agents"] });
+      }
+    },
   });
 }
 
@@ -1119,6 +1155,18 @@ export function useUpdateAgentInstructions() {
   });
 }
 
+export function useRenameAgent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ agentId, name }: { agentId: string; name: string }) =>
+      api.patch<AgentDetail>(`/agents/${agentId}/name`, { name }),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: keys.agent(variables.agentId) });
+      qc.invalidateQueries({ queryKey: keys.agents });
+    },
+  });
+}
+
 // Cursor-paginated (before_seq, same shape as useAuditEvents/audit-hooks.ts)
 // -- the Instructions tab's "Versions" panel loads one page at a time
 // instead of the agent's whole edit history, so it stays fast once an
@@ -1301,6 +1349,10 @@ export function useCreateMcpLogin() {
       fieldValues?: Record<string, unknown>;
       credentialId?: string;
       scopes: string[] | Record<string, string[]>;
+      // Omitted/undefined creates a tenant-wide login; set it to scope the
+      // login to one department, so a second login can reuse the same
+      // `name` (tool key) for a different department.
+      departmentId?: string;
     }) => api.post<McpLoginDTO>("/mcp/logins", body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["mcp-logins"] });
@@ -1425,6 +1477,18 @@ export function useAnswerClarification() {
       qc.invalidateQueries({ queryKey: keys.clarifications });
       if (data?.runId) qc.invalidateQueries({ queryKey: ["run", data.runId] });
     },
+  });
+}
+
+/** Put new work directly on a department's team lead -- the task board's own
+ * orchestration entry point, alongside chatting with the Copilot. 409 means
+ * the department has no team lead to receive it (see `workspace/tasks.py`). */
+export function useCreateTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { departmentId: string; instructions: string; title?: string }) =>
+      api.post<TaskBoardRow>("/tasks", body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["tasks"] }),
   });
 }
 
@@ -2581,7 +2645,7 @@ export function useTenantKpis(params?: TenantKPIFilterParams) {
 
 // ---- Widget-based "My Work" dashboard (§ My Work Widget Dashboard plan) ----
 
-export type WidgetType = "chat" | "approvals" | "reports" | "budget" | "activity";
+export type WidgetType = "chat" | "approvals" | "reports" | "budget" | "activity" | "tasks";
 
 export interface WidgetInstance {
   id: string;

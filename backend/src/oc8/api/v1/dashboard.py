@@ -74,6 +74,20 @@ _TEMPLATES: list[DashboardTemplateDTO] = [
             WidgetInstanceDTO(id="t3-reports", type="reports", x=6, y=5, w=6, h=3, config={}),
         ],
     ),
+    # The Copilot as the primary interface: chat dominates the grid rather
+    # than sharing it equally, with the task board and approvals as
+    # satellites for the orchestration state a conversation alone doesn't
+    # surface well (what's queued/running/blocked, what's waiting on a
+    # decision).
+    DashboardTemplateDTO(
+        id="command-center",
+        name={"en": "Command Center", "de": "Kommandozentrale"},
+        widgets=[
+            WidgetInstanceDTO(id="t4-chat", type="chat", x=0, y=0, w=8, h=8, config={}),
+            WidgetInstanceDTO(id="t4-tasks", type="tasks", x=8, y=0, w=4, h=4, config={}),
+            WidgetInstanceDTO(id="t4-approvals", type="approvals", x=8, y=4, w=4, h=4, config={}),
+        ],
+    ),
 ]
 
 
