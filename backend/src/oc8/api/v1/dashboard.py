@@ -6,20 +6,37 @@ profile (see `notifications.py`'s identical framing for push subscriptions).
 No `member_id` path or query parameter exists on any route, so there is no
 ownership check to write or forget: the row a request can ever touch is
 fixed by the caller's own identity token.
+
+The one exception is `DashboardPreset`'s `scope="tenant"`: a preset offered
+to the whole tenant is still created and deleted through an `unguarded`
+route (any member may save/manage their OWN presets), but reading or writing
+the tenant-wide flag itself is checked in-handler against `settings:manage`
+-- the same permission that gates the rest of `settings.py` -- rather than
+by a second router-level gate, because the personal and tenant-wide paths
+share every other line of the same handler.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from oc8 import models as m
 from oc8.api.deps import CurrentPrincipal, DbSession, unguarded
 from oc8.auth import Principal
+from oc8.authz.authority import authority_for_principal
+from oc8.authz.permissions import MANAGE, SETTINGS, perm
 from oc8.authz.scope import scope_for_principal
-from oc8.schemas.dto import DashboardLayoutDTO, DashboardTemplateDTO, WidgetInstanceDTO
-from oc8.schemas.requests import PutDashboardLayoutRequest
+from oc8.schemas.dto import (
+    DashboardLayoutDTO,
+    DashboardPresetDTO,
+    DashboardTemplateDTO,
+    WidgetInstanceDTO,
+)
+from oc8.schemas.requests import CreateDashboardPresetRequest, PutDashboardLayoutRequest
 
 router = APIRouter()
 
@@ -138,3 +155,84 @@ async def put_layout(
 )
 async def get_templates() -> list[DashboardTemplateDTO]:
     return _TEMPLATES
+
+
+def _preset_to_dto(row: m.DashboardPreset, *, mine: bool) -> DashboardPresetDTO:
+    return DashboardPresetDTO(
+        id=str(row.id), name=row.name, widgets=row.widgets, scope=row.scope, mine=mine
+    )
+
+
+async def _may_manage_tenant_presets(request: Request, db: DbSession, principal: Principal) -> bool:
+    authority = await authority_for_principal(request, db, principal)
+    return perm(SETTINGS, MANAGE) in authority.tenant_wide
+
+
+@router.get(
+    "/dashboard/presets",
+    response_model=list[DashboardPresetDTO],
+    dependencies=[Depends(unguarded(_UNGUARDED_REASON))],
+)
+async def get_presets(principal: CurrentPrincipal, db: DbSession) -> list[DashboardPresetDTO]:
+    member = await _member_for(db, principal)
+    result = await db.execute(
+        select(m.DashboardPreset)
+        .where(
+            m.DashboardPreset.tenant_id == principal.tenant_id,
+            or_(
+                m.DashboardPreset.scope == "tenant",
+                m.DashboardPreset.member_id == member.id,
+            ),
+        )
+        .order_by(m.DashboardPreset.created_at)
+    )
+    return [_preset_to_dto(row, mine=row.member_id == member.id) for row in result.scalars()]
+
+
+@router.post(
+    "/dashboard/presets",
+    response_model=DashboardPresetDTO,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(unguarded(_UNGUARDED_REASON))],
+)
+async def post_preset(
+    body: CreateDashboardPresetRequest, request: Request, principal: CurrentPrincipal, db: DbSession
+) -> DashboardPresetDTO:
+    member = await _member_for(db, principal)
+    if body.scope == "tenant" and not await _may_manage_tenant_presets(request, db, principal):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"requires permission: {perm(SETTINGS, MANAGE)}",
+        )
+    widgets_json = [w.model_dump(mode="json") for w in body.widgets]
+    row = m.DashboardPreset(
+        tenant_id=principal.tenant_id,
+        member_id=member.id,
+        name=body.name,
+        widgets=widgets_json,
+        scope=body.scope,
+    )
+    db.add(row)
+    await db.commit()
+    return _preset_to_dto(row, mine=True)
+
+
+@router.delete(
+    "/dashboard/presets/{preset_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(unguarded(_UNGUARDED_REASON))],
+)
+async def delete_preset(
+    preset_id: uuid.UUID, request: Request, principal: CurrentPrincipal, db: DbSession
+) -> None:
+    member = await _member_for(db, principal)
+    row = await db.get(m.DashboardPreset, preset_id)
+    if row is None or row.tenant_id != principal.tenant_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="preset not found")
+    if row.member_id != member.id and not await _may_manage_tenant_presets(request, db, principal):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"requires permission: {perm(SETTINGS, MANAGE)}",
+        )
+    await db.delete(row)
+    await db.commit()

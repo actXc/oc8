@@ -1166,3 +1166,16 @@ class DashboardTemplateDTO(CamelModel):
     id: str
     name: dict[str, str]
     widgets: list[WidgetInstanceDTO]
+
+
+class DashboardPresetDTO(CamelModel):
+    id: str
+    name: str
+    widgets: list[WidgetInstanceReadDTO]
+    scope: Literal["personal", "tenant"]
+    #: Whether the CALLER is this preset's creator -- lets the frontend show a
+    #: delete control without a second round trip. Deliberately not "may
+    #: delete": a tenant-scoped preset is also deletable by anyone holding
+    #: `settings:manage`, which the frontend already knows from `/governance`
+    #: and can combine with this locally.
+    mine: bool

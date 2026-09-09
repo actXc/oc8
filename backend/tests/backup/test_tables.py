@@ -22,7 +22,7 @@ def test_exported_tables_excludes_the_denylist() -> None:
     exported = exported_tables()
     assert exported.isdisjoint(EXCLUDED_TABLES)
     assert "agent_run" in exported and "run_message" in exported and "task" in exported
-    # 61 TenantMixin tables minus the 7-name denylist (channel_poll_cursor,
+    # 62 TenantMixin tables minus the 7-name denylist (channel_poll_cursor,
     # added by migration 0079, is legitimate company operational state,
     # portable like data_source.cursor; account_verification_token, added by
     # migration 0078, joins the denylist -- see EXCLUDED_TABLES docstring;
@@ -41,8 +41,11 @@ def test_exported_tables_excludes_the_denylist() -> None:
     # unlike push_subscription, its rows carry no instance-bound cryptographic
     # material (just widget positions/sizes/config), so a restore into another
     # instance is fully meaningful; the model docstring's "same ownership
-    # pattern as push_subscription" is about access control, not portability).
-    assert len(exported) == 55
+    # pattern as push_subscription" is about access control, not portability;
+    # dashboard_preset, added by migration 0089, stays INCLUDED for the same
+    # reason as member_dashboard_layout -- a saved arrangement is portable
+    # company data, not instance-bound).
+    assert len(exported) == 56
 
 
 def test_table_by_name_returns_a_real_table() -> None:

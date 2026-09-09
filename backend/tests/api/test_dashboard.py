@@ -16,9 +16,11 @@ from tests.conftest import AppSessionFactory
 pytestmark = pytest.mark.asyncio
 
 
-def _token(subject: str = "dashboard-user", tenant: uuid.UUID | None = None) -> str:
+def _token(
+    subject: str = "dashboard-user", tenant: uuid.UUID | None = None, role: str = "member"
+) -> str:
     return get_identity_provider().mint(
-        tenant_id=tenant or uuid.UUID(str(ACME_TENANT_ID)), subject=subject, role="member"
+        tenant_id=tenant or uuid.UUID(str(ACME_TENANT_ID)), subject=subject, role=role
     )
 
 
@@ -175,3 +177,116 @@ async def test_get_templates_returns_exactly_three_with_widgets() -> None:
             for template in templates:
                 assert template["widgets"], template["id"]
                 assert set(template["name"]) == {"en", "de"}
+
+
+def _preset_body(name: str = "My layout", scope: str = "personal") -> dict:
+    return {
+        "name": name,
+        "scope": scope,
+        "widgets": [{"id": "w1", "type": "chat", "x": 0, "y": 0, "w": 6, "h": 6, "config": {}}],
+    }
+
+
+async def test_post_preset_creates_a_personal_preset_visible_only_to_its_owner() -> None:
+    app = create_app()
+    async with LifespanManager(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            owner = {"Authorization": f"Bearer {_token(subject='preset-owner')}"}
+            other = {"Authorization": f"Bearer {_token(subject='preset-other')}"}
+
+            create = await client.post(
+                "/api/v1/dashboard/presets", json=_preset_body(), headers=owner
+            )
+            assert create.status_code == 201, create.text
+            body = create.json()
+            assert body["scope"] == "personal"
+            assert body["mine"] is True
+
+            mine = await client.get("/api/v1/dashboard/presets", headers=owner)
+            assert [p["id"] for p in mine.json()] == [body["id"]]
+
+            theirs = await client.get("/api/v1/dashboard/presets", headers=other)
+            assert theirs.json() == []
+
+
+async def test_post_preset_rejects_tenant_scope_without_settings_manage() -> None:
+    app = create_app()
+    async with LifespanManager(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            member = {"Authorization": f"Bearer {_token(subject='preset-member')}"}
+            r = await client.post(
+                "/api/v1/dashboard/presets", json=_preset_body(scope="tenant"), headers=member
+            )
+            assert r.status_code == 403
+
+
+async def test_post_preset_with_tenant_scope_by_an_admin_is_visible_to_other_members() -> None:
+    app = create_app()
+    async with LifespanManager(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            admin = {"Authorization": f"Bearer {_token(subject='preset-admin', role='org_admin')}"}
+            member = {"Authorization": f"Bearer {_token(subject='preset-member2')}"}
+
+            create = await client.post(
+                "/api/v1/dashboard/presets",
+                json=_preset_body(name="Team layout", scope="tenant"),
+                headers=admin,
+            )
+            assert create.status_code == 201, create.text
+            preset_id = create.json()["id"]
+
+            seen = await client.get("/api/v1/dashboard/presets", headers=member)
+            assert [p["id"] for p in seen.json()] == [preset_id]
+            assert seen.json()[0]["mine"] is False
+
+
+async def test_delete_preset_by_a_non_owner_without_settings_manage_is_refused() -> None:
+    app = create_app()
+    async with LifespanManager(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            owner = {"Authorization": f"Bearer {_token(subject='preset-del-owner')}"}
+            other = {"Authorization": f"Bearer {_token(subject='preset-del-other')}"}
+
+            create = await client.post(
+                "/api/v1/dashboard/presets", json=_preset_body(), headers=owner
+            )
+            preset_id = create.json()["id"]
+
+            r = await client.delete(f"/api/v1/dashboard/presets/{preset_id}", headers=other)
+            assert r.status_code == 403
+
+            r = await client.delete(f"/api/v1/dashboard/presets/{preset_id}", headers=owner)
+            assert r.status_code == 204
+
+            # Only asserts the deleted preset is gone, not that the list is
+            # empty: this tenant's row is shared with the other tests in this
+            # module, some of which leave a `scope="tenant"` preset behind.
+            seen = await client.get("/api/v1/dashboard/presets", headers=owner)
+            assert preset_id not in [p["id"] for p in seen.json()]
+
+
+async def test_delete_tenant_preset_by_an_admin_who_did_not_create_it_succeeds() -> None:
+    app = create_app()
+    async with LifespanManager(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            creator = {
+                "Authorization": f"Bearer {_token(subject='preset-creator', role='org_admin')}"
+            }
+            other_admin = {
+                "Authorization": f"Bearer {_token(subject='preset-other-admin', role='org_admin')}"
+            }
+
+            create = await client.post(
+                "/api/v1/dashboard/presets",
+                json=_preset_body(scope="tenant"),
+                headers=creator,
+            )
+            preset_id = create.json()["id"]
+
+            r = await client.delete(f"/api/v1/dashboard/presets/{preset_id}", headers=other_admin)
+            assert r.status_code == 204

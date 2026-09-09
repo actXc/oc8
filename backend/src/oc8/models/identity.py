@@ -228,3 +228,28 @@ class MemberDashboardLayout(Base, PkMixin, TenantMixin, TimestampMixin):
     member_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, unique=True)
     widgets: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
     template_id: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+
+
+class DashboardPreset(Base, PkMixin, TenantMixin, TimestampMixin):
+    """A member-saved "My Work" arrangement, offered back in `TemplatePicker`
+    alongside the built-in templates -- unlike `MemberDashboardLayout` above
+    (the member's one ACTIVE arrangement), this is a named, inert snapshot
+    that can be picked from repeatedly, by its creator (`scope="personal"`)
+    or, if the creator held `settings:manage` at save time, by the whole
+    tenant (`scope="tenant"`; see `dashboard.py::post_preset`'s permission
+    check -- there is no ongoing gate on this table itself).
+
+    No `SoftDeleteMixin`: deleting a preset is meant to be permanent, the
+    same call a member makes cleaning up their own saved views.
+    """
+
+    __tablename__ = "dashboard_preset"
+
+    member_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    widgets: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
+    scope: Mapped[str] = mapped_column(Text, nullable=False, default="personal")
+
+    __table_args__ = (
+        CheckConstraint("scope IN ('personal','tenant')", name="ck_dashboard_preset_scope"),
+    )

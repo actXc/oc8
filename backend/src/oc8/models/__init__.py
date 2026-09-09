@@ -20,6 +20,7 @@ from oc8.models.core import (
 from oc8.models.credentials import Credential
 from oc8.models.flow import Flow, FlowRun, FlowVersion
 from oc8.models.identity import (
+    DashboardPreset,
     MemberDashboardLayout,
     OrgMember,
     OrgMemberDepartment,
@@ -83,6 +84,7 @@ __all__ = [
     "CopilotOperation",
     "CopilotProposal",
     "Credential",
+    "DashboardPreset",
     "DataSource",
     "Department",
     "FileAttachment",

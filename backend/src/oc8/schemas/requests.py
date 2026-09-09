@@ -689,3 +689,17 @@ class PushSubscribeRequest(CamelModel):
 class PutDashboardLayoutRequest(CamelModel):
     widgets: list[WidgetInstanceDTO] = Field(max_length=50)
     template_id: str | None = None
+
+
+class CreateDashboardPresetRequest(CamelModel):
+    name: str = Field(min_length=1, max_length=80)
+    widgets: list[WidgetInstanceDTO] = Field(max_length=50)
+    scope: Literal["personal", "tenant"] = "personal"
+
+    @field_validator("name")
+    @classmethod
+    def non_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
