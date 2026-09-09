@@ -99,4 +99,89 @@ describe("WorkspacePage", () => {
     await new Promise((resolve) => setTimeout(resolve, 900));
     expect(mutate).not.toHaveBeenCalled();
   }, 3000);
+
+  it("opens the layout switcher, confirms, and replaces the layout with a picked preset", async () => {
+    vi.spyOn(hooks, "useDashboardLayout").mockReturnValue({
+      data: {
+        widgets: [{ id: "w1", type: "budget", x: 0, y: 0, w: 3, h: 3, config: {} }],
+        templateId: "focus-chat",
+      },
+      isPending: false,
+    } as never);
+    vi.spyOn(hooks, "useSaveDashboardLayout").mockReturnValue({ mutate: vi.fn() } as never);
+    vi.spyOn(hooks, "useBudgetStatus").mockReturnValue({
+      data: undefined,
+      isPending: true,
+    } as never);
+    vi.spyOn(hooks, "useDashboardTemplates").mockReturnValue({
+      data: [],
+      isPending: false,
+    } as never);
+    vi.spyOn(hooks, "useDashboardPresets").mockReturnValue({
+      data: [
+        {
+          id: "preset-1",
+          name: "My preset",
+          widgets: [{ id: "w2", type: "chat", x: 0, y: 0, w: 6, h: 6, config: {} }],
+          scope: "personal",
+          mine: true,
+        },
+      ],
+    } as never);
+    vi.spyOn(hooks, "useDeleteDashboardPreset").mockReturnValue({
+      mutate: vi.fn(),
+      isPending: false,
+    } as never);
+
+    const { WorkspacePage } = await import("./workspace");
+    render(<WorkspacePage />, { wrapper });
+    await waitFor(() => screen.getByText("Budget"));
+
+    fireEvent.click(screen.getByRole("button", { name: /switch layout/i }));
+    fireEvent.click(await screen.findByRole("button", { name: "My preset" }));
+
+    expect(await screen.findByText(/switch layout\?/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Switch$/i }));
+
+    await waitFor(() => expect(screen.queryByText(/switch layout\?/i)).not.toBeInTheDocument());
+  });
+
+  it("opens the save-as-preset dialog and submits the current widgets", async () => {
+    vi.spyOn(hooks, "useDashboardLayout").mockReturnValue({
+      data: {
+        widgets: [{ id: "w1", type: "budget", x: 0, y: 0, w: 3, h: 3, config: {} }],
+        templateId: "focus-chat",
+      },
+      isPending: false,
+    } as never);
+    vi.spyOn(hooks, "useSaveDashboardLayout").mockReturnValue({ mutate: vi.fn() } as never);
+    vi.spyOn(hooks, "useBudgetStatus").mockReturnValue({
+      data: undefined,
+      isPending: true,
+    } as never);
+    const saveMutate = vi.fn();
+    vi.spyOn(hooks, "useSaveDashboardPreset").mockReturnValue({
+      mutate: saveMutate,
+      isPending: false,
+    } as never);
+
+    const { WorkspacePage } = await import("./workspace");
+    render(<WorkspacePage />, { wrapper });
+    await waitFor(() => screen.getByText("Budget"));
+
+    fireEvent.click(screen.getByRole("button", { name: /save as preset/i }));
+    fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "My preset" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/i }));
+
+    await waitFor(() =>
+      expect(saveMutate).toHaveBeenCalledWith(
+        {
+          name: "My preset",
+          widgets: [{ id: "w1", type: "budget", x: 0, y: 0, w: 3, h: 3, config: {} }],
+          scope: "personal",
+        },
+        expect.anything(),
+      ),
+    );
+  });
 });

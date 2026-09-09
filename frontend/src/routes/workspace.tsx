@@ -4,17 +4,22 @@
 // docs/superpowers/specs/2026-09-07-my-work-widget-dashboard-design.md.
 
 import { createFileRoute } from "@tanstack/react-router";
+import { LayoutTemplate, Save } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Panel } from "@/components/app-shell";
 import { DashboardGrid } from "@/components/dashboard/dashboard-grid";
+import { SavePresetDialog } from "@/components/dashboard/save-preset-dialog";
 import { TemplatePicker } from "@/components/dashboard/template-picker";
 import { WidgetPicker } from "@/components/dashboard/widget-picker";
 import { WIDGET_REGISTRY } from "@/components/dashboard/widget-registry";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useConfirm } from "@/hooks/use-confirm";
 import {
   useDashboardLayout,
   useSaveDashboardLayout,
   useStanding,
+  type DashboardPresetDTO,
   type DashboardTemplateDTO,
   type WidgetInstance,
   type WidgetType,
@@ -42,6 +47,9 @@ export function WorkspacePage() {
 
   const [widgets, setWidgets] = useState<WidgetInstance[] | null>(null);
   const [templateId, setTemplateId] = useState<string | null>(null);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const { confirm, ConfirmDialog } = useConfirm();
 
   // Set the moment `widgets` is seeded from the server response below, and
   // consumed (cleared) the first time the save effect runs afterwards -- so
@@ -94,9 +102,34 @@ export function WorkspacePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedWidgets]);
 
-  function pickTemplate(template: DashboardTemplateDTO) {
+  async function replaceCurrentLayout(): Promise<boolean> {
+    // Only asked when a layout already exists -- the very first pick (from
+    // the initial `widgets === null` picker) has nothing to overwrite yet.
+    if (widgets === null) return true;
+    return confirm({
+      title: t("Switch layout?", "Layout wechseln?"),
+      description: t(
+        "This replaces your current arrangement. You can switch back at any time.",
+        "Das ersetzt deine aktuelle Anordnung. Du kannst jederzeit wieder wechseln.",
+      ),
+      confirmLabel: t("Switch", "Wechseln"),
+      cancelLabel: t("Cancel", "Abbrechen"),
+      destructive: false,
+    });
+  }
+
+  async function pickTemplate(template: DashboardTemplateDTO) {
+    if (!(await replaceCurrentLayout())) return;
     setWidgets(template.widgets);
     setTemplateId(template.id);
+    setSwitcherOpen(false);
+  }
+
+  async function pickPreset(preset: DashboardPresetDTO) {
+    if (!(await replaceCurrentLayout())) return;
+    setWidgets(preset.widgets);
+    setTemplateId(null);
+    setSwitcherOpen(false);
   }
 
   function addWidget(type: WidgetType) {
@@ -167,15 +200,46 @@ export function WorkspacePage() {
   }
 
   if (widgets === null) {
-    return <TemplatePicker onPick={pickTemplate} />;
+    return (
+      <>
+        <TemplatePicker onPick={pickTemplate} onPickPreset={pickPreset} />
+        {ConfirmDialog}
+      </>
+    );
   }
 
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={() => setSaveOpen(true)}
+          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-panel px-2.5 py-2 text-sm transition hover:bg-muted/30"
+        >
+          <Save className="h-4 w-4" />
+          {t("Save as preset", "Als Preset speichern")}
+        </button>
+        <button
+          type="button"
+          onClick={() => setSwitcherOpen(true)}
+          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-panel px-2.5 py-2 text-sm transition hover:bg-muted/30"
+        >
+          <LayoutTemplate className="h-4 w-4" />
+          {t("Switch layout", "Layout wechseln")}
+        </button>
         <WidgetPicker onAdd={addWidget} />
       </div>
       <DashboardGrid widgets={widgets} onChange={setWidgets} />
+      <Dialog open={switcherOpen} onOpenChange={setSwitcherOpen}>
+        <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="sr-only">{t("Switch layout", "Layout wechseln")}</DialogTitle>
+          </DialogHeader>
+          <TemplatePicker onPick={pickTemplate} onPickPreset={pickPreset} />
+        </DialogContent>
+      </Dialog>
+      <SavePresetDialog open={saveOpen} onOpenChange={setSaveOpen} widgets={widgets} />
+      {ConfirmDialog}
     </div>
   );
 }

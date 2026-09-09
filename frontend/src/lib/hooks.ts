@@ -2626,3 +2626,38 @@ export function useDashboardTemplates() {
     queryFn: () => api.get<DashboardTemplateDTO[]>("/dashboard/templates"),
   });
 }
+
+export interface DashboardPresetDTO {
+  id: string;
+  name: string;
+  widgets: WidgetInstance[];
+  scope: "personal" | "tenant";
+  /** Whether the caller created this preset -- combine with `settings:manage`
+   * (via `useMay()`) to decide whether a delete control should show for a
+   * `scope: "tenant"` preset the caller didn't create themselves. */
+  mine: boolean;
+}
+
+export function useDashboardPresets() {
+  return useQuery({
+    queryKey: ["dashboard", "presets"],
+    queryFn: () => api.get<DashboardPresetDTO[]>("/dashboard/presets"),
+  });
+}
+
+export function useSaveDashboardPreset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { name: string; widgets: WidgetInstance[]; scope: "personal" | "tenant" }) =>
+      api.post<DashboardPresetDTO>("/dashboard/presets", body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["dashboard", "presets"] }),
+  });
+}
+
+export function useDeleteDashboardPreset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/dashboard/presets/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["dashboard", "presets"] }),
+  });
+}
