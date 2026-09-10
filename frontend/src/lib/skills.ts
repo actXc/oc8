@@ -26,6 +26,10 @@ export interface Skill {
   /** Set once the skill is archived (`DELETE /skills/{id}` with dependents).
    * Optional because the backend does not send it yet — see Task 16's report. */
   deletedAt?: string | null;
+  nameTranslations?: Record<string, string>;
+  descriptionTranslations?: Record<string, string>;
+  instructionsTranslations?: Record<string, string>;
+  guardrailsTranslations?: Record<string, string[]>;
 }
 
 export const skillCategories: { id: SkillCategory; label: string; labelDe: string }[] = [

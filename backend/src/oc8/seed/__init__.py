@@ -1,6 +1,11 @@
 """Seed data — reproduces the frontend mock (src/lib/*.ts) 1:1 for tenant ACME,
 plus a minimal second tenant (Globex) used by isolation tests.
 
+German overlays for the ACME showcase live in `demo_i18n.py` and are stored
+under each row's `i18n.de` map so the UI can flip language without a second
+tenant. Enable with `OC8_DEMO=true` (compose.dev.yml sets it together with
+`OC8_ENV=dev` and seed-on-start).
+
 Runs as the schema-owner role, which bypasses RLS, so it can populate multiple
 tenants in one pass.
 """
@@ -22,6 +27,18 @@ from oc8.authz.permissions import role_kind
 from oc8.config import get_settings
 from oc8.constants import ACME_TENANT_ID, GLOBEX_TENANT_ID
 from oc8.modelrouter.registry import canonical_provider
+from oc8.seed.demo_i18n import (
+    ACTIVITY_DE,
+    AGENTS_DE,
+    DEPARTMENTS_DE,
+    ESCALATIONS_DE,
+    KBS_DE,
+    MODELS_DE,
+    SKILLS_DE,
+    SOURCES_DE,
+    TASKS_DE,
+    de_block,
+)
 from oc8.seed.department_templates import seed_department_templates
 
 #: Resolved at import time, not inside the async seed: `Path.resolve()` hits the
@@ -894,6 +911,10 @@ async def _seed_acme(session: AsyncSession) -> None:
     for provider, name, locality, status_, latency, cost_tier, note in MODELS:
         is_ollama = canonical_provider(provider) == "ollama"
         model_tag = get_settings().default_model if is_ollama else name
+        cost_meta: dict[str, Any] = {"cost_tier": cost_tier, "note": note}
+        model_de = MODELS_DE.get(name)
+        if model_de:
+            cost_meta["i18n"] = de_block(model_de)
         session.add(
             m.ModelConfig(
                 id=det(tid, "model", name),
@@ -902,7 +923,7 @@ async def _seed_acme(session: AsyncSession) -> None:
                 model=model_tag,
                 locality=locality,
                 display_name=name,
-                cost_meta={"cost_tier": cost_tier, "note": note},
+                cost_meta=cost_meta,
                 health={"status": status_, "latency": latency},
             )
         )
@@ -937,7 +958,13 @@ async def _seed_acme(session: AsyncSession) -> None:
                 source_ids=[str(det(tid, "source", s)) for s in src_ids],
                 status=status_,
                 local_only=local_only,
-                freshness={"docs": docs, "chunks": chunks, "updated": updated, "roles": roles},
+                freshness={
+                    "docs": docs,
+                    "chunks": chunks,
+                    "updated": updated,
+                    "roles": roles,
+                    "i18n": de_block(KBS_DE.get(slug)),
+                },
             )
         )
         for d in linked_depts:
@@ -963,6 +990,7 @@ async def _seed_acme(session: AsyncSession) -> None:
             )
 
     for slug, name, icon, goal, okr, kpi_label, kpi_value, activity, accent in DEPARTMENTS:
+        dept_de = DEPARTMENTS_DE.get(slug)
         session.add(
             m.Department(
                 id=det(tid, "dept", slug),
@@ -978,6 +1006,7 @@ async def _seed_acme(session: AsyncSession) -> None:
                     "activity": activity,
                     "accent": accent,
                     "slug": slug,
+                    "i18n": de_block(dept_de),
                 },
             )
         )
@@ -1027,6 +1056,7 @@ async def _seed_acme(session: AsyncSession) -> None:
                     "tasks_today": tasks_today,
                     "avatar_color": avatar,
                     "slug": slug,
+                    "i18n": de_block(AGENTS_DE.get(slug)),
                 },
             )
         )
@@ -1072,6 +1102,7 @@ async def _seed_acme(session: AsyncSession) -> None:
         ) = s
         skill_id = det(tid, "skill", slug)
         ver_id = det(tid, "skillver", slug, version)
+        skill_de = SKILLS_DE.get(slug, {})
         requires_tools = SKILL_CATEGORY_TOOL_FRAMES.get(cat, ["email"])
         session.add(
             m.Skill(
@@ -1108,6 +1139,7 @@ async def _seed_acme(session: AsyncSession) -> None:
                         "installs": installs,
                         "price": price,
                         "updated_at": updated,
+                        "i18n": de_block(skill_de),
                     },
                 },
             )
@@ -1156,7 +1188,12 @@ async def _seed_acme(session: AsyncSession) -> None:
                 last_sync_at=last_sync,
                 doc_count=docs or 0,
                 classification=sens or "internal",
-                config={"schedule": sched, "scope": scope, **extra},
+                config={
+                    "schedule": sched,
+                    "scope": scope,
+                    "i18n": de_block(SOURCES_DE.get(slug)),
+                    **extra,
+                },
             )
         )
 
@@ -1170,6 +1207,7 @@ async def _seed_acme(session: AsyncSession) -> None:
                 title=title,
                 state=TASK_STATE[column],
                 meta_label=meta,
+                payload={"slug": slug, "i18n": de_block(TASKS_DE.get(slug))},
             )
         )
 
@@ -1182,6 +1220,7 @@ async def _seed_acme(session: AsyncSession) -> None:
                 status=status_,
                 message=message,
                 detail=detail,
+                i18n=de_block(ACTIVITY_DE.get(slug)),
                 ts=dt.datetime(
                     2026, 7, 9, int(time_.split(":")[0]), int(time_.split(":")[1]), tzinfo=dt.UTC
                 ),
@@ -1197,6 +1236,7 @@ async def _seed_acme(session: AsyncSession) -> None:
     # announced on a messenger.
     department_of_agent = {row[0]: det(tid, "dept", row[13]) for row in AGENTS}
     for slug, agent_slug, title, detail, amount, time_ in ESCALATIONS:
+        esc_de = ESCALATIONS_DE.get(slug)
         session.add(
             m.ApprovalRequest(
                 id=det(tid, "approval", slug),
@@ -1208,7 +1248,7 @@ async def _seed_acme(session: AsyncSession) -> None:
                 title=title,
                 detail=detail,
                 amount_text=amount,
-                payload={"time": time_},
+                payload={"time": time_, "i18n": de_block(esc_de)},
             )
         )
 

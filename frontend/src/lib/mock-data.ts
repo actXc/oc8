@@ -25,6 +25,13 @@ export interface Agent {
   /** Set once the agent is archived (`DELETE /agents/{id}` with dependents).
    * Mirrors `Skill.deletedAt` -- see Task 16's report. */
   deletedAt?: string | null;
+  /** Demo-seed locale overlays. Empty on live agents. */
+  roleTranslations?: Record<string, string>;
+  lastActionTranslations?: Record<string, string>;
+  lastRunTranslations?: Record<string, string>;
+  scheduleTranslations?: Record<string, string>;
+  missionTranslations?: Record<string, string>;
+  guardrailsTranslations?: Record<string, string[]>;
 }
 
 export const agents: Agent[] = [
@@ -341,6 +348,8 @@ export interface ActivityItem {
   time: string;
   detail?: string;
   cacheHit?: boolean;
+  messageTranslations?: Record<string, string>;
+  detailTranslations?: Record<string, string>;
 }
 
 export const activity: ActivityItem[] = [
@@ -713,6 +722,10 @@ export interface Department {
   /** Set once the department is archived (`DELETE /departments/{id}`).
    * Mirrors `Agent.deletedAt` -- see Task 18's report. */
   deletedAt?: string | null;
+  nameTranslations?: Record<string, string>;
+  goalTranslations?: Record<string, string>;
+  okrTranslations?: Record<string, string>;
+  kpiLabelTranslations?: Record<string, string>;
 }
 
 export const departments: Department[] = [
@@ -872,6 +885,8 @@ export interface Task {
   agentId: string | null;
   column: TaskColumn;
   meta?: string;
+  titleTranslations?: Record<string, string>;
+  metaTranslations?: Record<string, string>;
 }
 
 export const tasks: Task[] = [
@@ -1234,6 +1249,8 @@ export interface KnowledgeBase {
    * Consistency plan's DataSource/KnowledgeBase archive exception and Task
    * 20's report. */
   deletedAt?: string | null;
+  nameTranslations?: Record<string, string>;
+  descriptionTranslations?: Record<string, string>;
 }
 
 export interface KnowledgeDocument {

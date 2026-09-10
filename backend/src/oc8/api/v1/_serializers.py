@@ -60,8 +60,35 @@ AGENT_STATUS_TO_UI = {
 TASK_STATE_TO_COLUMN = _workspace_tasks.TASK_STATE_TO_COLUMN
 
 
+def _i18n_str(i18n: Any, field: str) -> dict[str, str]:
+    """Pull `{locale: str}` for one field out of `{de: {field: …}}`."""
+    if not isinstance(i18n, dict):
+        return {}
+    out: dict[str, str] = {}
+    for locale, block in i18n.items():
+        if isinstance(block, dict):
+            value = block.get(field)
+            if isinstance(value, str) and value:
+                out[str(locale)] = value
+    return out
+
+
+def _i18n_str_list(i18n: Any, field: str) -> dict[str, list[str]]:
+    """Pull `{locale: [str, …]}` for one field out of `{de: {field: […]}}`."""
+    if not isinstance(i18n, dict):
+        return {}
+    out: dict[str, list[str]] = {}
+    for locale, block in i18n.items():
+        if isinstance(block, dict):
+            value = block.get(field)
+            if isinstance(value, list) and all(isinstance(v, str) for v in value):
+                out[str(locale)] = list(value)
+    return out
+
+
 def agent_to_dto(a: m.Agent) -> AgentDTO:
     p: dict[str, Any] = a.presentation or {}
+    i18n = p.get("i18n")
     return AgentDTO(
         id=str(a.id),
         name=a.name,
@@ -80,11 +107,18 @@ def agent_to_dto(a: m.Agent) -> AgentDTO:
         model_config_id=str(a.model_config_id) if a.model_config_id else None,
         is_lead=a.is_team_lead,
         deleted_at=a.deleted_at.isoformat() if a.deleted_at else None,
+        role_translations=_i18n_str(i18n, "role"),
+        last_action_translations=_i18n_str(i18n, "last_action"),
+        last_run_translations=_i18n_str(i18n, "last_run"),
+        schedule_translations=_i18n_str(i18n, "schedule"),
+        mission_translations=_i18n_str(i18n, "mission"),
+        guardrails_translations=_i18n_str_list(i18n, "guardrails"),
     )
 
 
 def department_to_dto(d: m.Department) -> DepartmentDTO:
     p: dict[str, Any] = d.presentation or {}
+    i18n = p.get("i18n")
     return DepartmentDTO(
         id=str(d.id),
         name=d.name,
@@ -97,10 +131,16 @@ def department_to_dto(d: m.Department) -> DepartmentDTO:
         accent=p.get("accent", ""),
         prompt_caching_enabled=d.prompt_caching_enabled,
         deleted_at=d.deleted_at.isoformat() if d.deleted_at else None,
+        name_translations=_i18n_str(i18n, "name"),
+        goal_translations=_i18n_str(i18n, "goal"),
+        okr_translations=_i18n_str(i18n, "okr"),
+        kpi_label_translations=_i18n_str(i18n, "kpi_label"),
     )
 
 
 def task_to_dto(t: m.Task) -> TaskDTO:
+    payload: dict[str, Any] = t.payload or {}
+    i18n = payload.get("i18n")
     return TaskDTO(
         id=str(t.id),
         department_id=str(t.department_id),
@@ -108,10 +148,13 @@ def task_to_dto(t: m.Task) -> TaskDTO:
         agent_id=str(t.assigned_agent_id) if t.assigned_agent_id else None,
         column=TASK_STATE_TO_COLUMN.get(t.state, "backlog"),
         meta=t.meta_label,
+        title_translations=_i18n_str(i18n, "title"),
+        meta_translations=_i18n_str(i18n, "meta"),
     )
 
 
 def activity_to_dto(e: m.ActivityEvent) -> ActivityDTO:
+    i18n = e.i18n or {}
     return ActivityDTO(
         id=str(e.id),
         agent_id=str(e.agent_id) if e.agent_id else None,
@@ -120,6 +163,8 @@ def activity_to_dto(e: m.ActivityEvent) -> ActivityDTO:
         time=e.ts.strftime("%H:%M"),
         detail=e.detail,
         cache_hit=e.cache_hit,
+        message_translations=_i18n_str(i18n, "message"),
+        detail_translations=_i18n_str(i18n, "detail"),
     )
 
 
@@ -219,6 +264,8 @@ def approval_to_dto(a: m.ApprovalRequest, names: ApprovalNames | None = None) ->
         decided_by_name=resolved.members.get(a.decided_by, "") if a.decided_by else "",
         tool_name=str(tool_name) if isinstance(tool_name, str) else None,
         tool_arguments=raw_arguments if isinstance(raw_arguments, dict) else {},
+        title_translations=_i18n_str(payload.get("i18n"), "title"),
+        detail_translations=_i18n_str(payload.get("i18n"), "detail"),
     )
 
 
@@ -341,6 +388,7 @@ def model_to_dto(mc: m.ModelConfig, assigned_to: list[str]) -> ModelDTO:
 def skill_to_dto(s: m.Skill, version: m.SkillVersion | None) -> SkillDTO:
     definition: dict[str, Any] = (version.definition if version else {}) or {}
     pres: dict[str, Any] = definition.get("presentation", {})
+    i18n = pres.get("i18n")
     price = pres.get("price")
     return SkillDTO(
         id=str(s.id),
@@ -360,6 +408,10 @@ def skill_to_dto(s: m.Skill, version: m.SkillVersion | None) -> SkillDTO:
         updated_at=pres.get("updated_at", ""),
         current_version_id=str(s.current_version_id) if s.current_version_id else None,
         deleted_at=s.deleted_at.isoformat() if s.deleted_at else None,
+        name_translations=_i18n_str(i18n, "name"),
+        description_translations=_i18n_str(i18n, "description"),
+        instructions_translations=_i18n_str(i18n, "instructions"),
+        guardrails_translations=_i18n_str_list(i18n, "guardrails"),
     )
 
 
@@ -444,6 +496,7 @@ def kb_to_dto(
     `[]` for call sites that genuinely have nothing to report (a base that
     was just created, before any source has ever synced into it)."""
     fresh: dict[str, Any] = kb.freshness or {}
+    i18n = fresh.get("i18n")
     return KnowledgeBaseDTO(
         id=str(kb.id),
         name=kb.name,
@@ -460,4 +513,6 @@ def kb_to_dto(
         roles=fresh.get("roles", []),
         local_only=kb.local_only,
         deleted_at=kb.deleted_at.isoformat() if kb.deleted_at else None,
+        name_translations=_i18n_str(i18n, "name"),
+        description_translations=_i18n_str(i18n, "description"),
     )

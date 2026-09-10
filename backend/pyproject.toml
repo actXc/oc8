@@ -106,6 +106,7 @@ ignore = ["B008", "RUF012"]
 # is correct typography and a hyphen would be a downgrade. Scoped to this file so
 # the check keeps working everywhere it is about code.
 "src/oc8/seed/__init__.py" = ["RUF001"]
+"src/oc8/seed/demo_i18n.py" = ["RUF001"]
 # ASYNC240 exists to stop blocking filesystem IO from stalling an event loop.
 # These tests ARE about the filesystem -- asserting that an archive exists and a
 # session tree does not -- and a single stat on a local path in a test is not the

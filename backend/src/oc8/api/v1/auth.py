@@ -758,13 +758,20 @@ async def auth_config() -> AuthConfig:
     """
     s = get_settings()
     if s.is_dev:
-        return AuthConfig(mode="dev", auth_server_url="", realm="", client_id="")
+        return AuthConfig(
+            mode="dev",
+            auth_server_url="",
+            realm="",
+            client_id="",
+            demo=s.is_demo,
+        )
     return AuthConfig(
         mode="community",
         auth_server_url="",
         realm="",
         client_id="",
         initialized=await _instance_has_an_administrator(),
+        demo=s.is_demo,
     )
 
 

@@ -2,20 +2,29 @@
 # it enables unauthenticated dev-login and creates disposable demo data.
 #
 # Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+#
+# OC8_DEMO=true loads the bilingual ACME showcase seed (EN + DE) and flags the
+# instance so the UI can show a Demo badge. Pair with OC8_ENV=dev so the
+# unauthenticated demo login works.
 services:
   migrate:
     environment:
       OC8_ENV: dev
+      OC8_DEMO: "true"
       OC8_SEED_ON_START: "true"
   backend:
     environment:
       OC8_ENV: dev
+      OC8_DEMO: "true"
   worker:
     environment:
       OC8_ENV: dev
+      OC8_DEMO: "true"
   ingestion-worker:
     environment:
       OC8_ENV: dev
+      OC8_DEMO: "true"
   scheduler:
     environment:
       OC8_ENV: dev
+      OC8_DEMO: "true"

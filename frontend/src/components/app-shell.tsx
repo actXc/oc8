@@ -40,7 +40,13 @@ import { NotificationsSheet, OPEN_NOTIFICATIONS_EVENT } from "@/components/inbox
 import { GlobalSearch } from "@/components/global-search";
 import { CopilotDock } from "@/components/copilot-dock";
 import { cn } from "@/lib/utils";
-import { useAgents, useApprovals, useClarifications, useStanding } from "@/lib/hooks";
+import {
+  useAgents,
+  useApprovals,
+  useAuthConfig,
+  useClarifications,
+  useStanding,
+} from "@/lib/hooks";
 import { useAssignedRoleName, useCan, useMay } from "@/lib/governance-hooks";
 import { useLang, useT } from "@/lib/i18n";
 import { hasCommunitySession, logoutCommunity, logoutDev } from "@/lib/api";
@@ -373,6 +379,8 @@ export function AppShell() {
 
   const { data: approvals = [] } = useApprovals("pending");
   const { data: clarifications = [] } = useClarifications();
+  const { data: authConfig } = useAuthConfig();
+  const isDemo = Boolean(authConfig?.demo);
   // Sidebar notification badge over every agent, not a paginated list view.
   const { data: agentsPage } = useAgents({ pageSize: 200 });
   const agents = agentsPage?.items ?? [];
@@ -677,8 +685,19 @@ export function AppShell() {
             className="h-9 w-auto shrink-0 select-none"
             draggable={false}
           />
-          <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-            {t("Control Panel", "Leitstand")}
+          <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            <span>{t("Control Panel", "Leitstand")}</span>
+            {isDemo && (
+              <span
+                className="rounded border border-border px-1.5 py-0.5 tracking-[0.12em] text-foreground/70"
+                title={t(
+                  "This instance is running with showcase mock data",
+                  "Diese Instanz läuft mit Showcase-Mockdaten",
+                )}
+              >
+                Demo
+              </span>
+            )}
           </div>
         </div>
 

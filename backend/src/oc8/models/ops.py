@@ -273,6 +273,10 @@ class ActivityEvent(Base, PkMixin, TenantMixin):
     status: Mapped[str] = mapped_column(Text, nullable=False, default="info")
     message: Mapped[str] = mapped_column(Text, nullable=False)
     detail: Mapped[str | None] = mapped_column(Text)
+    #: Locale overlays for demo-seeded rows (`{de: {message, detail}}`). Empty
+    #: on every live activity -- real runs write English (or the operator's
+    #: language) into `message`/`detail` directly and never touch this.
+    i18n: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     # Whether the model turn this activity reports on was answered from the
     # department response cache instead of a real model call (oc8.agent.
     # cache_flow) -- surfaced so an operator watching the feed can tell a

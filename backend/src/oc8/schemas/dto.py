@@ -27,6 +27,13 @@ class AgentDTO(CamelModel):
     model_config_id: str | None = None
     is_lead: bool = False
     deleted_at: str | None = None
+    #: Demo-seed locale overlays (`{de: "…"}`). Empty on live agents.
+    role_translations: dict[str, str] = {}
+    last_action_translations: dict[str, str] = {}
+    last_run_translations: dict[str, str] = {}
+    schedule_translations: dict[str, str] = {}
+    mission_translations: dict[str, str] = {}
+    guardrails_translations: dict[str, list[str]] = {}
 
 
 class DepartmentDTO(CamelModel):
@@ -41,6 +48,10 @@ class DepartmentDTO(CamelModel):
     accent: str
     prompt_caching_enabled: bool
     deleted_at: str | None = None
+    name_translations: dict[str, str] = {}
+    goal_translations: dict[str, str] = {}
+    okr_translations: dict[str, str] = {}
+    kpi_label_translations: dict[str, str] = {}
 
 
 class TaskDTO(CamelModel):
@@ -50,6 +61,8 @@ class TaskDTO(CamelModel):
     agent_id: str | None = None
     column: str  # backlog | in_progress | waiting | done
     meta: str | None = None
+    title_translations: dict[str, str] = {}
+    meta_translations: dict[str, str] = {}
 
 
 class ActivityDTO(CamelModel):
@@ -60,6 +73,8 @@ class ActivityDTO(CamelModel):
     time: str
     detail: str | None = None
     cache_hit: bool = False
+    message_translations: dict[str, str] = {}
+    detail_translations: dict[str, str] = {}
 
 
 class BoardDTO(CamelModel):
@@ -139,6 +154,8 @@ class ApprovalDTO(CamelModel):
     #: messenger accounts were told, and that is nobody's business on a screen.
     tool_name: str | None = None
     tool_arguments: dict[str, Any] = {}
+    title_translations: dict[str, str] = {}
+    detail_translations: dict[str, str] = {}
 
 
 class ClarificationDTO(CamelModel):
@@ -375,6 +392,10 @@ class SkillDTO(CamelModel):
     updated_at: str
     current_version_id: str | None = None
     deleted_at: str | None = None
+    name_translations: dict[str, str] = {}
+    description_translations: dict[str, str] = {}
+    instructions_translations: dict[str, str] = {}
+    guardrails_translations: dict[str, list[str]] = {}
 
 
 class DataSourceDTO(CamelModel):
@@ -524,6 +545,8 @@ class KnowledgeBaseDTO(CamelModel):
     roles: list[str] = []
     local_only: bool = False
     deleted_at: str | None = None
+    name_translations: dict[str, str] = {}
+    description_translations: dict[str, str] = {}
 
 
 class GrantDTO(CamelModel):
@@ -924,6 +947,10 @@ class AuthConfig(CamelModel):
     #: followed. Only meaningful for `community`; `false` for `dev`, which
     #: does not have a setup form at all.
     initialized: bool = False
+    #: True when `OC8_DEMO=true`: the ACME showcase seed (bilingual mock data)
+    #: is what this instance is for. The UI can show a Demo badge; it does not
+    #: by itself enable unauthenticated login -- that still needs `mode=dev`.
+    demo: bool = False
 
 
 class SecretDTO(CamelModel):

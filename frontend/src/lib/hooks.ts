@@ -30,6 +30,16 @@ import type {
   Task,
 } from "@/lib/mock-data";
 import type { Skill } from "@/lib/skills";
+import { useLang } from "@/lib/i18n";
+import {
+  localizeActivity,
+  localizeAgent,
+  localizeDepartment,
+  localizeKnowledgeBase,
+  localizeLabeled,
+  localizeSkill,
+  localizeTask,
+} from "@/lib/localize-demo";
 
 export interface ToolPolicy {
   enabled: boolean;
@@ -46,6 +56,7 @@ export interface AgentDetail extends Agent {
   departmentName: string | null;
   effectiveTools: Record<string, ToolPolicy>;
   departmentFrameTools: Record<string, ToolPolicy>;
+  missionTranslations?: Record<string, string>;
 }
 
 export interface ApprovalOption {
@@ -91,6 +102,8 @@ export interface Approval {
   // What is actually being held. The whole reason the detail pane exists.
   toolName?: string | null;
   toolArguments?: Record<string, unknown>;
+  titleTranslations?: Record<string, string>;
+  detailTranslations?: Record<string, string>;
 }
 
 /** A question an agent parked mid-run. The other half of the workspace queue. */
@@ -347,38 +360,68 @@ function toQueryString(params: ListQueryParams = {}, groupByKey = "groupBy"): st
 
 export { toQueryString };
 
-export const useDepartments = (params: ListQueryParams = {}) =>
-  useQuery({
+export const useDepartments = (params: ListQueryParams = {}) => {
+  const { lang } = useLang();
+  return useQuery({
     queryKey: [...keys.departments, params] as const,
     // `groupBy` alias -- `/departments` matches `/agents`/`/members`.
     queryFn: () => api.get<Page<Department>>(`/departments?${toQueryString(params)}`),
+    select: (page) => ({
+      ...page,
+      items: page.items.map((d) => localizeDepartment(d, lang)),
+    }),
   });
+};
 
 /** "dev" | "community" -- which login mode this instance runs. The user
  *  detail page reads this to decide whether to show password controls: they
- *  render only in "community" mode, this edition's one real login door. */
+ *  render only in "community" mode, this edition's one real login door.
+ *  `demo` is true when `OC8_DEMO=true` (ACME showcase seed). */
 export const useAuthConfig = () =>
   useQuery({
     queryKey: ["auth", "config"] as const,
-    queryFn: () => api.get<{ mode: "dev" | "community" }>("/auth/config"),
+    queryFn: () =>
+      api.get<{ mode: "dev" | "community"; demo?: boolean; initialized?: boolean }>("/auth/config"),
     staleTime: Infinity,
   });
 
-export const useDepartment = (id: string) =>
-  useQuery({
+export const useDepartment = (id: string) => {
+  const { lang } = useLang();
+  return useQuery({
     queryKey: ["departments", id],
     queryFn: () => api.get<Department>(`/departments/${id}`),
+    select: (d) => localizeDepartment(d, lang),
   });
+};
 
-export const useAgents = (params: ListQueryParams = {}) =>
-  useQuery({
+export const useAgents = (params: ListQueryParams = {}) => {
+  const { lang } = useLang();
+  return useQuery({
     queryKey: [...keys.agents, params] as const,
     // `groupBy` alias -- see `toQueryString`'s doc comment.
     queryFn: () => api.get<Page<Agent>>(`/agents?${toQueryString(params)}`),
+    select: (page) => ({
+      ...page,
+      items: page.items.map((a) => localizeAgent(a, lang)),
+    }),
   });
+};
 
-export const useAgent = (id: string) =>
-  useQuery({ queryKey: keys.agent(id), queryFn: () => api.get<AgentDetail>(`/agents/${id}`) });
+export const useAgent = (id: string) => {
+  const { lang } = useLang();
+  return useQuery({
+    queryKey: keys.agent(id),
+    queryFn: () => api.get<AgentDetail>(`/agents/${id}`),
+    select: (a) => {
+      const localized = localizeAgent(a, lang) as AgentDetail;
+      if (lang !== "en" && a.missionTranslations) {
+        const mission = a.missionTranslations[lang];
+        if (mission) return { ...localized, mission };
+      }
+      return localized;
+    },
+  });
+};
 
 export interface WorkspaceFileDTO {
   name: string;
@@ -435,11 +478,17 @@ export interface Board {
 
 // `limit` is per column, so a busy "done" column cannot crowd out the two tasks
 // actually in progress.
-export const useDepartmentBoard = (id: string, limit = 25) =>
-  useQuery({
+export const useDepartmentBoard = (id: string, limit = 25) => {
+  const { lang } = useLang();
+  return useQuery({
     queryKey: [...keys.board(id), limit],
     queryFn: () => api.get<Board>(`/departments/${id}/board?limit=${limit}`),
+    select: (board) => ({
+      ...board,
+      tasks: board.tasks.map((t) => localizeTask(t, lang)),
+    }),
   });
+};
 
 export interface DepartmentToolsDTO {
   tools: Record<string, Record<string, unknown>>;
@@ -592,20 +641,32 @@ export const useModelProviders = () =>
 export const useIntegrations = () =>
   useQuery({ queryKey: keys.integrations, queryFn: () => api.get<Integration[]>("/integrations") });
 
-export const useSkills = (params: ListQueryParams = {}) =>
-  useQuery({
+export const useSkills = (params: ListQueryParams = {}) => {
+  const { lang } = useLang();
+  return useQuery({
     queryKey: [...keys.skills, params] as const,
     // Unaliased `group_by` on the wire -- see `toQueryString`'s doc comment.
     queryFn: () => api.get<Page<Skill>>(`/skills?${toQueryString(params, "group_by")}`),
+    select: (page) => ({
+      ...page,
+      items: page.items.map((s) => localizeSkill(s, lang)),
+    }),
   });
+};
 
-export const useKnowledgeBases = (params: ListQueryParams = {}) =>
-  useQuery({
+export const useKnowledgeBases = (params: ListQueryParams = {}) => {
+  const { lang } = useLang();
+  return useQuery({
     queryKey: [...keys.bases, params] as const,
     // Unaliased `group_by` on the wire -- see `toQueryString`'s doc comment.
     queryFn: () =>
       api.get<Page<KnowledgeBase>>(`/knowledge/bases?${toQueryString(params, "group_by")}`),
+    select: (page) => ({
+      ...page,
+      items: page.items.map((kb) => localizeKnowledgeBase(kb, lang)),
+    }),
   });
+};
 
 /** Create a KB in the control plane (§11).  Sources and grants are separate
  * resources, so callers must not pretend that a local wizard selection has
@@ -800,6 +861,7 @@ export const useSimilarChunks = (kbId: string, chunkId: string | null) =>
 // nothing from the agent whose screen you are on, so its feed looked empty while
 // its own history sat just past the cut.
 export const useActivity = (opts: { agentId?: string; limit?: number } = {}) => {
+  const { lang } = useLang();
   const params = new URLSearchParams();
   if (opts.agentId) params.set("agentId", opts.agentId);
   params.set("limit", String(opts.limit ?? 50));
@@ -807,14 +869,18 @@ export const useActivity = (opts: { agentId?: string; limit?: number } = {}) => 
   return useQuery({
     queryKey: [...keys.activity, opts.agentId ?? "all", opts.limit ?? 50],
     queryFn: () => api.get<ActivityItem[]>(`/activity?${query}`),
+    select: (rows) => rows.map((r) => localizeActivity(r, lang)),
   });
 };
 
-export const useApprovals = (status = "pending") =>
-  useQuery({
+export const useApprovals = (status = "pending") => {
+  const { lang } = useLang();
+  return useQuery({
     queryKey: keys.approvals(status),
     queryFn: () => api.get<Approval[]>(`/approvals?status=${status}`),
+    select: (rows) => rows.map((r) => localizeLabeled(r, lang)),
   });
+};
 
 /** The open questions this caller may answer for.
  *
@@ -857,6 +923,8 @@ export const useMcpConnections = () =>
 
 export interface ConnectionToolNamesDTO {
   names: string[];
+  read: string[];
+  modify: string[];
 }
 
 export const useConnectionToolNames = (name: string) =>

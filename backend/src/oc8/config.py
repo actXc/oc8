@@ -19,6 +19,12 @@ class Settings(BaseSettings):
 
     env: str = "dev"
 
+    # Demo mode: load the full ACME showcase seed (agents, departments, tasks,
+    # approvals, bilingual EN/DE presentation) so a fresh stack can be walked
+    # through as a product demo. Pair with OC8_ENV=dev (compose.dev does both)
+    # -- demo alone does not enable unauthenticated login. See docs/DEPLOY.md.
+    demo: bool = False
+
     # Runtime DB connection (RLS-bound app role, async driver).
     database_url: str = "postgresql+asyncpg://oc8_app:oc8@localhost:5433/oc8"
     # Migration DB connection (schema owner, sync driver for Alembic).
@@ -334,6 +340,10 @@ class Settings(BaseSettings):
     @property
     def is_dev(self) -> bool:
         return self.env == "dev"
+
+    @property
+    def is_demo(self) -> bool:
+        return self.demo
 
     @property
     def migration_async_url(self) -> str:

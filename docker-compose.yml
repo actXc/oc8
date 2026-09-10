@@ -30,6 +30,9 @@ x-backend-env: &backend-env
   # OC8_ENV=prod to require real password auth (POST /auth/setup /
   # /auth/login). See docs/DEPLOY.md.
   OC8_ENV: ${OC8_ENV:-dev}
+  # Showcase mode: bilingual ACME seed + Demo badge. Prefer compose.dev.yml
+  # over flipping this alone on a reachable host.
+  OC8_DEMO: ${OC8_DEMO:-false}
   OC8_DATABASE_URL: postgresql+asyncpg://oc8_app:oc8@postgres:5432/oc8
   OC8_MIGRATION_URL: postgresql+psycopg://oc8_migrate:oc8@postgres:5432/oc8
   OC8_REDIS_URL: redis://redis:6379/0
@@ -198,6 +201,7 @@ services:
     environment:
       <<: *backend-env
       OC8_SEED_ON_START: ${OC8_SEED_ON_START:-true}
+      OC8_DEMO: ${OC8_DEMO:-false}
     depends_on:
       postgres:
         condition: service_healthy
@@ -207,7 +211,7 @@ services:
       - |
         set -e
         alembic upgrade head
-        if [ "$${OC8_SEED_ON_START}" = "true" ]; then
+        if [ "$${OC8_SEED_ON_START}" = "true" ] || [ "$${OC8_DEMO}" = "true" ]; then
           echo "seeding…"; oc8 seed || echo "seed skipped/failed (non-fatal)"
         fi
     restart: "no"
