@@ -1,0 +1,38 @@
+# Hosted showcase override: bilingual ACME mock data behind real password login.
+# Never enables unauthenticated dev-login (that is docker-compose.dev.yml).
+#
+# Usage:
+#   # set OC8_DEMO_PASSWORD in .env (min 8 chars), then:
+#   docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --build
+#
+# Sign in as OC8_DEMO_EMAIL (default demo@oc8.ai) with OC8_DEMO_PASSWORD.
+services:
+  migrate:
+    environment:
+      OC8_ENV: prod
+      OC8_DEMO: "true"
+      OC8_SEED_ON_START: "true"
+      OC8_DEMO_EMAIL: ${OC8_DEMO_EMAIL:-demo@oc8.ai}
+      OC8_DEMO_PASSWORD: ${OC8_DEMO_PASSWORD:?set OC8_DEMO_PASSWORD in .env for the showcase login}
+  backend:
+    environment:
+      OC8_ENV: prod
+      OC8_DEMO: "true"
+      OC8_DEMO_EMAIL: ${OC8_DEMO_EMAIL:-demo@oc8.ai}
+      OC8_DEMO_PASSWORD: ${OC8_DEMO_PASSWORD:?set OC8_DEMO_PASSWORD in .env for the showcase login}
+  worker:
+    environment:
+      OC8_ENV: prod
+      OC8_DEMO: "true"
+  ingestion-worker:
+    environment:
+      OC8_ENV: prod
+      OC8_DEMO: "true"
+  scheduler:
+    environment:
+      OC8_ENV: prod
+      OC8_DEMO: "true"
+  runtime-provisioner:
+    environment:
+      OC8_ENV: prod
+      OC8_DEMO: "true"

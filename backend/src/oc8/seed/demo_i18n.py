@@ -352,15 +352,19 @@ KBS_DE: dict[str, dict[str, str]] = {
 }
 
 INTEGRATIONS_DE: dict[str, dict[str, str]] = {
-    "erp": {"name": "ERP", "desc": "Rechnungen, Aufträge, Buchhaltung."},
-    "crm": {"name": "CRM", "desc": "Kontakte, Deals, Pipeline."},
-    "office": {"name": "Office-Suite", "desc": "Mail, Kalender, Chat, Dokumentenspeicher."},
-    "chat": {"name": "Chat", "desc": "Kanäle, Nachrichten, Alarme."},
-    "code-host": {"name": "Code-Host", "desc": "Repos, Pull Requests, Issues."},
-    "files": {"name": "Dateien", "desc": "Docs, Tabellen, Ordner."},
-    "hr-system": {"name": "HR-System", "desc": "Mitarbeitende, Zeiterfassung, Abwesenheit."},
-    "accounting": {"name": "Buchhaltung", "desc": "Belegimport, Kontenplan."},
-    "wiki": {"name": "Wiki", "desc": "Wikis, Notizen, Datenbanken."},
+    "odoo": {"name": "Odoo", "desc": "CRM, Verkauf, Rechnungen, Buchhaltung."},
+    "hubspot": {"name": "HubSpot", "desc": "Kontakte, Deals, Pipeline."},
+    "microsoft365": {
+        "name": "Microsoft 365",
+        "desc": "Mail, Kalender, Teams, SharePoint, OneDrive.",
+    },
+    "jira": {"name": "Jira", "desc": "Issues, Boards, Alarme."},
+    "github": {"name": "GitHub", "desc": "Repos, Pull Requests, Issues."},
+    "google_workspace": {
+        "name": "Google Workspace",
+        "desc": "Gmail, Drive, Kalender, Docs.",
+    },
+    "gitea": {"name": "Gitea", "desc": "Self-hosted Git, PRs, Issues."},
 }
 
 SOURCES_DE: dict[str, dict[str, str]] = {

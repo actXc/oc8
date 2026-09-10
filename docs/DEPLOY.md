@@ -88,9 +88,14 @@ screen, and creating the local administrator account proves the whole path
 (frontend → relative `/api/v1` → backend → Postgres) works through the single
 Caddy origin, with no CORS.
 
-For a local demo stack instead — seeded ACME/Globex tenants and the
-unauthenticated dev-login endpoint, never on a reachable host — bring the
-stack up with the dev override instead of editing `.env`:
+For a **hosted product walkthrough** (seeded bilingual ACME data behind a real
+password login, no open `dev-login`), set `OC8_DEMO_PASSWORD` in `.env` (min 8
+chars) and bring the stack up with the demo override:
+`docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --build`.
+Sign in as `OC8_DEMO_EMAIL` (default `demo@oc8.ai`) with that password.
+
+For a **local hacking** stack — seeded ACME and unauthenticated `dev-login`,
+never on a reachable host — use the dev override instead:
 `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build`.
 
 ## Giving agents a model

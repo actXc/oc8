@@ -1,7 +1,10 @@
-# Development/demo override. Never use this on a reachable Community instance:
+# Development override. Never use this on a reachable Community instance:
 # it enables unauthenticated dev-login and creates disposable demo data.
 #
 # Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+#
+# For a *hosted* product walkthrough with real password login, use
+# docker-compose.demo.yml instead (OC8_ENV=prod + seeded demo@… account).
 #
 # OC8_DEMO=true loads the bilingual ACME showcase seed (EN + DE) and flags the
 # instance so the UI can show a Demo badge. Pair with OC8_ENV=dev so the

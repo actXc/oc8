@@ -30,8 +30,9 @@ x-backend-env: &backend-env
   # OC8_ENV=prod to require real password auth (POST /auth/setup /
   # /auth/login). See docs/DEPLOY.md.
   OC8_ENV: ${OC8_ENV:-dev}
-  # Showcase mode: bilingual ACME seed + Demo badge. Prefer compose.dev.yml
-  # over flipping this alone on a reachable host.
+  # Showcase mode: bilingual ACME seed + Demo badge. Prefer compose.demo.yml
+  # (password login) or compose.dev.yml (local open login) over flipping this
+  # alone on a reachable host.
   OC8_DEMO: ${OC8_DEMO:-false}
   OC8_DATABASE_URL: postgresql+asyncpg://oc8_app:oc8@postgres:5432/oc8
   OC8_MIGRATION_URL: postgresql+psycopg://oc8_migrate:oc8@postgres:5432/oc8
@@ -205,6 +206,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    volumes:
+      # Seed installs/enables showcase capas when OC8_DEMO=true; discovery reads
+      # this mount the same way backend/worker do.
+      - ./capas:/app/capas:ro
     command:
       - sh
       - -c

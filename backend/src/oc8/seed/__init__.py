@@ -3,18 +3,21 @@ plus a minimal second tenant (Globex) used by isolation tests.
 
 German overlays for the ACME showcase live in `demo_i18n.py` and are stored
 under each row's `i18n.de` map so the UI can flip language without a second
-tenant. Enable with `OC8_DEMO=true` (compose.dev.yml sets it together with
-`OC8_ENV=dev` and seed-on-start).
+tenant. Enable with `OC8_DEMO=true`:
+
+- `docker-compose.demo.yml` — hosted walkthrough: ACME only + password admin
+  (`OC8_DEMO_EMAIL` / `OC8_DEMO_PASSWORD`), `OC8_ENV=prod` (no open login).
+- `docker-compose.dev.yml` — local hacking: ACME + unauthenticated `dev-login`
+  (`OC8_ENV=dev`). Globex is skipped in both demo paths so password auth keeps
+  its singleton-Organization invariant.
 
 Runs as the schema-owner role, which bypasses RLS, so it can populate multiple
-tenants in one pass.
+tenants in one pass when Globex is included.
 """
 
 from __future__ import annotations
 
 import datetime as dt
-import pathlib
-import sys
 import uuid
 from typing import Any
 
@@ -41,11 +44,6 @@ from oc8.seed.demo_i18n import (
 )
 from oc8.seed.department_templates import seed_department_templates
 
-#: Resolved at import time, not inside the async seed: `Path.resolve()` hits the
-#: filesystem, and a blocking syscall on the event loop is worth avoiding even
-#: when it is this small. The answer cannot change while the process runs.
-_DEMO_MCP_SERVER = pathlib.Path(__file__).resolve().parents[3] / "mcp_servers" / "demo_fs.py"
-
 _NS = uuid.UUID("0192a000-0000-7000-8000-0000000000ff")
 
 
@@ -63,48 +61,44 @@ def _tool(enabled: int, read: int, write: int, send: int, approval: int | None) 
     }
 
 
-# Department frames (permissions.ts departmentPolicies) — the ceilings.
+# Department frames — ceilings keyed by real MCP connection names (same
+# vocabulary as capas/*/tool_pack.toml and a live install: hubspot, odoo,
+# microsoft365, github, jira). Generic Lovable labels (crm/email/office) made
+# the Tools/Guardrails table look unlike a real system. `coding` is the
+# built-in coding-runtime frame key.
 DEPT_FRAMES: dict[str, dict[str, tuple[int, int, int, int, int | None]]] = {
     "vertrieb": {
-        "crm": (1, 1, 1, 1, 5000),
-        "office": (1, 1, 1, 0, None),
-        "email": (1, 1, 1, 1, 5000),
-        "demo-fs": (1, 1, 1, 0, None),
+        "hubspot": (1, 1, 1, 1, 5000),
+        "odoo": (1, 1, 1, 1, 5000),
+        "microsoft365": (1, 1, 1, 1, 5000),
         "coding": (1, 1, 1, 0, None),
     },
     "entwicklung": {
-        "code-host": (1, 1, 1, 1, None),
-        "chat": (1, 1, 1, 1, None),
-        "office": (1, 1, 0, 0, None),
-        "demo-fs": (1, 1, 1, 0, None),
+        "github": (1, 1, 1, 1, None),
+        "jira": (1, 1, 1, 1, None),
+        "microsoft365": (1, 1, 0, 0, None),
         "coding": (1, 1, 1, 0, None),
     },
     "marketing": {
-        "crm": (1, 1, 1, 0, None),
-        "files": (1, 1, 1, 0, None),
-        "email": (1, 1, 1, 1, 2500),
-        "chat": (1, 1, 1, 1, None),
-        "demo-fs": (1, 1, 1, 0, None),
+        "hubspot": (1, 1, 1, 0, None),
+        "microsoft365": (1, 1, 1, 1, 2500),
+        "jira": (1, 1, 1, 1, None),
         "coding": (1, 1, 1, 0, None),
     },
     "buchhaltung": {
-        "erp": (1, 1, 1, 1, 2500),
-        "office": (1, 1, 1, 0, None),
-        "email": (1, 1, 0, 1, 2500),
-        "demo-fs": (1, 1, 1, 0, None),
+        "odoo": (1, 1, 1, 1, 2500),
+        "microsoft365": (1, 1, 1, 0, None),
         "coding": (1, 1, 1, 0, None),
     },
     "hr": {
-        "office": (1, 1, 1, 0, None),
-        "email": (1, 1, 0, 0, None),
-        "demo-fs": (1, 1, 1, 0, None),
+        "microsoft365": (1, 1, 1, 0, None),
+        "odoo": (1, 1, 0, 0, None),
         "coding": (1, 1, 1, 0, None),
     },
     "support": {
-        "chat": (1, 1, 1, 1, None),
-        "email": (1, 1, 1, 1, 200),
-        "office": (1, 1, 0, 0, None),
-        "demo-fs": (1, 1, 1, 0, None),
+        "jira": (1, 1, 1, 1, None),
+        "microsoft365": (1, 1, 1, 1, 200),
+        "hubspot": (1, 1, 0, 0, None),
         "coding": (1, 1, 1, 0, None),
     },
 }
@@ -114,16 +108,16 @@ DEPT_FRAMES: dict[str, dict[str, tuple[int, int, int, int, int | None]]] = {
 # skill's own category. The seeded skills' human-readable tool names (e.g.
 # "Accounting", "Procurement") live in `presentation.tools` for the UI instead.
 SKILL_CATEGORY_TOOL_FRAMES: dict[str, list[str]] = {
-    "finance": ["erp", "email"],
-    "sales": ["crm", "email"],
-    "marketing": ["crm", "files"],
-    "hr": ["office", "email"],
+    "finance": ["odoo", "microsoft365"],
+    "sales": ["hubspot", "microsoft365"],
+    "marketing": ["hubspot", "microsoft365"],
+    "hr": ["microsoft365", "odoo"],
 }
 
 # Agent narrowings (permissions.ts agentPolicies) — subset/tighten only.
 AGENT_NARROW: dict[str, dict[str, tuple[int, int, int, int, int | None]]] = {
-    "leo": {"crm": (1, 1, 0, 0, None)},
-    "nina": {"crm": (1, 1, 1, 1, 1000), "email": (1, 1, 1, 1, 1000)},
+    "leo": {"hubspot": (1, 1, 0, 0, None)},
+    "nina": {"hubspot": (1, 1, 1, 1, 1000), "microsoft365": (1, 1, 1, 1, 1000)},
 }
 
 # departments[] from mock-data.ts
@@ -248,7 +242,7 @@ AGENTS: list[tuple[Any, ...]] = [
         "Claude 3.5 Sonnet",
         "Claude",
         "warning",
-        ["CRM", "Office", "Email", "Calendar"],
+        ["HubSpot", "Odoo", "Microsoft 365"],
         "Prepared quote for client Bauer GmbH — awaiting approval",
         "2 min ago",
         24,
@@ -265,7 +259,7 @@ AGENTS: list[tuple[Any, ...]] = [
         "GPT-4o",
         "GPT",
         "running",
-        ["Data Warehouse", "Spreadsheets", "Chat"],
+        ["HubSpot", "Microsoft 365", "Jira"],
         "Generated weekly revenue report and shared to #sales",
         "34 sec ago",
         41,
@@ -282,7 +276,7 @@ AGENTS: list[tuple[Any, ...]] = [
         "Mistral Large",
         "Mistral",
         "running",
-        ["Wiki", "Wiki", "Code Host"],
+        ["GitHub", "Jira", "Microsoft 365"],
         "Summarized changes to API documentation",
         "7 min ago",
         18,
@@ -299,7 +293,7 @@ AGENTS: list[tuple[Any, ...]] = [
         "Llama 3.1 (local)",
         "Ollama",
         "paused",
-        ["HR System", "Office", "Email"],
+        ["Microsoft 365", "Odoo"],
         "Paused by admin — GDPR review",
         "2 hrs ago",
         6,
@@ -316,7 +310,7 @@ AGENTS: list[tuple[Any, ...]] = [
         "Claude 3.5 Sonnet",
         "Claude",
         "running",
-        ["Accounting", "ERP", "Email"],
+        ["Odoo", "Microsoft 365"],
         "Categorized 12 incoming invoices and transferred to the accounting system",
         "12 min ago",
         37,
@@ -333,7 +327,7 @@ AGENTS: list[tuple[Any, ...]] = [
         "GPT-4o mini",
         "GPT",
         "error",
-        ["Monitoring", "On-call", "Code Host", "Chat"],
+        ["Jira", "Microsoft 365", "GitHub"],
         "Error: Connection to the monitoring API dropped (401)",
         "4 min ago",
         16,
@@ -350,7 +344,7 @@ AGENTS: list[tuple[Any, ...]] = [
         "GPT-4o mini",
         "GPT",
         "running",
-        ["CRM", "Social Network", "Email"],
+        ["HubSpot", "Microsoft 365"],
         "Sent 24 cold emails to 'Manufacturing DACH' segment",
         "1 min ago",
         28,
@@ -367,7 +361,7 @@ AGENTS: list[tuple[Any, ...]] = [
         "Claude 3.5 Haiku",
         "Claude",
         "running",
-        ["CRM", "Chat"],
+        ["HubSpot", "Microsoft 365"],
         "Scored 9 new leads — 3 marked as 'Hot'",
         "3 min ago",
         21,
@@ -384,7 +378,7 @@ AGENTS: list[tuple[Any, ...]] = [
         "Claude 3.5 Sonnet",
         "Claude",
         "running",
-        ["Code Host", "Issue Tracker", "Chat"],
+        ["GitHub", "Jira"],
         "Completed PR review for #482 — 2 comments",
         "40 sec ago",
         34,
@@ -401,7 +395,7 @@ AGENTS: list[tuple[Any, ...]] = [
         "GPT-4o",
         "GPT",
         "running",
-        ["Code Host", "Issue Tracker"],
+        ["GitHub", "Jira"],
         "Implemented 'Batch Export' feature — tests green",
         "6 min ago",
         19,
@@ -418,7 +412,7 @@ AGENTS: list[tuple[Any, ...]] = [
         "Mistral Large",
         "Mistral",
         "warning",
-        ["Code Host", "Test Runner", "Chat"],
+        ["GitHub", "Jira"],
         "E2E test run: 2 regressions found — awaiting triage",
         "8 min ago",
         12,
@@ -435,7 +429,7 @@ AGENTS: list[tuple[Any, ...]] = [
         "Claude 3.5 Sonnet",
         "Claude",
         "running",
-        ["CRM", "Social Network", "Ads Platform"],
+        ["HubSpot", "Microsoft 365"],
         "Rolled out 'Q3 Launch' campaign on the social network",
         "5 min ago",
         15,
@@ -452,7 +446,7 @@ AGENTS: list[tuple[Any, ...]] = [
         "GPT-4o",
         "GPT",
         "running",
-        ["Wiki", "CMS"],
+        ["Microsoft 365", "HubSpot"],
         "Blog post 'Agents in Practice' in review",
         "11 min ago",
         8,
@@ -469,7 +463,7 @@ AGENTS: list[tuple[Any, ...]] = [
         "Mistral Large",
         "Mistral",
         "running",
-        ["Accounting", "Office"],
+        ["Odoo", "Microsoft 365"],
         "OCR-processed and reviewed 18 travel receipts",
         "15 min ago",
         22,
@@ -486,7 +480,7 @@ AGENTS: list[tuple[Any, ...]] = [
         "Claude 3.5 Sonnet",
         "Claude",
         "running",
-        ["Helpdesk", "Chat", "Wiki"],
+        ["Jira", "Microsoft 365", "HubSpot"],
         "Resolved ticket #4412 — SSO connection issue",
         "2 min ago",
         31,
@@ -503,7 +497,7 @@ AGENTS: list[tuple[Any, ...]] = [
         "GPT-4o mini",
         "GPT",
         "running",
-        ["Helpdesk", "Wiki"],
+        ["Jira", "Microsoft 365"],
         "Generated 14 answers from knowledge base",
         "45 sec ago",
         47,
@@ -533,7 +527,7 @@ SKILLS: list[tuple[Any, ...]] = [
         "local",
         "1.4.2",
         "oc8 core",
-        ["Accounting", "Procurement", "OCR"],
+        ["Odoo", "Microsoft 365"],
         ["Chart of Accounts", "Vendor Master"],
         ["Amounts above €10 000 require human approval", "Reject invoices without valid VAT ID"],
         "Given an invoice PDF, extract header + line items, match against open POs, book to the "
@@ -551,7 +545,7 @@ SKILLS: list[tuple[Any, ...]] = [
         "local",
         "2.1.0",
         "Sales Ops",
-        ["CRM", "Data Enrichment", "Social Network"],
+        ["HubSpot", "Microsoft 365"],
         ["ICP Definition", "Sales Playbook"],
         ["Never contact leads on the do-not-call list"],
         "Enrich the lead, evaluate Budget / Authority / Need / Timeline, produce a score 0-100 "
@@ -569,7 +563,7 @@ SKILLS: list[tuple[Any, ...]] = [
         "local",
         "1.0.7",
         "Legal Team",
-        ["DocuSign", "OCR"],
+        ["Microsoft 365"],
         ["Legal Templates"],
         ["Do not give legal advice", "Flag jurisdiction changes"],
         "Parse the contract, produce structured summary with parties, term, renewal, obligations "
@@ -587,7 +581,7 @@ SKILLS: list[tuple[Any, ...]] = [
         "store",
         "3.2.1",
         "Community · helpdesk-labs",
-        ["Helpdesk", "Helpdesk"],
+        ["Jira", "Microsoft 365"],
         ["Help Center"],
         ["Escalate legal or safety issues immediately"],
         "Classify by product area, set priority, propose response draft citing help-center "
@@ -605,7 +599,7 @@ SKILLS: list[tuple[Any, ...]] = [
         "store",
         "1.1.0",
         "Community · people-ops",
-        ["HR System", "Chat", "Office Suite"],
+        ["Odoo", "Microsoft 365"],
         [],
         ["Never share private employee data outside HR channel"],
         "Given a new-hire record, provision accounts, order equipment, schedule intro meetings.",
@@ -622,7 +616,7 @@ SKILLS: list[tuple[Any, ...]] = [
         "store",
         "0.9.4",
         "Community · ops-guild",
-        ["SAP", "Excel"],
+        ["Odoo", "Microsoft 365"],
         [],
         ["Adjustments above 2% variance require approval"],
         "Compare cycle-count file with ERP quantities, produce variance report, post approved "
@@ -634,41 +628,39 @@ SKILLS: list[tuple[Any, ...]] = [
     ),
 ]
 
-# integrations[]
+# integrations[] — product names matching capa connection keys
 INTEGRATIONS: list[tuple[Any, ...]] = [
-    ("erp", "ERP", "ERP", True, ["fin"], "Invoices, orders, accounting.", 280),
-    ("crm", "CRM", "CRM", True, ["vera"], "Contacts, deals, pipeline.", 25),
+    ("odoo", "Odoo", "ERP", True, ["fin", "vera"], "CRM, sales, invoices, accounting.", 280),
+    ("hubspot", "HubSpot", "CRM", True, ["vera", "nina", "leo"], "Contacts, deals, pipeline.", 25),
     (
-        "office",
-        "Office Suite",
+        "microsoft365",
+        "Microsoft 365",
         "Productivity",
         True,
         ["vera", "hera", "fin"],
-        "Mail, calendar, chat, document store.",
+        "Mail, calendar, Teams, SharePoint, OneDrive.",
         220,
     ),
-    ("chat", "Chat", "Communication", True, ["data", "ops"], "Channels, messages, alerts.", 320),
+    ("jira", "Jira", "Issues", True, ["data", "ops", "dex"], "Issues, boards, alerts.", 320),
     (
-        "code-host",
-        "Code Host",
+        "github",
+        "GitHub",
         "Engineering",
         True,
-        ["doku", "ops"],
+        ["doku", "ops", "dex", "ada"],
         "Repos, pull requests, issues.",
         250,
     ),
-    ("files", "Files", "Files", False, [], "Docs, sheets, folders.", 155),
-    ("hr-system", "HR System", "HR", False, [], "Employees, time tracking, leave.", 200),
     (
-        "accounting",
-        "Accounting",
-        "Accounting",
-        True,
-        ["fin"],
-        "Receipt import, chart of accounts.",
-        40,
+        "google_workspace",
+        "Google Workspace",
+        "Productivity",
+        False,
+        [],
+        "Gmail, Drive, Calendar, Docs.",
+        155,
     ),
-    ("wiki", "Wiki", "Knowledge", False, [], "Wikis, notes, databases.", 0),
+    ("gitea", "Gitea", "Engineering", False, [], "Self-hosted git, PRs, issues.", 200),
 ]
 
 # dataSources[]
@@ -895,8 +887,19 @@ def _narrow_json(agent_slug: str) -> dict[str, Any]:
 
 async def _seed_acme(session: AsyncSession) -> None:
     tid = ACME_TENANT_ID
+    # Disposable test tenants monkeypatch `ACME_TENANT_ID` but must not collide
+    # on the global unique `organization.slug` with the real ACME row.
+    from oc8.constants import ACME_TENANT_ID as canonical_acme
+
+    is_canonical = tid == canonical_acme
     session.add(
-        m.Organization(id=tid, slug="acme", name="ACME Industries", tier="standard", region="eu")
+        m.Organization(
+            id=tid,
+            slug="acme" if is_canonical else f"acme-{tid.hex[:8]}",
+            name="ACME Industries" if is_canonical else f"ACME ({tid.hex[:8]})",
+            tier="standard",
+            region="eu",
+        )
     )
 
     # `kind` derived per name, never uniform: this loop builds all five built-in
@@ -1160,22 +1163,9 @@ async def _seed_acme(session: AsyncSession) -> None:
             )
         )
 
-    # A ready-to-use demo MCP server (sandboxed filesystem tools) so an agent can
-    # be run end to end from the UI with no setup.
-    demo_server = _DEMO_MCP_SERVER
-    session.add(
-        m.McpConnection(
-            id=det(tid, "mcp", "demo-fs"),
-            tenant_id=tid,
-            department_id=det(tid, "dept", "vertrieb"),
-            name="demo-fs",
-            transport="stdio",
-            server_url="",
-            scopes={"read": ["list_files", "read_file"], "modify": []},
-            config={"command": sys.executable, "args": [str(demo_server)]},
-            connected=True,
-        )
-    )
+    # No seeded McpConnection rows: empty "Untested / Test connection" cards
+    # under Capas look like a broken install next to the real enabled capas.
+    # Agent Tools still list hubspot/odoo/… via department frame keys alone.
 
     for slug, kind, name, connected, last_sync, docs, sched, sens, scope, extra in SOURCES:
         session.add(
@@ -1254,6 +1244,11 @@ async def _seed_acme(session: AsyncSession) -> None:
 
     await seed_department_templates(session, tenant_id=tid)
 
+    if get_settings().is_demo:
+        from oc8.seed.demo_showcase import seed_demo_showcase
+
+        await seed_demo_showcase(session, tenant_id=tid)
+
     await session.flush()
     await append_event(
         session,
@@ -1264,6 +1259,55 @@ async def _seed_acme(session: AsyncSession) -> None:
         action="seed.loaded",
         resource={"tenant": "acme"},
     )
+
+
+async def _seed_demo_admin(session: AsyncSession) -> None:
+    """Password-login admin for the ACME showcase (hosted demo, OC8_ENV=prod).
+
+    Community password auth requires a singleton Organization and at least one
+    `org_member` with a password_hash. The ACME seed already supplies the
+    singleton; this writes the member. Skipped when `OC8_DEMO_PASSWORD` is
+    empty so a forgotten env never invents a guessable secret.
+    """
+    from oc8.auth.password import PasswordHashingError, hash_password
+
+    settings = get_settings()
+    # Same canonical spelling as PasswordSetupRequest (`_normalized_address`).
+    email = (settings.demo_email or "").strip().lower()
+    password = settings.demo_password or ""
+    if not email or not password:
+        print(
+            "demo seed: OC8_DEMO_EMAIL/OC8_DEMO_PASSWORD not both set — "
+            "skipping demo admin (password login will have nobody to authenticate)"
+        )
+        return
+    if len(password) < 8:
+        raise ValueError("OC8_DEMO_PASSWORD must be at least 8 characters")
+
+    tid = ACME_TENANT_ID
+    try:
+        password_hash = hash_password(password)
+    except PasswordHashingError as err:
+        raise ValueError(f"OC8_DEMO_PASSWORD could not be hashed: {err}") from err
+
+    admin_role_id = det(tid, "role", "org_admin")
+    session.add(
+        m.OrgMember(
+            id=det(tid, "member", "demo-admin"),
+            tenant_id=tid,
+            subject=email,
+            # Match password_setup's subject_uuid derivation (local auth, not
+            # subject_uuid_for / messenger door).
+            subject_uuid=uuid.uuid5(uuid.NAMESPACE_URL, f"oc8:local:{email}"),
+            display_name="Demo Admin",
+            password_hash=password_hash,
+            all_departments=True,
+            role_id=admin_role_id,
+            # No totp_grace_started_at: demo walkthroughs must not force 2FA
+            # enrollment before anyone can open the Office.
+        )
+    )
+    print(f"demo seed: password login ready for {email}")
 
 
 async def _seed_globex(session: AsyncSession) -> None:
@@ -1400,8 +1444,17 @@ async def run_seed(reset: bool = False) -> None:
                 await session.commit()
             async with sm() as session2:
                 await _seed_acme(session2)
-                await _seed_globex(session2)
+                # Hosted demo needs a singleton Organization for password auth
+                # (`_get_singleton_organization`). Globex is only for isolation
+                # tests under the unauthenticated seed path.
+                if settings.is_demo:
+                    await _seed_demo_admin(session2)
+                else:
+                    await _seed_globex(session2)
                 await session2.commit()
     finally:
         await engine.dispose()
-    print("seed complete: ACME + Globex")
+    if settings.is_demo:
+        print("seed complete: ACME demo (password login)")
+    else:
+        print("seed complete: ACME + Globex")

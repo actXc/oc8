@@ -21,9 +21,15 @@ class Settings(BaseSettings):
 
     # Demo mode: load the full ACME showcase seed (agents, departments, tasks,
     # approvals, bilingual EN/DE presentation) so a fresh stack can be walked
-    # through as a product demo. Pair with OC8_ENV=dev (compose.dev does both)
-    # -- demo alone does not enable unauthenticated login. See docs/DEPLOY.md.
+    # through as a product demo. Prefer OC8_ENV=prod + compose.demo.yml for a
+    # hosted walkthrough with real password login; compose.dev.yml still pairs
+    # demo with unauthenticated dev-login for local hacking only.
     demo: bool = False
+    # Sign-in for the seeded ACME demo admin (only used when demo=True). Empty
+    # password refuses to seed the member -- never invent a default secret that
+    # could ship onto a reachable host by accident.
+    demo_email: str = "demo@oc8.ai"
+    demo_password: str = ""
 
     # Runtime DB connection (RLS-bound app role, async driver).
     database_url: str = "postgresql+asyncpg://oc8_app:oc8@localhost:5433/oc8"
