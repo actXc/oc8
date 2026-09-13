@@ -30,7 +30,15 @@ from oc8.agent.control_tools import (
     execute_control_tool,
     offered_tools,
 )
-from oc8.agent.engine import _authorize, _call_sig, _max_steps
+from oc8.agent.engine import (
+    TODO_CONTINUATION_MAX_ROUNDS,
+    _authorize,
+    _call_sig,
+    _max_steps,
+    todo_continuation_exhausted_note,
+    todo_continuation_reminder,
+    track_repeat_tool_call,
+)
 from oc8.agent.mcp_client import McpSession
 from oc8.agent.mcp_env import resolve_mcp_env
 from oc8.agent.mcp_requirements import wrap_with_requirements
@@ -254,6 +262,18 @@ async def step(
     agent, dept, conn = await _load(db, run)
 
     ctx = dict(run.context)
+
+    # Same step-limit as the in-process engine's `for steps in range(1,
+    # max_steps + 1)` loop bound (§8.3, engine.py's _max_steps): once this
+    # many completions have already happened, refuse to place another one
+    # rather than letting the shell keep calling this endpoint until its own
+    # MAX_ITERS backstop (isolated_shell.py) -- that backstop is deliberately
+    # far above any real budget and must never be the thing that actually
+    # stops a run. No model call, no cost, on this path -- ctx["steps"] isn't
+    # incremented here, so a resumed/retried request stays idempotent.
+    if int(ctx.get("steps", 0)) >= _max_steps(agent):
+        return StepResult(done=True, text="Reached step limit.", status_override="done")
+
     transcript: list[dict[str, Any]] = list(ctx.get("transcript", []))
     tool_schemas_raw: list[dict[str, Any]] = list(ctx.get("tool_schemas", []))
 
@@ -363,7 +383,6 @@ async def step(
         copilot_permissions=copilot_permissions,
     )
 
-    resolved_messages = _to_messages(transcript)
     resolved_tools = tools
     # Shared with the in-process engine so sampling cannot drift between the
     # two runtimes -- see oc8.modelrouter.sampling.
@@ -379,126 +398,175 @@ async def step(
         provider=provider,
         credential_id=model_config.credential_id if model_config is not None else None,
     )
-    request_id = uuid.uuid4()
-    # Department prompt caching, through the SAME helper the in-process engine
-    # uses (oc8.agent.cache_flow) -- an isolated deployment must not silently
-    # render a settings toggle and a savings figure that do nothing.
-    key, cached_result = await cache_flow.lookup(
-        department=dept,
-        tenant_id=run.tenant_id,
-        department_id=agent.department_id,
-        provider=provider,
-        model=model,
-        base_url=resolved_base_url,
-        messages=resolved_messages,
-        tools=resolved_tools,
-        params=resolved_params,
-        contains_restricted=contains_restricted,
-    )
-    # Every model turn is metered HERE, because this is where an isolated run's
-    # turns happen -- the container holds no keys and never calls a provider. Same
-    # record the in-process engine writes after its own turn (§15.3): without it a
-    # deployment on OC8_AGENT_ISOLATION=true bills nothing and its budgets never
-    # fill, so the runtime's budget gate could never fire.
-    if cached_result is not None:
-        result = cached_result
-        # Nothing new was stored this step -- a leftover key from an earlier
-        # step must not be invalidated by a LATER step's tool failure (see
-        # the pop below).
-        ctx.pop("pending_cache_key", None)
+
+    async def _live_token_delta(text: str) -> None:
+        # Same Live Log parity as the in-process engine's own callback
+        # (agent/engine.py's _live_token_delta) -- transient, no DB write,
+        # since the full text still lands durably below once the turn
+        # completes (ctx["transcript"] + the final db.commit()).
+        await publish_run_token_delta(run.tenant_id, run_id=run.id, text=text)
+
+    async def _complete(
+        msgs: list[NeutralMessage], sampling_params: ModelParams, req_id: uuid.UUID
+    ) -> Any:
+        return await accumulate_stream(
+            stream_completion_with_fallback(
+                db,
+                get_model_router(),
+                tenant_id=run.tenant_id,
+                agent_id=agent.id,
+                primary=model_config,
+                no_config_provider=provider,
+                no_config_model=model,
+                messages=msgs,
+                tools=resolved_tools,
+                params=sampling_params,
+                request_id=req_id,
+                contains_restricted=contains_restricted,
+            ),
+            on_text=_live_token_delta,
+        )
+
+    async def _record(res: Any, req_id: uuid.UUID) -> None:
         await record_usage(
             db,
             tenant_id=run.tenant_id,
-            request_id=request_id,
-            model=result.model,
-            provider=result.provider,
-            tokens_in=0,
-            tokens_out=0,
+            request_id=req_id,
+            model=res.model,
+            provider=res.provider,
+            tokens_in=res.usage.tokens_in,
+            tokens_out=res.usage.tokens_out,
             agent_id=agent.id,
             department_id=agent.department_id,
-            cache_hit=True,
-            saved_tokens_in=result.usage.tokens_in,
-            saved_tokens_out=result.usage.tokens_out,
         )
-    else:
 
-        async def _live_token_delta(text: str) -> None:
-            # Same Live Log parity as the in-process engine's own callback
-            # (agent/engine.py's _live_token_delta) -- transient, no DB write,
-            # since the full text still lands durably below once the turn
-            # completes (ctx["transcript"] + the final db.commit()).
-            await publish_run_token_delta(run.tenant_id, run_id=run.id, text=text)
-
-        async def _complete(sampling_params: ModelParams, req_id: uuid.UUID) -> Any:
-            return await accumulate_stream(
-                stream_completion_with_fallback(
-                    db,
-                    get_model_router(),
-                    tenant_id=run.tenant_id,
-                    agent_id=agent.id,
-                    primary=model_config,
-                    no_config_provider=provider,
-                    no_config_model=model,
-                    messages=resolved_messages,
-                    tools=resolved_tools,
-                    params=sampling_params,
-                    request_id=req_id,
-                    contains_restricted=contains_restricted,
-                ),
-                on_text=_live_token_delta,
-            )
-
-        async def _record(res: Any, req_id: uuid.UUID) -> None:
+    # See engine.py's todo_continuation_reminder / todo_continue_rounds: a
+    # continuation round never crosses a /step HTTP call here -- the shell
+    # must never see an intermediate "no tool calls yet" response, since its
+    # own loop protocol (isolated_shell.py) has no "keep going anyway" path
+    # and would just end the run. So the whole nudge-and-retry cycle happens
+    # in this one call via this internal loop, mirroring the length-retry
+    # precedent just below (which already does 2 completions per /step
+    # call) instead of a second completion. A plain local counter is
+    # correct here (never reset mid-cap, never spans calls) precisely
+    # because it never has to survive past this one request.
+    todo_continue_rounds = 0
+    while True:
+        resolved_messages = _to_messages(transcript)
+        request_id = uuid.uuid4()
+        # Department prompt caching, through the SAME helper the in-process engine
+        # uses (oc8.agent.cache_flow) -- an isolated deployment must not silently
+        # render a settings toggle and a savings figure that do nothing.
+        key, cached_result = await cache_flow.lookup(
+            department=dept,
+            tenant_id=run.tenant_id,
+            department_id=agent.department_id,
+            provider=provider,
+            model=model,
+            base_url=resolved_base_url,
+            messages=resolved_messages,
+            tools=resolved_tools,
+            params=resolved_params,
+            contains_restricted=contains_restricted,
+        )
+        # Every model turn is metered HERE, because this is where an isolated run's
+        # turns happen -- the container holds no keys and never calls a provider. Same
+        # record the in-process engine writes after its own turn (§15.3): without it a
+        # deployment on OC8_AGENT_ISOLATION=true bills nothing and its budgets never
+        # fill, so the runtime's budget gate could never fire.
+        if cached_result is not None:
+            result = cached_result
+            # Nothing new was stored this step -- a leftover key from an earlier
+            # step must not be invalidated by a LATER step's tool failure (see
+            # the pop below).
+            ctx.pop("pending_cache_key", None)
             await record_usage(
                 db,
                 tenant_id=run.tenant_id,
-                request_id=req_id,
-                model=res.model,
-                provider=res.provider,
-                tokens_in=res.usage.tokens_in,
-                tokens_out=res.usage.tokens_out,
+                request_id=request_id,
+                model=result.model,
+                provider=result.provider,
+                tokens_in=0,
+                tokens_out=0,
                 agent_id=agent.id,
                 department_id=agent.department_id,
+                cache_hit=True,
+                saved_tokens_in=result.usage.tokens_in,
+                saved_tokens_out=result.usage.tokens_out,
             )
+        else:
+            result = await _complete(resolved_messages, resolved_params, request_id)
+            await _record(result, request_id)
+            if result.stop_reason == "length" and not result.tool_calls and not result.text.strip():
+                # See engine.py's identical check: a reasoning-capable model can
+                # spend its whole completion budget on hidden reasoning and hit
+                # max_tokens before writing anything visible. One retry with
+                # double the budget, before this silently reads as the run being
+                # finished with nothing actually done.
+                retry_request_id = uuid.uuid4()
+                result = await _complete(
+                    resolved_messages, bumped_for_length_retry(resolved_params), retry_request_id
+                )
+                await _record(result, retry_request_id)
+            await cache_flow.store_if_matching(key, result, provider=provider, model=model)
+            # Read by /tool below, once this step's requested tool calls come back
+            # and any of them turns out to have failed for real (see that
+            # endpoint's own invalidate call) -- store_if_matching can't know that
+            # yet, since it runs before any tool call this completion requested
+            # has executed. Same fix as agent/engine.py's step loop, adapted to
+            # this endpoint's split /step + /tool request cycle: there is no
+            # single in-process loop here to hold the key across both calls, so
+            # it travels on the run's own context instead.
+            ctx["pending_cache_key"] = key
 
-        result = await _complete(resolved_params, request_id)
-        await _record(result, request_id)
-        if result.stop_reason == "length" and not result.tool_calls and not result.text.strip():
-            # See engine.py's identical check: a reasoning-capable model can
-            # spend its whole completion budget on hidden reasoning and hit
-            # max_tokens before writing anything visible. One retry with
-            # double the budget, before this silently reads as the run being
-            # finished with nothing actually done.
-            retry_request_id = uuid.uuid4()
-            result = await _complete(bumped_for_length_retry(resolved_params), retry_request_id)
-            await _record(result, retry_request_id)
-        await cache_flow.store_if_matching(key, result, provider=provider, model=model)
-        # Read by /tool below, once this step's requested tool calls come back
-        # and any of them turns out to have failed for real (see that
-        # endpoint's own invalidate call) -- store_if_matching can't know that
-        # yet, since it runs before any tool call this completion requested
-        # has executed. Same fix as agent/engine.py's step loop, adapted to
-        # this endpoint's split /step + /tool request cycle: there is no
-        # single in-process loop here to hold the key across both calls, so
-        # it travels on the run's own context instead.
-        ctx["pending_cache_key"] = key
-
-    transcript.append(
-        _from_message(
-            NeutralMessage(role="assistant", content=result.text, tool_calls=result.tool_calls)
+        transcript.append(
+            _from_message(
+                NeutralMessage(role="assistant", content=result.text, tool_calls=result.tool_calls)
+            )
         )
-    )
+        ctx["steps"] = int(ctx.get("steps", 0)) + 1
+
+        truncated_empty = (
+            result.stop_reason == "length" and not result.tool_calls and not result.text.strip()
+        )
+        if not result.tool_calls and not truncated_empty:
+            # See engine.py's identical gate: the model tried to finish while
+            # its own todo_write checklist still has open items.
+            open_todos = [t for t in ctx.get("todos", []) if t.get("status") != "completed"]
+            if (
+                open_todos
+                and todo_continue_rounds < TODO_CONTINUATION_MAX_ROUNDS
+                and int(ctx["steps"]) < _max_steps(agent)
+            ):
+                todo_continue_rounds += 1
+                transcript.append(
+                    _from_message(
+                        NeutralMessage(
+                            role="user",
+                            content=todo_continuation_reminder(open_todos, todo_continue_rounds),
+                        )
+                    )
+                )
+                continue
+        break
+
     ctx["transcript"] = transcript
-    ctx["steps"] = int(ctx.get("steps", 0)) + 1
     run.context = ctx
     await db.commit()
 
-    truncated_empty = (
-        result.stop_reason == "length" and not result.tool_calls and not result.text.strip()
-    )
+    # Reaching here with no tool call and open todos means the round cap (or
+    # the step budget) was hit, not that everything got done -- say so in the
+    # output instead of silently looking like a clean finish, same as
+    # engine.py's identical check (see todo_continuation_exhausted_note).
+    step_text = result.text
+    if not result.tool_calls and not truncated_empty:
+        open_todos_final = [t for t in ctx.get("todos", []) if t.get("status") != "completed"]
+        if open_todos_final:
+            step_text = f"{step_text}\n\n{todo_continuation_exhausted_note(open_todos_final)}"
+
     return StepResult(
         done=not result.tool_calls and int(ctx["steps"]) <= _max_steps(agent),
-        text=result.text,
+        text=step_text,
         tool_calls=[
             {"id": t.id, "name": t.name, "arguments": t.arguments} for t in result.tool_calls
         ],
@@ -709,6 +777,10 @@ async def tool(
                 {"run_id": str(run.id), **control.rendered_component},
                 source=f"oc8/run/{run.id}",
             )
+        if control.todos is not None:
+            # Whole-list replace, unlike rendered_components above -- this IS
+            # the current state, not a log of every call. See RunResult.todos.
+            ctx["todos"] = control.todos
     elif decision.effect is Effect.DENY:
         output = f"ERROR: {decision.reason or 'denied'}"
         dispatched = False
@@ -809,6 +881,16 @@ async def tool(
     transcript.append(
         _from_message(NeutralMessage(role="tool", content=output, tool_call_id=tc.id, name=tc.name))
     )
+    # Loop-hygiene guard, at parity with the in-process engine's own
+    # `_track_repeat` (engine.py's loop()) -- same shared track_repeat_tool_call,
+    # just persisted on run.context instead of a local closure variable, since
+    # this runtime drives one tool call per HTTP request with no in-memory state
+    # surviving between them.
+    ctx["repeat_tracker"], repeat_reminder = track_repeat_tool_call(
+        ctx.get("repeat_tracker", {}), tc
+    )
+    if repeat_reminder is not None:
+        transcript.append(_from_message(NeutralMessage(role="user", content=repeat_reminder)))
     ctx["transcript"] = transcript
     if suspend is not None:
         # The verdict the isolated runtime reads after the container exits, so the

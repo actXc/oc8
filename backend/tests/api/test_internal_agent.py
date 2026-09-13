@@ -1489,3 +1489,141 @@ async def test_step_reports_status_override_failed_when_still_truncated_after_re
             assert r.json()["status_override"] == "failed"
     # Exactly one retry, never an unbounded loop.
     assert calls["n"] == 2
+
+
+@pytest.mark.asyncio
+async def test_step_nudges_instead_of_finishing_when_todos_are_still_open(
+    app_session: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Container-parity proof for engine.py's todo-continuation gate: the
+    isolated runtime must never let the shell see an intermediate "no tool
+    calls yet" response while ctx["todos"] still has an open item. Here the
+    nudge works -- the model's next turn actually calls todo_write -- so the
+    internal retry loop hands that real tool call straight back to the shell
+    (only a genuine no-tool-calls attempt to finish gets nudged again;
+    dispatching a real tool call is /tool's job, not /step's)."""
+    from oc8.modelrouter.types import CompletionResult, Usage
+
+    calls = {"n": 0}
+
+    async def fake_complete(*args: object, **kw: object) -> CompletionResult:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return CompletionResult(
+                text="Ticket A is resolved.", tool_calls=[],
+                usage=Usage(tokens_in=100, tokens_out=20), stop_reason="stop",
+                provider="openrouter", model="z-ai/glm-5.3-flash",
+            )
+        assert "Resolve ticket B" in str(kw["messages"][-1].content)  # type: ignore[index]
+        return CompletionResult(
+            text="",
+            tool_calls=[
+                ToolCall(
+                    id="c1", name="todo_write",
+                    arguments={"todos": [{"content": "Resolve ticket B", "status": "completed"}]},
+                )
+            ],
+            usage=Usage(tokens_in=120, tokens_out=20), stop_reason="tool_calls",
+            provider="openrouter", model="z-ai/glm-5.3-flash",
+        )
+
+    monkeypatch.setattr(
+        "oc8.api.v1.internal_agent.stream_completion_with_fallback", _as_stream(fake_complete)
+    )
+
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:  # type: ignore[operator]
+        agent, _task, run = await _plain_agent_run(
+            db, tenant, todos=[{"content": "Resolve ticket B", "status": "pending"}]
+        )
+        agent_id, run_id = agent.id, run.id
+
+    token = _agent_token(tenant, agent_id, run_id)
+    from asgi_lifespan import LifespanManager
+    from httpx import ASGITransport, AsyncClient
+
+    from oc8 import models as m
+    from oc8.main import create_app
+
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.post(
+                f"/api/v1/internal/agent/{run_id}/step",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["done"] is False
+            assert body["tool_calls"] == [
+                {
+                    "id": "c1",
+                    "name": "todo_write",
+                    "arguments": {
+                        "todos": [{"content": "Resolve ticket B", "status": "completed"}]
+                    },
+                }
+            ]
+    # Both completions happened INSIDE this one /step call -- the shell
+    # never saw the round-1 "no tool calls" attempt.
+    assert calls["n"] == 2
+    async with app_session(tenant) as db:  # type: ignore[operator]
+        refetched = await db.get(m.AgentRun, run_id)
+        assert refetched is not None
+        # Each continuation round still counts as one ordinary step.
+        assert refetched.context["steps"] == 2
+
+
+@pytest.mark.asyncio
+async def test_step_round_cap_stops_nudging_and_lets_the_run_end(
+    app_session: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The isolated runtime's round cap must match engine.py's
+    TODO_CONTINUATION_MAX_ROUNDS exactly and, once spent, let the run end
+    anyway rather than nudging forever."""
+    from oc8.agent.engine import TODO_CONTINUATION_MAX_ROUNDS
+    from oc8.modelrouter.types import CompletionResult, Usage
+
+    calls = {"n": 0}
+
+    async def fake_complete(*args: object, **kw: object) -> CompletionResult:
+        calls["n"] += 1
+        return CompletionResult(
+            text="I'm done.", tool_calls=[],
+            usage=Usage(tokens_in=100, tokens_out=10), stop_reason="stop",
+            provider="openrouter", model="z-ai/glm-5.3-flash",
+        )
+
+    monkeypatch.setattr(
+        "oc8.api.v1.internal_agent.stream_completion_with_fallback", _as_stream(fake_complete)
+    )
+
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:  # type: ignore[operator]
+        agent, _task, run = await _plain_agent_run(
+            db, tenant, todos=[{"content": "Do the thing", "status": "pending"}]
+        )
+        agent_id, run_id = agent.id, run.id
+
+    token = _agent_token(tenant, agent_id, run_id)
+    from asgi_lifespan import LifespanManager
+    from httpx import ASGITransport, AsyncClient
+
+    from oc8.main import create_app
+
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.post(
+                f"/api/v1/internal/agent/{run_id}/step",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["done"] is True
+    # One initial finish attempt plus exactly TODO_CONTINUATION_MAX_ROUNDS
+    # nudged retries -- never unbounded -- all within this one /step call.
+    assert calls["n"] == 1 + TODO_CONTINUATION_MAX_ROUNDS
+    # A run that gave up must not read like one that finished cleanly.
+    assert "Do the thing" in body["text"]
+    assert "still open" in body["text"]

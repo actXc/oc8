@@ -130,12 +130,118 @@ class RunResult:
     # Every render_component call this run made, in call order -- see the
     # accumulator's own comment in run_agent for why this must be durable.
     rendered_components: list[dict[str, Any]] = field(default_factory=list)
+    # The agent's current to-do list (todo_write), whole-list-replace: this is
+    # the LATEST call's list, not a log of every call. Empty means the tool was
+    # never called this run, not that every item finished.
+    todos: list[dict[str, str]] = field(default_factory=list)
 
 
 def _call_sig(tc: ToolCall) -> str:
     """Stable signature of a tool call, so an approval decided on a suspended run
     can be matched to the same call when the run resumes and replays it."""
     return tc.name + "\n" + json.dumps(tc.arguments, sort_keys=True, default=str)
+
+
+#: Consecutive-identical-call counts that trigger a repeat-call reminder (see
+#: track_repeat_tool_call). The first is a short nudge; the later two spell out
+#: the tool, count and arguments -- by then a short nudge already failed once.
+REPEAT_CALL_THRESHOLDS = (3, 5, 8)
+_REPEAT_ARGS_PREVIEW_CHARS = 500
+
+
+def track_repeat_tool_call(
+    state: dict[str, Any], tc: ToolCall
+) -> tuple[dict[str, Any], str | None]:
+    """Advisory loop-hygiene guard: counts CONSECUTIVE calls to the same tool
+    with canonically-identical arguments (via _call_sig, so this agrees with the
+    approval-resume matcher on what "identical" means) and, once the count
+    crosses a threshold, returns a reminder to inject -- never blocks or
+    rewrites the call itself, only nudges the model to look at what it already
+    has instead of repeating itself.
+
+    Shared VERBATIM by the in-process engine (loop()'s own `_repeat_state`, a
+    plain local dict) and the isolated runtime's /tool endpoint (persisted on
+    run.context so it survives across that runtime's separate HTTP requests) --
+    see "container parity is not automatic": duplicating this logic instead of
+    sharing it is exactly how the two runtimes drift.
+
+    `state` is `{"sig": str | None, "count": int}` (JSON-serializable on
+    purpose, for the isolated runtime's context column) or `{}` for a fresh
+    run. Returns the updated state and the reminder text, or None if no
+    threshold was crossed this call.
+    """
+    sig = _call_sig(tc)
+    prior_count = state.get("count", 0) if state.get("sig") == sig else 0
+    count = prior_count + 1
+    new_state = {"sig": sig, "count": count}
+    if count not in REPEAT_CALL_THRESHOLDS:
+        return new_state, None
+    if count == REPEAT_CALL_THRESHOLDS[0]:
+        return new_state, (
+            "You are repeating the exact same tool call with identical "
+            "arguments. Carefully analyze the previous result before calling "
+            "again -- if it already answered your question, act on it instead "
+            "of repeating the call."
+        )
+    args_preview = json.dumps(tc.arguments, sort_keys=True, default=str)
+    if len(args_preview) > _REPEAT_ARGS_PREVIEW_CHARS:
+        args_preview = args_preview[: _REPEAT_ARGS_PREVIEW_CHARS - 1] + "…"
+    return new_state, (
+        f"You have now called '{tc.name}' {count} times in a row with the "
+        f"exact same arguments ({args_preview}). This strongly suggests you "
+        "are stuck in a loop. Stop and reconsider: either the result you "
+        "already have answers this, or the call cannot succeed and you should "
+        "try a different approach or explain the blocker instead of repeating it."
+    )
+
+
+#: Ported from DeepSeek Harness's goal-round-driver, adapted to oc8's bounded
+#: step loop: there is no separate session-level "goal" object here, no idle
+#: detection, and no multi-session resume -- a run is already one bounded
+#: execution with its own step budget. Reusing the already-model-facing
+#: `todo_write` list as the completion signal (instead of porting a whole
+#: goal domain/service/UI) is the Keep-It-Simple call: an agent that never
+#: calls todo_write gets zero behavior change, and one that does gets the
+#: harness refusing to let it stop while its own declared checklist still has
+#: open items -- directly the Kai bug pattern (a status report written with
+#: tickets still pending). Bounded independently of max_steps so a stubborn
+#: model cannot burn a whole run's budget on reminders alone; each round still
+#: also counts as one ordinary step against max_steps.
+TODO_CONTINUATION_MAX_ROUNDS = 3
+
+
+def todo_continuation_reminder(open_todos: list[dict[str, str]], round_no: int) -> str:
+    """Reminder injected when the model tries to finish a run while its own
+    todo_write list still has open (non-completed) items -- see
+    TODO_CONTINUATION_MAX_ROUNDS. Shared verbatim by the in-process engine and
+    the isolated runtime's /step endpoint, same reasoning as
+    track_repeat_tool_call above."""
+    lines = "\n".join(
+        f"- [{t.get('status', 'pending')}] {t.get('content', '')}" for t in open_todos
+    )
+    return (
+        f"You indicated you are finished, but {len(open_todos)} todo item(s) from your own "
+        f"todo_write list are still open (continuation round {round_no}/"
+        f"{TODO_CONTINUATION_MAX_ROUNDS}):\n{lines}\n"
+        "Continue working through them. If any are genuinely done, no longer applicable, "
+        "or blocked, call todo_write again to update their status and explain why before "
+        "finishing."
+    )
+
+
+def todo_continuation_exhausted_note(open_todos: list[dict[str, str]]) -> str:
+    """Appended to the run's own output when it ends with todo_write items still
+    open despite TODO_CONTINUATION_MAX_ROUNDS worth of nudging -- without this, a
+    run that gave up looks identical to one that genuinely finished everything.
+    Shared verbatim by the in-process engine and the isolated runtime's /step
+    endpoint, same reasoning as todo_continuation_reminder above."""
+    lines = "\n".join(
+        f"- [{t.get('status', 'pending')}] {t.get('content', '')}" for t in open_todos
+    )
+    return (
+        f"[Note: this run ended with {len(open_todos)} todo item(s) still open after "
+        f"{TODO_CONTINUATION_MAX_ROUNDS} continuation attempt(s):\n{lines}]"
+    )
 
 
 def _extract_value(
@@ -532,6 +638,9 @@ async def run_agent(
         # it: an unattended run (chat/cron) has no live viewer to catch that
         # event, so this is the only copy that survives past the moment it fired.
         rendered_components: list[dict[str, Any]] = []
+        # The latest todo_write call's list, replaced wholesale on every call
+        # (see RunResult.todos) -- not accumulated like rendered_components.
+        todos: list[dict[str, str]] = []
         session_state = {"started": False}
 
         def _hook_ctx(**extra: Any) -> dict[str, Any]:
@@ -583,10 +692,26 @@ async def run_agent(
                     copilot_permissions=copilot_permissions,
                 )
 
+            # Advisory loop-hygiene guard (track_repeat_tool_call, shared with the
+            # isolated runtime's /tool endpoint). Per-run, in-memory only: a
+            # fresh run_agent call (including a resumed/forked run) starts
+            # counting again from zero, an accepted heuristic cost rather than a
+            # durable, cross-run counter.
+            _repeat_state: dict[str, Any] = {}
+
+            def _track_repeat(tc: ToolCall) -> str | None:
+                nonlocal _repeat_state
+                _repeat_state, reminder = track_repeat_tool_call(_repeat_state, tc)
+                return reminder
+
             steps = 0
             checkpoint_trace_delta: list[dict[str, Any]] = []
             tokens_since_checkpoint = 0
             max_steps = _max_steps(agent)
+            # See todo_continuation_reminder: counts auto-continuation rounds
+            # separately from `steps` so it can be capped independently of
+            # max_steps, even though each round also consumes one step.
+            todo_continue_rounds = 0
             for steps in range(1, max_steps + 1):
                 if not session_state["started"]:
                     await dispatch_claude_event(
@@ -623,6 +748,7 @@ async def run_agent(
                         steps,
                         pending_runs,
                         rendered_components,
+                        todos,
                     )
                 # Operator chat (§ live steering): drain any messages an operator
                 # sent to this running agent and inject them as user turns, so the
@@ -810,15 +936,48 @@ async def run_agent(
                             steps,
                             pending_runs,
                             rendered_components,
+                            todos,
                         )
+
+                    open_todos = [t for t in todos if t.get("status") != "completed"]
+                    if open_todos and todo_continue_rounds < TODO_CONTINUATION_MAX_ROUNDS:
+                        # See todo_continuation_reminder: the model tried to finish
+                        # while its own checklist still has open items. Append its
+                        # (otherwise-dropped) turn plus the reminder and go around
+                        # again instead of returning "done" -- bounded on its own
+                        # cap, but each round still consumes one `steps` iteration.
+                        todo_continue_rounds += 1
+                        messages.append(
+                            NeutralMessage(role="assistant", content=result.text, tool_calls=[])
+                        )
+                        messages.append(
+                            NeutralMessage(
+                                role="user",
+                                content=todo_continuation_reminder(
+                                    open_todos, todo_continue_rounds
+                                ),
+                            )
+                        )
+                        continue
+
+                    # Reaching here with open_todos still set means the round
+                    # cap above was hit, not that everything got done -- say so
+                    # in the output instead of silently looking like a clean
+                    # finish (see todo_continuation_exhausted_note).
+                    output_text = result.text
+                    if open_todos:
+                        output_text = (
+                            f"{output_text}\n\n{todo_continuation_exhausted_note(open_todos)}"
+                        )
+
                     task.state = "done"
                     await record_activity(
                         db,
                         tenant_id=tenant_id,
                         agent_id=agent.id,
-                        status="success",
+                        status="warning" if open_todos else "success",
                         message=f"{agent.name} completed: {task_text[:80]}",
-                        detail=result.text[:500] or None,
+                        detail=output_text[:500] or None,
                         cache_hit=cached_result is not None,
                     )
                     await maybe_checkpoint(
@@ -837,11 +996,12 @@ async def run_agent(
                         task.id,
                         agent.id,
                         "done",
-                        result.text,
+                        output_text,
                         tool_trace,
                         steps,
                         pending_runs,
                         rendered_components,
+                        todos,
                     )
 
                 messages.append(
@@ -940,6 +1100,11 @@ async def run_agent(
                                     name=tc.name,
                                 )
                             )
+                            repeat_reminder = _track_repeat(tc)
+                            if repeat_reminder is not None:
+                                messages.append(
+                                    NeutralMessage(role="user", content=repeat_reminder)
+                                )
                             checkpoint_trace_delta.append(tool_trace[-1])
                             await dispatch_claude_event(
                                 tenant_id,
@@ -1039,6 +1204,7 @@ async def run_agent(
                                 steps,
                                 pending_runs,
                                 rendered_components,
+                                todos,
                             )
 
                         _tool_call_started_at = dt.datetime.now(dt.UTC)
@@ -1089,6 +1255,14 @@ async def run_agent(
                                     {"run_id": str(run_id), **control.rendered_component},
                                     source=f"oc8/run/{run_id}",
                                 )
+                            if control.todos is not None:
+                                # Slice-assign (not `todos = control.todos`): this
+                                # closure only ever mutates the outer `todos` list
+                                # in place, the same convention as pending_runs/
+                                # rendered_components above -- a rebind here would
+                                # need `nonlocal` and every RunResult below already
+                                # closes over the one list object.
+                                todos[:] = control.todos
                             if control.suspend == "waiting_for_input":
                                 task.state = "waiting_for_input"
                                 return RunResult(
@@ -1100,6 +1274,7 @@ async def run_agent(
                                     steps,
                                     pending_runs,
                                     rendered_components,
+                                    todos,
                                 )
                         elif decision.effect is Effect.DENY or server is None:
                             output = f"ERROR: {decision.reason or 'no tool server available'}"
@@ -1160,6 +1335,9 @@ async def run_agent(
                                 role="tool", content=output, tool_call_id=tc.id, name=tc.name
                             )
                         )
+                        repeat_reminder = _track_repeat(tc)
+                        if repeat_reminder is not None:
+                            messages.append(NeutralMessage(role="user", content=repeat_reminder))
                         checkpoint_trace_delta.append(tool_trace[-1])
                         post_event = (
                             "PostToolUseFailure" if output.startswith("ERROR:") else "PostToolUse"
@@ -1218,6 +1396,7 @@ async def run_agent(
                 steps,
                 pending_runs,
                 rendered_components,
+                todos,
             )
 
         async def _run_with_session_end() -> RunResult:
