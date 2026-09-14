@@ -148,25 +148,14 @@ switch ($Mode) {
 
 # --- Optional custom domain for automatic HTTPS. Skipped in Dev mode: that
 # mode's login has no password, so it must never be reachable off localhost.
-# Always asks interactively, even if .env already has one -- a checkout
-# reused for a different host/mode must not silently inherit the old domain.
+# Always asks interactively, with no default -- a checkout reused for a
+# different host/mode must not silently inherit or suggest an old domain.
 if ($Mode -ne "dev") {
   $existingDomain = Get-EnvValue "OC8_DOMAIN"
   $domain = $env:OC8_QUICKSTART_DOMAIN
   if ([string]::IsNullOrWhiteSpace($domain) -and (Test-Interactive)) {
-    if (-not [string]::IsNullOrWhiteSpace($existingDomain)) {
-      $domainInput = Read-Host "Custom domain for automatic HTTPS [$existingDomain, '-' to clear]"
-      if ([string]::IsNullOrWhiteSpace($domainInput)) {
-        $domain = $existingDomain
-      } elseif ($domainInput -eq "-") {
-        $domain = ""
-      } else {
-        $domain = $domainInput
-      }
-    } else {
-      $domain = Read-Host "Custom domain for automatic HTTPS (leave empty for plain HTTP)"
-    }
-  } elseif ([string]::IsNullOrWhiteSpace($domain)) {
+    $domain = Read-Host "Custom domain for automatic HTTPS (leave empty for plain HTTP)"
+  } elseif ([string]::IsNullOrWhiteSpace($domain) -and -not (Test-Interactive)) {
     $domain = $existingDomain
   }
   if (-not [string]::IsNullOrWhiteSpace($domain)) {

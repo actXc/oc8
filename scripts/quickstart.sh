@@ -166,25 +166,14 @@ esac
 
 # --- Optional custom domain for automatic HTTPS. Skipped in Dev mode: that
 # mode's login has no password, so it must never be reachable off localhost.
-# Always asks interactively, even if .env already has one -- a checkout
-# reused for a different host/mode must not silently inherit the old domain.
+# Always asks interactively, with no default -- a checkout reused for a
+# different host/mode must not silently inherit or suggest an old domain.
 if [[ "$MODE" != "dev" ]]; then
   existing_domain="$(env_value OC8_DOMAIN)"
   domain="${OC8_QUICKSTART_DOMAIN:-}"
   if [[ -z "$domain" ]] && is_interactive; then
-    if [[ -n "$existing_domain" ]]; then
-      read -r -p "Custom domain for automatic HTTPS [${existing_domain}, '-' to clear]: " domain_input
-      if [[ -z "$domain_input" ]]; then
-        domain="$existing_domain"
-      elif [[ "$domain_input" == "-" ]]; then
-        domain=""
-      else
-        domain="$domain_input"
-      fi
-    else
-      read -r -p 'Custom domain for automatic HTTPS (leave empty for plain HTTP): ' domain
-    fi
-  elif [[ -z "$domain" ]]; then
+    read -r -p 'Custom domain for automatic HTTPS (leave empty for plain HTTP): ' domain
+  elif [[ -z "$domain" ]] && ! is_interactive; then
     domain="$existing_domain"
   fi
   if [[ -n "$domain" ]]; then
