@@ -21,7 +21,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { departmentById } from "@/lib/mock-data";
 import {
   flowToYaml,
   validateFlowContracts,
@@ -446,19 +445,32 @@ function StatusBadge({ s }: { s: FlowDef["status"] }) {
   );
 }
 
+// Deterministic accent hue from a department's name, purely cosmetic --
+// departments here only ever arrive as already-resolved display-name
+// strings (see mapFlow), not ids, so there is no record to look up.
+function hashHue(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+  return h;
+}
+
+function deptAccent(name: string): string {
+  return `oklch(0.75 0.15 ${hashHue(name)})`;
+}
+
 function DeptChip({ id }: { id: string }) {
-  const d = departmentById(id);
+  const accent = deptAccent(id);
   return (
     <span
       className="inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px]"
       style={{
-        borderColor: `color-mix(in oklab, ${d?.accent ?? "var(--primary)"} 40%, transparent)`,
-        color: d?.accent,
-        background: `color-mix(in oklab, ${d?.accent ?? "var(--primary)"} 10%, transparent)`,
+        borderColor: `color-mix(in oklab, ${accent} 40%, transparent)`,
+        color: accent,
+        background: `color-mix(in oklab, ${accent} 10%, transparent)`,
       }}
     >
       <Building2 className="h-2.5 w-2.5" />
-      {d?.name ?? id}
+      {id}
     </span>
   );
 }
@@ -480,27 +492,27 @@ function FlowCanvas({
     <div className="p-6">
       <div className="mb-6 grid grid-cols-3 gap-4">
         {rooms.map((id) => {
-          const d = departmentById(id);
+          const accent = deptAccent(id);
           return (
             <div
               key={id}
               className="rounded-xl border border-border bg-background/40 p-3"
               style={{
-                borderColor: `color-mix(in oklab, ${d?.accent ?? "var(--primary)"} 30%, var(--border))`,
+                borderColor: `color-mix(in oklab, ${accent} 30%, var(--border))`,
               }}
             >
               <div className="flex items-center gap-2">
                 <div
                   className="grid h-8 w-8 place-items-center rounded-md"
                   style={{
-                    background: `color-mix(in oklab, ${d?.accent} 22%, transparent)`,
-                    color: d?.accent,
+                    background: `color-mix(in oklab, ${accent} 22%, transparent)`,
+                    color: accent,
                   }}
                 >
                   <Building2 className="h-4 w-4" />
                 </div>
                 <div>
-                  <div className="font-serif text-sm">{d?.name}</div>
+                  <div className="font-serif text-sm">{id}</div>
                   <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
                     Room
                   </div>
@@ -514,8 +526,8 @@ function FlowCanvas({
       <div className="space-y-3">
         {flow.stages.map((st) => {
           const invalid = problemMap[st.id];
-          const src = departmentById(st.sourceDept);
-          const tgt = departmentById(st.targetDept);
+          const srcAccent = deptAccent(st.sourceDept);
+          const tgtAccent = deptAccent(st.targetDept);
           return (
             <div
               key={st.id}
@@ -527,9 +539,9 @@ function FlowCanvas({
             >
               <span
                 className="rounded-md border border-border bg-background/40 px-2 py-1 text-xs"
-                style={{ color: src?.accent }}
+                style={{ color: srcAccent }}
               >
-                {src?.name}
+                {st.sourceDept}
               </span>
               <ArrowRight
                 className={cn(
@@ -555,16 +567,15 @@ function FlowCanvas({
               </div>
               <span
                 className="rounded-md border border-border bg-background/40 px-2 py-1 text-xs"
-                style={{ color: tgt?.accent }}
+                style={{ color: tgtAccent }}
               >
-                {tgt?.name}
+                {st.targetDept}
               </span>
             </div>
           );
         })}
 
         {flow.compensations.map((c) => {
-          const tgt = departmentById(c.toDept);
           return (
             <div
               key={c.from}
@@ -580,7 +591,7 @@ function FlowCanvas({
               <ArrowRight className="h-4 w-4" />
               <span className="font-mono">{c.type}</span>
               <ArrowRight className="h-4 w-4" />
-              <span>{tgt?.name}</span>
+              <span>{c.toDept}</span>
             </div>
           );
         })}

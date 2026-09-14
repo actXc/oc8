@@ -18,7 +18,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { Panel } from "@/components/app-shell";
-import { agents, departments, type Agent, type Department } from "@/lib/mock-data";
+import type { Agent, Department } from "@/lib/mock-data";
 import {
   convert,
   currentSpendForLimit,
@@ -860,6 +860,8 @@ function LimitsTab({ currency }: { currency: Currency }) {
   const [pricing] = usePricing();
   const [limits, setLimits] = useLimits();
   const [addOpen, setAddOpen] = useState(false);
+  const { data: agentsPage } = useAgents({ pageSize: 200 });
+  const { data: departmentsPage } = useDepartments({ pageSize: 200 });
 
   const update = (id: string, patch: Partial<CostLimit>) => {
     setLimits(limits.map((l) => (l.id === id ? { ...l, ...patch } : l)));
@@ -882,9 +884,10 @@ function LimitsTab({ currency }: { currency: Currency }) {
   ];
 
   const targetLabel = (l: CostLimit) => {
-    if (l.scope === "agent") return agents.find((a) => a.id === l.targetId)?.name ?? l.targetId;
+    if (l.scope === "agent")
+      return agentsPage?.items?.find((a) => a.id === l.targetId)?.name ?? l.targetId;
     if (l.scope === "department")
-      return departments.find((d) => d.id === l.targetId)?.name ?? l.targetId;
+      return departmentsPage?.items?.find((d) => d.id === l.targetId)?.name ?? l.targetId;
     return l.targetId;
   };
 
@@ -1371,11 +1374,13 @@ function TargetSelect({
   onChange: (v: string) => void;
 }) {
   const [pricing] = usePricing();
+  const { data: agentsPage } = useAgents({ pageSize: 200 });
+  const { data: departmentsPage } = useDepartments({ pageSize: 200 });
   const options =
     scope === "agent"
-      ? agents.map((a) => ({ id: a.id, label: `${a.name} · ${a.role}` }))
+      ? (agentsPage?.items ?? []).map((a) => ({ id: a.id, label: `${a.name} · ${a.role}` }))
       : scope === "department"
-        ? departments.map((d) => ({ id: d.id, label: d.name }))
+        ? (departmentsPage?.items ?? []).map((d) => ({ id: d.id, label: d.name }))
         : pricing.map((p) => ({ id: p.id, label: p.id }));
   return (
     <select
@@ -1402,13 +1407,26 @@ function AddLimitDialog({
 }) {
   const t = useT();
   const [pricing] = usePricing();
+  const { data: agentsPage } = useAgents({ pageSize: 200 });
+  const { data: departmentsPage } = useDepartments({ pageSize: 200 });
   const [scope, setScope] = useState<LimitScope>("agent");
   const defaultTarget = (s: LimitScope) =>
-    s === "agent" ? agents[0].id : s === "department" ? departments[0].id : (pricing[0]?.id ?? "");
+    s === "agent"
+      ? (agentsPage?.items?.[0]?.id ?? "")
+      : s === "department"
+        ? (departmentsPage?.items?.[0]?.id ?? "")
+        : (pricing[0]?.id ?? "");
   const [targetId, setTargetId] = useState<string>(defaultTarget("agent"));
   const [amount, setAmount] = useState(100);
   const [period, setPeriod] = useState<LimitPeriod>("monthly");
   const [action, setAction] = useState<LimitAction>("notify");
+
+  // Agents/departments load async; backfill the default target once they
+  // arrive if the user hasn't picked one yet.
+  useEffect(() => {
+    if (!targetId) setTargetId(defaultTarget(scope));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentsPage, departmentsPage]);
 
   return (
     <div
