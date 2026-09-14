@@ -43,11 +43,26 @@ The script will:
 
 1. Check that Docker (or Podman) is running
 2. Create `.env` from `.env.example` if missing
-3. Generate secrets (`OC8_JWT_SECRET`, `OC8_SECRET_KEK`, `POSTGRES_PASSWORD`)
-4. Build and start all services (Postgres, Redis, API, workers, frontend, Caddy)
-5. Wait until `/health` responds
-6. Print the URL to open in your browser (usually `http://localhost/` or a
-   custom port if 80 is taken)
+3. Ask which **mode** to run:
+   - **Community** (default) — empty instance, real password setup — this is
+     what the rest of this guide assumes
+   - **Demo** — seeded bilingual ACME showcase data behind a real password
+     login; also offers a custom domain for automatic HTTPS (good for a
+     hosted walkthrough, e.g. `demo.yourcompany.com` — point DNS at the host
+     first)
+   - **Dev** — seeded ACME data with an unauthenticated instant login;
+     localhost only, never expose this
+4. Generate secrets (`OC8_JWT_SECRET`, `OC8_SECRET_KEK`, `POSTGRES_PASSWORD`,
+   and for Demo mode, the demo login password)
+5. Build and start all services (Postgres, Redis, API, workers, frontend, Caddy)
+6. Wait until `/health` responds
+7. Print the URL to open in your browser (usually `http://localhost/`, your
+   custom domain, or a custom port if 80 is taken)
+
+Running from a script or CI (no terminal attached) skips the prompts and
+defaults to Community mode with no domain — set `OC8_QUICKSTART_MODE`
+(`community`/`demo`/`dev`) and `OC8_QUICKSTART_DOMAIN` beforehand to choose
+without being asked.
 
 **Manual alternative** (same result, more control):
 

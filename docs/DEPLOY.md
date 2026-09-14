@@ -92,11 +92,18 @@ For a **hosted product walkthrough** (seeded bilingual ACME data behind a real
 password login, no open `dev-login`), set `OC8_DEMO_PASSWORD` in `.env` (min 8
 chars) and bring the stack up with the demo override:
 `docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --build`.
-Sign in as `OC8_DEMO_EMAIL` (default `demo@oc8.ai`) with that password.
+Sign in as `OC8_DEMO_EMAIL` (default `demo@oc8.ai`) with that password. Add a
+custom domain (`OC8_DOMAIN` in `.env`) for automatic HTTPS — see the HTTPS
+section below; point DNS at the host first.
 
 For a **local hacking** stack — seeded ACME and unauthenticated `dev-login`,
 never on a reachable host — use the dev override instead:
 `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build`.
+
+`scripts/quickstart.sh`/`.ps1` wrap all three of the above (Community, Demo,
+Dev) behind one interactive prompt — including the custom-domain question —
+instead of hand-picking `-f` files and editing `.env`; see
+[Quickstart](user/quickstart.md).
 
 ## Giving agents a model
 

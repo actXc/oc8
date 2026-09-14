@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
-# Start a safe local oc8 Community evaluation instance on macOS or Linux.
+# Start a safe local oc8 evaluation instance on macOS or Linux.
 # It creates only missing local secrets and never resets containers or volumes.
+#
+# Interactive by default: asks which operating mode to run (Community, Demo,
+# or Dev) and, for Community/Demo, an optional custom domain for automatic
+# HTTPS. Both can be preset for scripted/non-interactive runs via
+# OC8_QUICKSTART_MODE (community|demo|dev) and OC8_QUICKSTART_DOMAIN -- when
+# stdin isn't a terminal and neither is set, it falls back to the previous
+# non-interactive default: Community mode, no domain.
 
 set -euo pipefail
 
@@ -81,14 +88,13 @@ env_value() {
   awk -F= -v key="$1" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' .env
 }
 
-set_env_value_if_missing() {
+# Unconditional overwrite (or append if the key is missing entirely). Only
+# used below for values the user just typed at a prompt -- everything else
+# in this script goes through set_env_value_if_missing so a rerun never
+# clobbers what's already in .env.
+set_env_value() {
   local key="$1"
   local value="$2"
-  local current
-  current="$(env_value "$key")"
-  if [[ -n "$current" ]]; then
-    return
-  fi
 
   local temp_env
   temp_env="$(mktemp "${TMPDIR:-/tmp}/oc8-env.XXXXXX")"
@@ -100,8 +106,109 @@ set_env_value_if_missing() {
   ' .env > "$temp_env"
   mv "$temp_env" .env
   chmod 600 .env 2>/dev/null || true
+}
+
+set_env_value_if_missing() {
+  local key="$1"
+  local value="$2"
+  local current
+  current="$(env_value "$key")"
+  if [[ -n "$current" ]]; then
+    return
+  fi
+  set_env_value "$key" "$value"
   printf 'Generated %s in .env.\n' "$key"
 }
+
+is_interactive() {
+  [[ -t 0 && -t 1 ]]
+}
+
+# --- Operating mode: Community (empty, real password setup), Demo (seeded
+# ACME showcase behind real password login), or Dev (seeded ACME + instant
+# unauthenticated login, localhost only). Each maps to a docker-compose.yml
+# + override combination -- see docker-compose.demo.yml/docker-compose.dev.yml
+# for exactly what each one changes.
+MODE="${OC8_QUICKSTART_MODE:-}"
+if [[ -z "$MODE" ]]; then
+  if is_interactive; then
+    printf '\nWhich operating mode do you want to run?\n'
+    printf '  1) Prod      — empty instance, real password setup (recommended)\n'
+    printf '  2) Demo      — seeded bilingual ACME showcase data behind a real password login\n'
+    printf '  3) Dev       — seeded ACME data + instant unauthenticated login (localhost only, never expose)\n'
+    read -r -p 'Choice [1]: ' mode_choice
+    case "${mode_choice:-1}" in
+      1|"") MODE="community" ;;
+      2) MODE="demo" ;;
+      3) MODE="dev" ;;
+      *) fail "Invalid choice: ${mode_choice}" ;;
+    esac
+  else
+    MODE="community"
+  fi
+fi
+case "$MODE" in
+  community|demo|dev) ;;
+  *) fail "OC8_QUICKSTART_MODE must be 'community', 'demo', or 'dev', got '$MODE'." ;;
+esac
+
+COMPOSE_FILES=(-f docker-compose.yml)
+case "$MODE" in
+  demo)
+    COMPOSE_FILES+=(-f docker-compose.demo.yml)
+    printf 'Demo mode: seeded ACME showcase data behind a real password login.\n'
+    ;;
+  dev)
+    COMPOSE_FILES+=(-f docker-compose.dev.yml)
+    printf 'Dev mode: instant unauthenticated admin login. LOCALHOST ONLY -- never expose this to a network.\n'
+    ;;
+esac
+
+# --- Optional custom domain for automatic HTTPS. Skipped in Dev mode: that
+# mode's login has no password, so it must never be reachable off localhost.
+if [[ "$MODE" != "dev" ]]; then
+  existing_domain="$(env_value OC8_DOMAIN)"
+  if [[ -n "$existing_domain" ]]; then
+    printf 'Using existing domain from .env: %s\n' "$existing_domain"
+  else
+    domain="${OC8_QUICKSTART_DOMAIN:-}"
+    if [[ -z "$domain" ]] && is_interactive; then
+      read -r -p 'Custom domain for automatic HTTPS (leave empty for plain HTTP): ' domain
+    fi
+    if [[ -n "$domain" ]]; then
+      printf 'Point DNS for %s at this host before continuing, or certificate issuance will fail.\n' "$domain"
+      set_env_value "OC8_DOMAIN" "$domain"
+      current_base_url="$(env_value OC8_FRONTEND_BASE_URL)"
+      if [[ -z "$current_base_url" || "$current_base_url" == "http://localhost" ]]; then
+        set_env_value "OC8_FRONTEND_BASE_URL" "https://${domain}"
+      else
+        printf 'Note: OC8_FRONTEND_BASE_URL is already set to %s -- leaving it, but it should probably be https://%s.\n' "$current_base_url" "$domain"
+      fi
+    fi
+  fi
+fi
+
+# --- Demo mode's password login (compose.demo.yml requires OC8_DEMO_PASSWORD).
+if [[ "$MODE" == "demo" ]]; then
+  existing_demo_password="$(env_value OC8_DEMO_PASSWORD)"
+  if [[ -z "$existing_demo_password" ]]; then
+    demo_password="${OC8_QUICKSTART_DEMO_PASSWORD:-}"
+    if [[ -z "$demo_password" ]] && is_interactive; then
+      read -r -s -p 'Demo login password (min 8 chars, leave empty to auto-generate): ' demo_password
+      printf '\n'
+    fi
+    if [[ -z "$demo_password" ]]; then
+      demo_password="$(openssl rand -base64 18)"
+      printf 'Generated demo password: %s\n' "$demo_password"
+      printf '(save this now -- it is only shown this once)\n'
+    elif [[ "${#demo_password}" -lt 8 ]]; then
+      fail "Demo password must be at least 8 characters."
+    fi
+    set_env_value "OC8_DEMO_PASSWORD" "$demo_password"
+  fi
+  demo_email="$(env_value OC8_DEMO_EMAIL)"
+  printf 'Demo sign-in address: %s\n' "${demo_email:-demo@oc8.ai}"
+fi
 
 set_env_value_if_missing "OC8_JWT_SECRET" "$(openssl rand -hex 32)"
 set_env_value_if_missing "OC8_SECRET_KEK" "$(openssl rand -base64 32 | tr -d '\n')"
@@ -115,24 +222,29 @@ if [[ "$CONTAINER_RUNTIME" == "podman" ]]; then
   set_env_value_if_missing "OC8_CONTAINER_SOCKET" "$podman_socket"
 fi
 
-printf '\nBuilding and starting oc8 Community…\n'
+printf '\nBuilding and starting oc8 (%s mode)…\n' "$MODE"
 if [[ "$CONTAINER_RUNTIME" == "docker" ]]; then
-  docker compose up -d --build
+  docker compose "${COMPOSE_FILES[@]}" up -d --build
 else
-  "${COMPOSE_CMD[@]}" up -d --build
+  "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" up -d --build
 fi
 
-port_mapping="$(env_value OC8_HTTP_PORT)"
-port_mapping="${port_mapping:-80}"
-if [[ "$port_mapping" == *:* ]]; then
-  host="${port_mapping%:*}"
-  port="${port_mapping##*:}"
-  # `0.0.0.0` is a listen address, not an address a local browser can request.
-  [[ "$host" == "0.0.0.0" || "$host" == "::" ]] && host="127.0.0.1"
-  url="http://${host}:${port}"
+domain_in_env="$(env_value OC8_DOMAIN)"
+if [[ -n "$domain_in_env" ]]; then
+  url="https://${domain_in_env}"
 else
-  url="http://localhost"
-  [[ "$port_mapping" != "80" ]] && url="${url}:${port_mapping}"
+  port_mapping="$(env_value OC8_HTTP_PORT)"
+  port_mapping="${port_mapping:-80}"
+  if [[ "$port_mapping" == *:* ]]; then
+    host="${port_mapping%:*}"
+    port="${port_mapping##*:}"
+    # `0.0.0.0` is a listen address, not an address a local browser can request.
+    [[ "$host" == "0.0.0.0" || "$host" == "::" ]] && host="127.0.0.1"
+    url="http://${host}:${port}"
+  else
+    url="http://localhost"
+    [[ "$port_mapping" != "80" ]] && url="${url}:${port_mapping}"
+  fi
 fi
 
 printf '\nWaiting for %s/health …\n' "$url"
@@ -146,12 +258,19 @@ if command -v curl >/dev/null 2>&1; then
     sleep 2
   done
   if [[ "$ready" -ne 1 ]]; then
-    "${COMPOSE_CMD[@]}" ps
-    fail "oc8 did not become healthy in time. Inspect: ${COMPOSE_CMD[*]} logs -f backend"
+    "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" ps
+    fail "oc8 did not become healthy in time. Inspect: ${COMPOSE_CMD[*]} ${COMPOSE_FILES[*]} logs -f backend"
   fi
 fi
 
-printf '\n✓ oc8 Community is running at %s\n' "$url"
-printf 'Next: open the URL and create the local administrator account.\n'
+printf '\n✓ oc8 (%s mode) is running at %s\n' "$MODE" "$url"
+case "$MODE" in
+  community) printf 'Next: open the URL and create the local administrator account.\n' ;;
+  demo) printf 'Next: sign in as %s with the password shown above (or already in .env).\n' "${demo_email:-demo@oc8.ai}" ;;
+  dev) printf 'Next: open the URL -- dev-login signs you in as org_admin with no password.\n' ;;
+esac
 printf 'Logs: %s logs -f backend\n' "${COMPOSE_CMD[*]}"
 printf 'Stop later (keeps data): %s stop\n' "${COMPOSE_CMD[*]}"
+if [[ "$MODE" != "community" ]]; then
+  printf 'Restart later in the same mode: %s %s up -d\n' "${COMPOSE_CMD[*]}" "${COMPOSE_FILES[*]}"
+fi

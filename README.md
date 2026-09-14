@@ -180,19 +180,19 @@ cd oc8
 ./scripts/quickstart.ps1
 ```
 
-The scripts check Docker, create missing `.env` secrets without overwriting
-existing values, build and start the stack, wait for its health endpoint, and
-print the local URL. A fresh installation opens the local administrator setup
-wizard. Then configure a model, create an agent, and run a first task.
+The scripts check Docker, ask which mode to run (**Community** — empty, real
+password setup; **Demo** — seeded bilingual ACME showcase behind a real
+password login, good for a hosted walkthrough on a custom domain; or **Dev** —
+seeded ACME data with an unauthenticated instant login, localhost only, never
+expose it), create missing `.env` secrets without overwriting existing values,
+build and start the stack, wait for its health endpoint, and print the URL. A
+fresh Community installation opens the local administrator setup wizard. Then
+configure a model, create an agent, and run a first task.
 
-For local demo data only:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
-```
-
-The development override enables demo data and an unauthenticated development
-login. Never expose it on a network-reachable host.
+Non-interactive/scripted runs (no terminal attached) default to Community mode
+with no custom domain, same as before — set `OC8_QUICKSTART_MODE`
+(`community`/`demo`/`dev`) and `OC8_QUICKSTART_DOMAIN` to preset the answers
+instead of being prompted.
 
 ## Your first automation
 

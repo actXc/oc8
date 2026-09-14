@@ -1,5 +1,12 @@
-# Start a safe local oc8 Community evaluation instance on Windows.
+# Start a safe local oc8 evaluation instance on Windows.
 # It creates only missing local secrets and never resets containers or volumes.
+#
+# Interactive by default: asks which operating mode to run (Community, Demo,
+# or Dev) and, for Community/Demo, an optional custom domain for automatic
+# HTTPS. Both can be preset for scripted/non-interactive runs via
+# $env:OC8_QUICKSTART_MODE (community|demo|dev) and $env:OC8_QUICKSTART_DOMAIN
+# -- when stdin isn't a terminal and neither is set, it falls back to the
+# previous non-interactive default: Community mode, no domain.
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
@@ -29,8 +36,11 @@ function Get-EnvValue([string]$Key) {
   return $line.Substring($Key.Length + 1)
 }
 
-function Set-EnvValueIfMissing([string]$Key, [string]$Value) {
-  if (-not [string]::IsNullOrWhiteSpace((Get-EnvValue $Key))) { return }
+# Unconditional overwrite (or append if the key is missing entirely). Only
+# used below for values the user just typed at a prompt -- everything else
+# in this script goes through Set-EnvValueIfMissing so a rerun never
+# clobbers what's already in .env.
+function Set-EnvValue([string]$Key, [string]$Value) {
   $lines = @(Get-Content ".env")
   $pattern = "^$([regex]::Escape($Key))="
   $found = $false
@@ -44,7 +54,16 @@ function Set-EnvValueIfMissing([string]$Key, [string]$Value) {
   }
   if (-not $found) { $updated += "$Key=$Value" }
   Set-Content -Path ".env" -Value $updated -Encoding utf8
+}
+
+function Set-EnvValueIfMissing([string]$Key, [string]$Value) {
+  if (-not [string]::IsNullOrWhiteSpace((Get-EnvValue $Key))) { return }
+  Set-EnvValue $Key $Value
   Write-Host "Generated $Key in .env."
+}
+
+function Test-Interactive {
+  return -not [System.Console]::IsInputRedirected
 }
 
 function Resolve-ContainerRuntime {
@@ -88,6 +107,94 @@ if (-not (Test-Path ".env")) {
   Write-Host "Using existing .env; non-empty values will not be changed."
 }
 
+# --- Operating mode: Community (empty, real password setup), Demo (seeded
+# ACME showcase behind real password login), or Dev (seeded ACME + instant
+# unauthenticated login, localhost only). Each maps to a docker-compose.yml
+# + override combination -- see docker-compose.demo.yml/docker-compose.dev.yml
+# for exactly what each one changes.
+$Mode = $env:OC8_QUICKSTART_MODE
+if ([string]::IsNullOrWhiteSpace($Mode)) {
+  if (Test-Interactive) {
+    Write-Host "`nWhich operating mode do you want to run?"
+    Write-Host "  1) Prod - empty instance, real password setup (recommended)"
+    Write-Host "  2) Demo      - seeded bilingual ACME showcase data behind a real password login"
+    Write-Host "  3) Dev       - seeded ACME data + instant unauthenticated login (localhost only, never expose)"
+    $modeChoice = Read-Host "Choice [1]"
+    switch ($modeChoice) {
+      { $_ -in @("1", "") } { $Mode = "community" }
+      "2" { $Mode = "demo" }
+      "3" { $Mode = "dev" }
+      default { Fail "Invalid choice: $modeChoice" }
+    }
+  } else {
+    $Mode = "community"
+  }
+}
+if ($Mode -notin @("community", "demo", "dev")) {
+  Fail "OC8_QUICKSTART_MODE must be 'community', 'demo', or 'dev', got '$Mode'."
+}
+
+$ComposeFiles = @("-f", "docker-compose.yml")
+switch ($Mode) {
+  "demo" {
+    $ComposeFiles += @("-f", "docker-compose.demo.yml")
+    Write-Host "Demo mode: seeded ACME showcase data behind a real password login."
+  }
+  "dev" {
+    $ComposeFiles += @("-f", "docker-compose.dev.yml")
+    Write-Host "Dev mode: instant unauthenticated admin login. LOCALHOST ONLY -- never expose this to a network."
+  }
+}
+
+# --- Optional custom domain for automatic HTTPS. Skipped in Dev mode: that
+# mode's login has no password, so it must never be reachable off localhost.
+if ($Mode -ne "dev") {
+  $existingDomain = Get-EnvValue "OC8_DOMAIN"
+  if (-not [string]::IsNullOrWhiteSpace($existingDomain)) {
+    Write-Host "Using existing domain from .env: $existingDomain"
+  } else {
+    $domain = $env:OC8_QUICKSTART_DOMAIN
+    if ([string]::IsNullOrWhiteSpace($domain) -and (Test-Interactive)) {
+      $domain = Read-Host "Custom domain for automatic HTTPS (leave empty for plain HTTP)"
+    }
+    if (-not [string]::IsNullOrWhiteSpace($domain)) {
+      Write-Host "Point DNS for $domain at this host before continuing, or certificate issuance will fail."
+      Set-EnvValue "OC8_DOMAIN" $domain
+      $currentBaseUrl = Get-EnvValue "OC8_FRONTEND_BASE_URL"
+      if ([string]::IsNullOrWhiteSpace($currentBaseUrl) -or $currentBaseUrl -eq "http://localhost") {
+        Set-EnvValue "OC8_FRONTEND_BASE_URL" "https://$domain"
+      } else {
+        Write-Host "Note: OC8_FRONTEND_BASE_URL is already set to $currentBaseUrl -- leaving it, but it should probably be https://$domain."
+      }
+    }
+  }
+}
+
+# --- Demo mode's password login (compose.demo.yml requires OC8_DEMO_PASSWORD).
+$DemoEmail = "demo@oc8.ai"
+if ($Mode -eq "demo") {
+  $existingDemoPassword = Get-EnvValue "OC8_DEMO_PASSWORD"
+  if ([string]::IsNullOrWhiteSpace($existingDemoPassword)) {
+    $demoPassword = $env:OC8_QUICKSTART_DEMO_PASSWORD
+    if ([string]::IsNullOrWhiteSpace($demoPassword) -and (Test-Interactive)) {
+      $secure = Read-Host "Demo login password (min 8 chars, leave empty to auto-generate)" -AsSecureString
+      $demoPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto(
+        [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
+    }
+    if ([string]::IsNullOrWhiteSpace($demoPassword)) {
+      $demoPassword = New-Base64Secret 18
+      Write-Host "Generated demo password: $demoPassword"
+      Write-Host "(save this now -- it is only shown this once)"
+    } elseif ($demoPassword.Length -lt 8) {
+      Fail "Demo password must be at least 8 characters."
+    }
+    Set-EnvValue "OC8_DEMO_PASSWORD" $demoPassword
+  }
+  $envDemoEmail = Get-EnvValue "OC8_DEMO_EMAIL"
+  if (-not [string]::IsNullOrWhiteSpace($envDemoEmail)) { $DemoEmail = $envDemoEmail }
+  Write-Host "Demo sign-in address: $DemoEmail"
+}
+
 Set-EnvValueIfMissing "OC8_JWT_SECRET" (New-HexSecret 32)
 Set-EnvValueIfMissing "OC8_SECRET_KEK" (New-Base64Secret 32)
 Set-EnvValueIfMissing "POSTGRES_PASSWORD" (New-HexSecret 24)
@@ -102,22 +209,27 @@ if ($ContainerRuntime -eq "podman") {
   Set-EnvValueIfMissing "OC8_CONTAINER_SOCKET" $PodmanSocket
 }
 
-Write-Host "`nBuilding and starting oc8 Community…"
+Write-Host "`nBuilding and starting oc8 ($Mode mode)…"
 if ($ContainerRuntime -eq "docker") {
-  docker compose up -d --build
+  docker compose @ComposeFiles up -d --build
 } else {
-  & $ComposeCmd[0] $ComposeCmd[1] up -d --build
+  & $ComposeCmd[0] $ComposeCmd[1] @ComposeFiles up -d --build
 }
 
-$portMapping = Get-EnvValue "OC8_HTTP_PORT"
-if ([string]::IsNullOrWhiteSpace($portMapping)) { $portMapping = "80" }
-if ($portMapping.Contains(":")) {
-  $host, $port = $portMapping -split ":", 2
-  if ($host -eq "0.0.0.0" -or $host -eq "::") { $host = "127.0.0.1" }
-  $url = "http://${host}:$port"
+$domainInEnv = Get-EnvValue "OC8_DOMAIN"
+if (-not [string]::IsNullOrWhiteSpace($domainInEnv)) {
+  $url = "https://$domainInEnv"
 } else {
-  $url = "http://localhost"
-  if ($portMapping -ne "80") { $url = "$url`:$portMapping" }
+  $portMapping = Get-EnvValue "OC8_HTTP_PORT"
+  if ([string]::IsNullOrWhiteSpace($portMapping)) { $portMapping = "80" }
+  if ($portMapping.Contains(":")) {
+    $urlHost, $port = $portMapping -split ":", 2
+    if ($urlHost -eq "0.0.0.0" -or $urlHost -eq "::") { $urlHost = "127.0.0.1" }
+    $url = "http://${urlHost}:$port"
+  } else {
+    $url = "http://localhost"
+    if ($portMapping -ne "80") { $url = "$url`:$portMapping" }
+  }
 }
 
 Write-Host "`nWaiting for $url/health …"
@@ -130,11 +242,18 @@ for ($i = 0; $i -lt 60; $i++) {
   Start-Sleep -Seconds 2
 }
 if (-not $ready) {
-  & $ComposeCmd[0] $ComposeCmd[1] ps
-  Fail "oc8 did not become healthy in time. Inspect: $($ComposeCmd -join ' ') logs -f backend"
+  & $ComposeCmd[0] $ComposeCmd[1] @ComposeFiles ps
+  Fail "oc8 did not become healthy in time. Inspect: $($ComposeCmd -join ' ') $($ComposeFiles -join ' ') logs -f backend"
 }
 
-Write-Host "`n✓ oc8 Community is running at $url"
-Write-Host "Next: open the URL and create the local administrator account."
+Write-Host "`n✓ oc8 ($Mode mode) is running at $url"
+switch ($Mode) {
+  "community" { Write-Host "Next: open the URL and create the local administrator account." }
+  "demo" { Write-Host "Next: sign in as $DemoEmail with the password shown above (or already in .env)." }
+  "dev" { Write-Host "Next: open the URL -- dev-login signs you in as org_admin with no password." }
+}
 Write-Host "Logs: $($ComposeCmd -join ' ') logs -f backend"
 Write-Host "Stop later (keeps data): $($ComposeCmd -join ' ') stop"
+if ($Mode -ne "community") {
+  Write-Host "Restart later in the same mode: $($ComposeCmd -join ' ') $($ComposeFiles -join ' ') up -d"
+}
