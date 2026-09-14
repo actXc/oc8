@@ -166,25 +166,41 @@ esac
 
 # --- Optional custom domain for automatic HTTPS. Skipped in Dev mode: that
 # mode's login has no password, so it must never be reachable off localhost.
+# Always asks interactively, even if .env already has one -- a checkout
+# reused for a different host/mode must not silently inherit the old domain.
 if [[ "$MODE" != "dev" ]]; then
   existing_domain="$(env_value OC8_DOMAIN)"
-  if [[ -n "$existing_domain" ]]; then
-    printf 'Using existing domain from .env: %s\n' "$existing_domain"
-  else
-    domain="${OC8_QUICKSTART_DOMAIN:-}"
-    if [[ -z "$domain" ]] && is_interactive; then
+  domain="${OC8_QUICKSTART_DOMAIN:-}"
+  if [[ -z "$domain" ]] && is_interactive; then
+    if [[ -n "$existing_domain" ]]; then
+      read -r -p "Custom domain for automatic HTTPS [${existing_domain}, '-' to clear]: " domain_input
+      if [[ -z "$domain_input" ]]; then
+        domain="$existing_domain"
+      elif [[ "$domain_input" == "-" ]]; then
+        domain=""
+      else
+        domain="$domain_input"
+      fi
+    else
       read -r -p 'Custom domain for automatic HTTPS (leave empty for plain HTTP): ' domain
     fi
-    if [[ -n "$domain" ]]; then
+  elif [[ -z "$domain" ]]; then
+    domain="$existing_domain"
+  fi
+  if [[ -n "$domain" ]]; then
+    if [[ "$domain" != "$existing_domain" ]]; then
       printf 'Point DNS for %s at this host before continuing, or certificate issuance will fail.\n' "$domain"
-      set_env_value "OC8_DOMAIN" "$domain"
-      current_base_url="$(env_value OC8_FRONTEND_BASE_URL)"
-      if [[ -z "$current_base_url" || "$current_base_url" == "http://localhost" ]]; then
-        set_env_value "OC8_FRONTEND_BASE_URL" "https://${domain}"
-      else
-        printf 'Note: OC8_FRONTEND_BASE_URL is already set to %s -- leaving it, but it should probably be https://%s.\n' "$current_base_url" "$domain"
-      fi
     fi
+    set_env_value "OC8_DOMAIN" "$domain"
+    current_base_url="$(env_value OC8_FRONTEND_BASE_URL)"
+    if [[ -z "$current_base_url" || "$current_base_url" == "http://localhost" ]]; then
+      set_env_value "OC8_FRONTEND_BASE_URL" "https://${domain}"
+    else
+      printf 'Note: OC8_FRONTEND_BASE_URL is already set to %s -- leaving it, but it should probably be https://%s.\n' "$current_base_url" "$domain"
+    fi
+  elif [[ -n "$existing_domain" ]]; then
+    set_env_value "OC8_DOMAIN" ""
+    printf 'Cleared OC8_DOMAIN -- plain HTTP.\n'
   fi
 fi
 

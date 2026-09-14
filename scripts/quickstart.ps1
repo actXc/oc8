@@ -148,25 +148,41 @@ switch ($Mode) {
 
 # --- Optional custom domain for automatic HTTPS. Skipped in Dev mode: that
 # mode's login has no password, so it must never be reachable off localhost.
+# Always asks interactively, even if .env already has one -- a checkout
+# reused for a different host/mode must not silently inherit the old domain.
 if ($Mode -ne "dev") {
   $existingDomain = Get-EnvValue "OC8_DOMAIN"
-  if (-not [string]::IsNullOrWhiteSpace($existingDomain)) {
-    Write-Host "Using existing domain from .env: $existingDomain"
-  } else {
-    $domain = $env:OC8_QUICKSTART_DOMAIN
-    if ([string]::IsNullOrWhiteSpace($domain) -and (Test-Interactive)) {
+  $domain = $env:OC8_QUICKSTART_DOMAIN
+  if ([string]::IsNullOrWhiteSpace($domain) -and (Test-Interactive)) {
+    if (-not [string]::IsNullOrWhiteSpace($existingDomain)) {
+      $domainInput = Read-Host "Custom domain for automatic HTTPS [$existingDomain, '-' to clear]"
+      if ([string]::IsNullOrWhiteSpace($domainInput)) {
+        $domain = $existingDomain
+      } elseif ($domainInput -eq "-") {
+        $domain = ""
+      } else {
+        $domain = $domainInput
+      }
+    } else {
       $domain = Read-Host "Custom domain for automatic HTTPS (leave empty for plain HTTP)"
     }
-    if (-not [string]::IsNullOrWhiteSpace($domain)) {
+  } elseif ([string]::IsNullOrWhiteSpace($domain)) {
+    $domain = $existingDomain
+  }
+  if (-not [string]::IsNullOrWhiteSpace($domain)) {
+    if ($domain -ne $existingDomain) {
       Write-Host "Point DNS for $domain at this host before continuing, or certificate issuance will fail."
-      Set-EnvValue "OC8_DOMAIN" $domain
-      $currentBaseUrl = Get-EnvValue "OC8_FRONTEND_BASE_URL"
-      if ([string]::IsNullOrWhiteSpace($currentBaseUrl) -or $currentBaseUrl -eq "http://localhost") {
-        Set-EnvValue "OC8_FRONTEND_BASE_URL" "https://$domain"
-      } else {
-        Write-Host "Note: OC8_FRONTEND_BASE_URL is already set to $currentBaseUrl -- leaving it, but it should probably be https://$domain."
-      }
     }
+    Set-EnvValue "OC8_DOMAIN" $domain
+    $currentBaseUrl = Get-EnvValue "OC8_FRONTEND_BASE_URL"
+    if ([string]::IsNullOrWhiteSpace($currentBaseUrl) -or $currentBaseUrl -eq "http://localhost") {
+      Set-EnvValue "OC8_FRONTEND_BASE_URL" "https://$domain"
+    } else {
+      Write-Host "Note: OC8_FRONTEND_BASE_URL is already set to $currentBaseUrl -- leaving it, but it should probably be https://$domain."
+    }
+  } elseif (-not [string]::IsNullOrWhiteSpace($existingDomain)) {
+    Set-EnvValue "OC8_DOMAIN" ""
+    Write-Host "Cleared OC8_DOMAIN -- plain HTTP."
   }
 }
 
