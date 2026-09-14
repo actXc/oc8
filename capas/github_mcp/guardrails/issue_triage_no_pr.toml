@@ -12,4 +12,17 @@ read = true
 modify = true
 approval_eur = ""
 approval_actions = []
-only = ["add_issue_comment", "issue_write", "sub_issue_write"]
+# `only` names every reachable tool, read and modify alike (`pdp.py`'s
+# `in_surface` applies it uniformly) -- so the connection's full `read` scope
+# has to be listed here too, or a support agent could no longer even search
+# or read the issues it's meant to be triaging.
+only = [
+    "get_me", "get_team_members", "get_teams", "get_label", "issue_read",
+    "list_issue_fields", "list_issue_types", "list_issues", "search_issues",
+    "list_pull_requests", "pull_request_read", "search_pull_requests",
+    "get_commit", "get_file_contents", "get_latest_release", "get_release_by_tag",
+    "get_tag", "list_branches", "list_commits", "list_releases",
+    "list_repository_collaborators", "list_tags", "search_code", "search_commits",
+    "search_repositories", "search_users",
+    "add_issue_comment", "issue_write", "sub_issue_write",
+]

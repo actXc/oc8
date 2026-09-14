@@ -226,7 +226,10 @@ class TestGitHubMcpGuardrailLibrary:
 
     def test_issue_triage_entry_withholds_all_code_and_pr_tools(self) -> None:
         g = _entry("issue_triage_no_pr")
-        assert set(g.only) == {"add_issue_comment", "issue_write", "sub_issue_write"}
+        # `only` applies to read and modify tools alike (`pdp.py`'s
+        # `in_surface`), so the full read scope has to be listed here too --
+        # only the modify side is actually restricted to these three.
+        assert set(g.only) == _READ_TOOLS | {"add_issue_comment", "issue_write", "sub_issue_write"}
         assert g.modify is True
         assert not g.approval_actions
 
