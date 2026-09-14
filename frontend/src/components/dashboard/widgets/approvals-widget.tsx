@@ -554,6 +554,77 @@ function QueueRow({
   );
 }
 
+// Raw operator symbols (`ConditionOperator` in `authz/pdp.py`) shown as
+// readable comparison signs rather than the wire tokens.
+const OPERATOR_SYMBOLS: Record<string, string> = {
+  ">": ">",
+  ">=": "≥",
+  "<": "<",
+  "<=": "≤",
+  "==": "=",
+  "!=": "≠",
+  in: "in",
+  not_in: "not in",
+};
+
+// Mirrors `guardrail-function-rules.tsx`'s `humanizeName` -- no shared label
+// dictionary exists anywhere in the stack, so this stays a small mechanical
+// humanization local to each consumer rather than an import.
+function humanizeAttribute(name: string): string {
+  return name
+    .split("_")
+    .map((word) =>
+      word.length <= 2 ? word.toUpperCase() : word.charAt(0).toUpperCase() + word.slice(1),
+    )
+    .join(" ");
+}
+
+function formatReasonValue(value: unknown): string {
+  if (typeof value === "number") return value.toLocaleString();
+  if (value == null) return "?";
+  return String(value);
+}
+
+/** Turns `ApprovalDTO.reasonContext` (Decision.reason_code/context, see
+ *  `authz/pdp.py`) into a translated sentence. `null` for anything not raised
+ *  via `authorize_tool_call` or a `reason_code` this pane doesn't know yet --
+ *  the caller falls back to the raw `detail` string in that case. */
+function formatReasonContext(
+  reasonContext: Approval["reasonContext"],
+  t: (en: string, de: string) => string,
+): string | null {
+  if (!reasonContext || typeof reasonContext.code !== "string") return null;
+  switch (reasonContext.code) {
+    case "condition_matched": {
+      const attribute = humanizeAttribute(String(reasonContext.attribute ?? ""));
+      const operator = OPERATOR_SYMBOLS[String(reasonContext.operator ?? "")] ?? "?";
+      const threshold = formatReasonValue(reasonContext.threshold);
+      const actual = formatReasonValue(reasonContext.actual);
+      return t(
+        `A configured guardrail applies: ${attribute} ${operator} ${threshold} -- this one is ${actual}.`,
+        `Es greift eine konfigurierte Guardrail: ${attribute} ${operator} ${threshold} -- dieser Wert liegt bei ${actual}.`,
+      );
+    }
+    case "always_requires_approval": {
+      const tool = reasonContext.tool ? humanizeAttribute(String(reasonContext.tool)) : "";
+      return t(
+        `This action${tool ? ` (${tool})` : ""} always requires approval, regardless of amount.`,
+        `Diese Aktion${tool ? ` (${tool})` : ""} erfordert immer eine Freigabe, unabhängig vom Betrag.`,
+      );
+    }
+    case "value_threshold_exceeded": {
+      const threshold = formatReasonValue(reasonContext.threshold);
+      const actual = formatReasonValue(reasonContext.actual);
+      return t(
+        `This exceeds the autonomous limit of ${threshold} -- this one is ${actual}.`,
+        `Dies überschreitet das eigenständige Limit von ${threshold} -- dieser Wert liegt bei ${actual}.`,
+      );
+    }
+    default:
+      return null;
+  }
+}
+
 function ApprovalPane({
   approval,
   mayAct,
@@ -590,6 +661,7 @@ function ApprovalPane({
   const canReject = reason.trim().length > 0;
 
   const approve = () => onDecide(approval, "approve", reason, choice);
+  const reasonSentence = formatReasonContext(approval.reasonContext, t);
 
   return (
     <div className="flex h-full max-h-[80vh] flex-col">
@@ -620,8 +692,15 @@ function ApprovalPane({
             )}
           </div>
           <h2 className="mt-2 font-serif text-2xl leading-tight">{approval.title}</h2>
-          {approval.detail && (
-            <p className="mt-2 text-sm leading-relaxed text-foreground/90">{approval.detail}</p>
+          {reasonSentence ? (
+            <div className="mt-2 flex items-start gap-2 rounded-md border border-border bg-panel/60 px-3 py-2 text-sm leading-relaxed text-foreground/90">
+              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+              <span>{reasonSentence}</span>
+            </div>
+          ) : (
+            approval.detail && (
+              <p className="mt-2 text-sm leading-relaxed text-foreground/90">{approval.detail}</p>
+            )
           )}
         </section>
 

@@ -237,6 +237,13 @@ describe("describeGuardrailSaveError", () => {
     );
   });
 
+  it("shows the fixed security-policy copy for a 403, not the raw permission string", () => {
+    const error = new ApiError("requires permission: agent:manage", 403);
+    expect(describeGuardrailSaveError(error, t)).toBe(
+      "This action is blocked by an OC8 security policy.",
+    );
+  });
+
   it("falls back to a generic message for a plain-string or unstructured error", () => {
     expect(describeGuardrailSaveError(new ApiError("agent not found", 404), t)).toBe(
       "agent not found",

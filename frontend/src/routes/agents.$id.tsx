@@ -227,7 +227,7 @@ function AgentDetail() {
   const tabs: { id: TabId; label: string }[] = [
     { id: "overview", label: t("Overview", "Übersicht") },
     { id: "instructions", label: t("Instructions", "Anweisungen") },
-    { id: "guardrails", label: t("Tools", "Tools") },
+    { id: "guardrails", label: t("Tools & Access", "Tools & Zugriff") },
     { id: "livelog", label: t("Live Log", "Live-Log") },
     { id: "chat", label: t("Chat", "Chat") },
     { id: "files", label: t("Files", "Dateien") },
@@ -1118,6 +1118,7 @@ export function AssignedModelPanel({
   );
   const [effort, setEffort] = useState(agent.effort ?? "");
   const [rawParams, setRawParams] = useState<RawParamPair[]>(() => extraToPairs(agent.extra));
+  const [maxSteps, setMaxSteps] = useState(agent.maxSteps != null ? String(agent.maxSteps) : "");
   // Route param change remounts this whole page in the common case, but
   // nothing here guarantees it -- a prior bug in this exact codebase (the
   // Chat window carrying a previous agent's session across a switch) showed
@@ -1128,11 +1129,12 @@ export function AssignedModelPanel({
     setMaxTokens(agent.maxTokens != null ? String(agent.maxTokens) : "");
     setEffort(agent.effort ?? "");
     setRawParams(extraToPairs(agent.extra));
+    setMaxSteps(agent.maxSteps != null ? String(agent.maxSteps) : "");
     // agent.extra is a fresh object reference on every fetch; depending on it
     // directly would re-run this on every render and clobber in-progress
     // edits, so this re-syncs on agent identity (agent.id) instead.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agent.id, agent.temperature, agent.maxTokens, agent.effort]);
+  }, [agent.id, agent.temperature, agent.maxTokens, agent.effort, agent.maxSteps]);
 
   function saveSamplingOverrides() {
     if (!agent.modelConfigId) return;
@@ -1153,6 +1155,17 @@ export function AssignedModelPanel({
       );
       return;
     }
+    const trimmedSteps = maxSteps.trim();
+    const parsedSteps = trimmedSteps ? Number(trimmedSteps) : null;
+    if (parsedSteps !== null && (!Number.isInteger(parsedSteps) || parsedSteps < 1)) {
+      toast.error(
+        t(
+          "Max steps must be a positive whole number",
+          "Max. Steps muss eine positive Ganzzahl sein",
+        ),
+      );
+      return;
+    }
     switchModel.mutate(
       {
         agentId: agent.id,
@@ -1164,6 +1177,7 @@ export function AssignedModelPanel({
         // effort value the operator can no longer even see to restore.
         effort: showEffort ? effort.trim() || null : undefined,
         extra: showRawParams ? (pairsToExtra(rawParams) ?? null) : undefined,
+        maxSteps: parsedSteps,
       },
       {
         onSuccess: () =>
@@ -1286,6 +1300,28 @@ export function AssignedModelPanel({
               <RawParamsEditor pairs={rawParams} onChange={setRawParams} disabled={!mayManage} />
             </div>
           )}
+          <div className="mt-3 border-t border-border pt-3">
+            <label className="block max-w-[calc(50%-0.375rem)]">
+              <span className="mb-1 block text-[10px] uppercase tracking-widest text-muted-foreground">
+                {t("Max steps per run", "Max. Steps pro Lauf")}
+              </span>
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder={t("Framework default", "Framework-Standard")}
+                value={maxSteps}
+                disabled={!mayManage}
+                onChange={(e) => setMaxSteps(e.target.value)}
+                className="w-full rounded-md border border-border bg-background/40 px-3 py-2 text-sm outline-none focus:border-primary/50 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+            </label>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {t(
+                "How many tool-using steps this agent may take in one run before it stops. Blank inherits the framework default (currently high, not unlimited -- budget/token metering only checks once per run).",
+                "Wie viele Tool-Schritte dieser Agent pro Lauf ausführen darf, bevor er stoppt. Leer übernimmt den Framework-Standard (aktuell hoch, aber nicht unbegrenzt -- Budget-/Token-Metering wird nur einmal pro Lauf geprüft).",
+              )}
+            </p>
+          </div>
           {mayManage && (
             <button
               type="button"
@@ -1352,6 +1388,7 @@ export function AgentGuardrailsPanel({
       approvalActions: src?.approvalActions ?? [],
       approvalEur: src?.approvalEur ?? null,
       only: src?.only ?? [],
+      conditions: src?.conditions ?? [],
     };
   }
 
@@ -1379,6 +1416,7 @@ export function AgentGuardrailsPanel({
         approval_eur: val.approvalEur,
         approval_actions: val.approvalActions,
         only: val.only,
+        conditions: val.conditions,
         connection_id:
           isEdited && connectionIdOverride !== undefined
             ? connectionIdOverride
@@ -1404,10 +1442,18 @@ export function AgentGuardrailsPanel({
     });
   }
 
-  function addTool(name: string, policy: GuardrailValue | null) {
+  function addTool(name: string, policy: GuardrailValue | null, connectionId?: string | null) {
     persistOne(
       name,
-      policy ?? { read: true, modify: false, approvalActions: [], approvalEur: null, only: [] },
+      policy ?? {
+        read: true,
+        modify: false,
+        approvalActions: [],
+        approvalEur: null,
+        only: [],
+        conditions: [],
+      },
+      connectionId,
     );
   }
 
@@ -1422,6 +1468,7 @@ export function AgentGuardrailsPanel({
           approvalActions: frame[key]?.approvalActions ?? [],
           approvalEur: frame[key]?.approvalEur ?? null,
           only: frame[key]?.only ?? [],
+          conditions: frame[key]?.conditions ?? [],
         };
     // Mere presence in `narrowing` is NOT the signal -- every save rewrites
     // every currently-relevant key whether or not it was the one edited, so
@@ -1516,6 +1563,8 @@ export function AgentGuardrailsPanel({
           onSave={persistOne}
           onAdd={addTool}
           saving={update.isPending}
+          departmentId={agent.departmentId}
+          agentId={agent.id}
         />
       </div>
     </Panel>

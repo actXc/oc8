@@ -260,6 +260,26 @@ def _manifest_scopes(conn: m.McpConnection | None) -> dict[str, Any] | None:
     return conn.scopes if isinstance(conn.scopes, dict) else None
 
 
+def _manifest_guardrail_attributes(conn: m.McpConnection | None) -> list[dict[str, Any]]:
+    """This connection's declared `GuardrailAttribute`s (see `capas/manifest.py`),
+    resolved the same way `_manifest_scopes` resolves scopes -- a live tool
+    call needs the plugin's own attribute catalog to know which named,
+    typed values it may extract for a `Condition` (`authz/pdp.py`) to
+    evaluate. Empty for a connection with no matching manifest."""
+    if conn is None:
+        return []
+    cfg = _cfg(conn)
+    manifest_conn = resolve_tool_pack_connection(
+        str(cfg.get("_plugin_name", "")), str(cfg.get("_connection_key", ""))
+    )
+    if manifest_conn is None:
+        return []
+    return [
+        {"key": a.key, "datatype": a.datatype, "tools": a.tools, "extract": a.extract}
+        for a in manifest_conn.guardrail_attributes
+    ]
+
+
 async def _env(conn: m.McpConnection, db: DbSession, tenant_id: uuid.UUID) -> dict[str, str]:
     return await resolve_mcp_env(db, tenant_id=tenant_id, cfg=_cfg(conn), connection_name=conn.name)
 
@@ -744,6 +764,7 @@ async def _call_tool(
         connection_key=conn.name if conn is not None else None,
         tool_scopes=scopes,
         value_spec=value_spec,
+        guardrail_attribute_specs=_manifest_guardrail_attributes(conn),
     )
     # Honour an operator's earlier decision on this exact call (resume).
     if decision.effect is Effect.REQUIRE_APPROVAL:
@@ -776,6 +797,8 @@ async def _call_tool(
             title=f"{agent.name} wants to call {tc.name}",
             detail=decision.reason,
             payload={"tool": tc.name, "arguments": tc.arguments},
+            reason_code=decision.reason_code,
+            reason_context=decision.context,
         )
         # Park the run and return immediately -- no bounded wait. The adapter
         # polls for the park marker every couple of seconds (runtime.py's

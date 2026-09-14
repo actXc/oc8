@@ -14,7 +14,7 @@ import json
 import uuid
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from oc8 import models as m
@@ -153,10 +153,15 @@ async def seed_showcase_capas(session: AsyncSession, *, tenant_id: uuid.UUID) ->
                 granted_permissions=list(version.permissions),
             )
 
-    # Enable materialises empty tool_pack McpConnection rows (connected=False).
-    # Those render as "Untested / Test connection" under Capas next to the real
-    # capa cards — drop them so the Installed tab only shows Capas.
-    await session.execute(delete(m.McpConnection).where(m.McpConnection.tenant_id == tenant_id))
+    # Enable materialises tool_pack McpConnection rows (connected=False,
+    # health={}) -- these used to be deleted here because they rendered as
+    # stray "Untested" cards under Capas. capas.tsx now folds a connection
+    # with a `pluginName` stamp into its own Capa's card (ConnectionDot)
+    # instead of listing it separately, so that's no longer a concern. Kept
+    # rows matter beyond that page too: without them `GET /mcp/connections`
+    # is empty in the hosted demo, which silently blanks the agent-level
+    # guardrail editor (it only renders once a real `connection` object
+    # exists for a tool key) and disables "+ Add tool" entirely.
     await session.flush()
 
 

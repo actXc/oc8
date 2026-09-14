@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { resolveTranslation, useLang, useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -36,6 +36,24 @@ export interface GuardrailPreset {
   only: string[];
 }
 
+/** Mirrors `ConditionDTO`/`ConditionWriteDTO` (`backend/src/oc8/schemas/dto.py`,
+ * `backend/src/oc8/api/v1/departments.py`) exactly -- one generic "with
+ * limits" rule row. `attribute` must be one of the action's declared
+ * `GuardrailAttribute.key`s; `datatype` and `operator` are never inferred
+ * client-side, always carried explicitly so a saved condition round-trips
+ * even if the attribute catalog changes later. */
+export interface Condition {
+  attribute: string;
+  datatype: "number" | "string" | "boolean" | "enum";
+  operator: ">" | ">=" | "<" | "<=" | "==" | "!=" | "in" | "not_in";
+  value: unknown;
+  /** Mirrors `authz.pdp.Effect` field-for-field -- NOT a 2-value shorthand.
+   * `"allow"` is rarely authored directly (no condition at all already means
+   * allow), but the backend enum supports it and a condition editor must be
+   * able to express it too (e.g. an early exception before a stricter rule). */
+  then: "allow" | "deny" | "require_approval";
+}
+
 /** The policy actually applied to a connection -- what a preset selection
  * writes, and what the always-visible free controls below it edit directly.
  * Carries `only` for the same reason `GuardrailPreset` does: it is part of
@@ -49,6 +67,9 @@ export interface GuardrailValue {
   approvalActions: string[];
   approvalEur: number | null;
   only: string[];
+  /** Generic "with limits" rules -- see `Condition`. Additive alongside
+   * `approvalEur`/`approvalActions`, mirroring `ToolPolicy.conditions`. */
+  conditions: Condition[];
 }
 
 /** Mirrors `GuardrailAdjustableDTO` (`backend/src/oc8/schemas/dto.py`)
@@ -97,7 +118,11 @@ function sameSet(a: string[], b: string[]): boolean {
   return [...a].sort().join(",") === [...b].sort().join(",");
 }
 
-function matches(preset: GuardrailPreset, value: GuardrailValue, hasValueSpec: boolean): boolean {
+export function matches(
+  preset: GuardrailPreset,
+  value: GuardrailValue,
+  hasValueSpec: boolean,
+): boolean {
   return (
     preset.read === value.read &&
     preset.modify === value.modify &&
@@ -107,13 +132,14 @@ function matches(preset: GuardrailPreset, value: GuardrailValue, hasValueSpec: b
   );
 }
 
-function policyOf(preset: GuardrailPreset): GuardrailValue {
+export function policyOf(preset: GuardrailPreset): GuardrailValue {
   return {
     read: preset.read,
     modify: preset.modify,
     approvalActions: preset.approvalActions,
     approvalEur: preset.approvalEur,
     only: preset.only,
+    conditions: [],
   };
 }
 
@@ -139,7 +165,10 @@ const USE_CASE_LABELS: Record<string, [en: string, de: string]> = {
 // NOT named `useCaseHeading` -- that spelling makes eslint-plugin-react-hooks
 // treat it as a hook (any `use*`-prefixed function is), which then rejects
 // calling it from inside the `.map()` callback below.
-function formatUseCaseHeading(useCase: string, t: (en: string, de: string) => string): string {
+export function formatUseCaseHeading(
+  useCase: string,
+  t: (en: string, de: string) => string,
+): string {
   const known = USE_CASE_LABELS[useCase];
   if (known) return t(known[0], known[1]);
   return useCase.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -156,7 +185,7 @@ function formatUseCaseHeading(useCase: string, t: (en: string, de: string) => st
  * explicit `order` field in the guardrail format; accepted as out of scope
  * for the restructure (controller ruling, Plugin Package Restructure plan,
  * Task 16). */
-function groupByUseCase(
+export function groupByUseCase(
   entries: GuardrailLibraryEntry[],
 ): Array<[string, GuardrailLibraryEntry[]]> {
   const order: string[] = [];
@@ -171,13 +200,14 @@ function groupByUseCase(
   return order.map((useCase) => [useCase, byUseCase.get(useCase)!]);
 }
 
-function libraryPolicyOf(entry: GuardrailLibraryEntry): GuardrailValue {
+export function libraryPolicyOf(entry: GuardrailLibraryEntry): GuardrailValue {
   return {
     read: entry.read,
     modify: entry.modify,
     approvalActions: entry.approvalActions,
     approvalEur: entry.approvalEur,
     only: entry.only,
+    conditions: [],
   };
 }
 
@@ -189,7 +219,7 @@ function libraryPolicyOf(entry: GuardrailLibraryEntry): GuardrailValue {
  * would make editing the revealed number field immediately read back as
  * "custom", defeating the point of showing it inline under the still-selected
  * entry. */
-function libraryMatches(
+export function libraryMatches(
   entry: GuardrailLibraryEntry,
   value: GuardrailValue,
   hasValueSpec: boolean,
@@ -232,14 +262,27 @@ function GrantChip({ on, label }: { on: boolean; label: string }) {
 function FreeTextApprovalActions({
   value,
   onChange,
+  suggestions,
   t,
 }: {
   value: GuardrailValue;
   onChange: (next: GuardrailValue) => void;
+  // Tool names from this connection's own catalog, offered as a datalist so
+  // the operator can pick a real tool instead of guessing its spelling --
+  // the input still accepts any free-text name, this is suggestions only.
+  suggestions: string[];
   t: (en: string, de: string) => string;
 }) {
   const [draft, setDraft] = useState("");
+  const datalistId = useId();
   const custom = value.approvalActions.filter((a) => a !== "modify");
+  // Only when the catalog fetch actually succeeded and returned names -- an
+  // empty `suggestions` array also happens while it's loading or failed
+  // (see `useConnectionToolNames`'s own doc comment), and flagging every
+  // entry as "unknown" in that case would be a false positive, not a real
+  // warning.
+  const catalogIsReliable = suggestions.length > 0;
+  const unknown = (name: string) => catalogIsReliable && !suggestions.includes(name);
 
   function addDraft() {
     const name = draft.trim();
@@ -258,8 +301,22 @@ function FreeTextApprovalActions({
         {custom.map((name) => (
           <span
             key={name}
-            className="inline-flex items-center gap-1 rounded-full border border-border bg-background/40 px-2 py-0.5 text-[11px] normal-case text-foreground"
+            title={
+              unknown(name)
+                ? t(
+                    `"${name}" doesn't match any tool this connection exposes -- it won't gate anything`,
+                    `„${name}" entspricht keinem Tool dieser Verbindung -- das gate nichts`,
+                  )
+                : undefined
+            }
+            className={cn(
+              "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] normal-case",
+              unknown(name)
+                ? "border-amber-500/60 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                : "border-border bg-background/40 text-foreground",
+            )}
           >
+            {unknown(name) && "⚠ "}
             {name}
             <button
               type="button"
@@ -278,6 +335,9 @@ function FreeTextApprovalActions({
         ))}
         <input
           type="text"
+          role="combobox"
+          aria-label={t("Approval action suggestions", "Freigabe-Aktions-Vorschläge")}
+          list={datalistId}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
@@ -290,27 +350,50 @@ function FreeTextApprovalActions({
           placeholder={t("e.g. delete_record", "z. B. delete_record")}
           className="min-w-[140px] flex-1 rounded-md border border-border bg-background/40 px-2 py-1 text-xs normal-case text-foreground outline-none focus:border-primary/50"
         />
+        <datalist id={datalistId}>
+          {suggestions.map((name) => (
+            <option key={name} value={name} />
+          ))}
+        </datalist>
       </div>
+      {catalogIsReliable && (
+        <p className="mt-1 text-[11px] normal-case text-muted-foreground">
+          {t(
+            "Must exactly match a tool this connection exposes -- pick from the suggestions.",
+            "Muss exakt einem Tool dieser Verbindung entsprechen -- am besten aus den Vorschlägen wählen.",
+          )}
+        </p>
+      )}
     </label>
   );
 }
 
-/** The free controls (Modify, approval-actions, €-threshold) -- always
- * rendered below the preset/library list, never gated behind a "does the
- * current value happen to match a preset" check. A preset or library entry
- * is a quick-fill shortcut for this same editor, not a separate locked
- * state: once applied, the result is a plain, independent policy record
- * with no further tie to the capa that suggested it, so it must stay
- * editable the same way a from-scratch policy is. */
+/** The free controls (Modify, approval-actions, €-threshold, only-these-
+ * surfaces) -- always rendered below the preset/library list, never gated
+ * behind a "does the current value happen to match a preset" check. A
+ * preset or library entry is a quick-fill shortcut for this same editor,
+ * not a separate locked state: once applied, the result is a plain,
+ * independent policy record with no further tie to the capa that suggested
+ * it, so it must stay editable the same way a from-scratch policy is.
+ *
+ * This is the ONE place `value.approvalActions` and `value.only` get
+ * edited -- there used to be a second, near-identical "approval for"
+ * free-text field rendered separately in `ToolGuardrailEditorPanel`, which
+ * read as two different features editing the same list. Everything below
+ * the preset cards now lives in this single bordered container. */
 function FreeGuardrailControls({
   value,
   onChange,
   hasValueSpec,
+  approvalSuggestions,
+  onlyOptions,
   t,
 }: {
   value: GuardrailValue;
   onChange: (next: GuardrailValue) => void;
   hasValueSpec: boolean;
+  approvalSuggestions: string[];
+  onlyOptions: string[];
   t: (en: string, de: string) => string;
 }) {
   return (
@@ -349,7 +432,12 @@ function FreeGuardrailControls({
           </label>
         </div>
       </label>
-      <FreeTextApprovalActions value={value} onChange={onChange} t={t} />
+      <FreeTextApprovalActions
+        value={value}
+        onChange={onChange}
+        suggestions={approvalSuggestions}
+        t={t}
+      />
       {hasValueSpec && (
         <label className="block text-xs uppercase tracking-wider text-muted-foreground">
           {t("Approval needed from (€, optional)", "Freigabe nötig ab (€, optional)")}
@@ -368,6 +456,50 @@ function FreeGuardrailControls({
             placeholder="—"
             className="mt-1 w-full rounded-md border border-border bg-background/40 px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
           />
+        </label>
+      )}
+      {onlyOptions.length > 0 && (
+        <label className="block text-xs uppercase tracking-wider text-muted-foreground">
+          {t("Only these surfaces (optional)", "Nur diese Bereiche (optional)")}
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {value.only.map((surface) => (
+              <span
+                key={surface}
+                className="inline-flex items-center gap-1 rounded-full border border-border bg-background/40 px-2 py-0.5 text-[11px] normal-case text-foreground"
+              >
+                {surface}
+                <button
+                  type="button"
+                  aria-label={t(`Remove ${surface}`, `${surface} entfernen`)}
+                  onClick={() =>
+                    onChange({ ...value, only: value.only.filter((s) => s !== surface) })
+                  }
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            <select
+              value=""
+              onChange={(e) => {
+                if (!e.target.value) return;
+                if (!value.only.includes(e.target.value)) {
+                  onChange({ ...value, only: [...value.only, e.target.value] });
+                }
+              }}
+              className="rounded-md border border-border bg-background/40 px-2 py-1 text-xs normal-case text-foreground"
+            >
+              <option value="">{t("Add…", "Hinzufügen…")}</option>
+              {onlyOptions
+                .filter((o) => !value.only.includes(o))
+                .map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+            </select>
+          </div>
         </label>
       )}
     </div>
@@ -393,6 +525,8 @@ export function GuardrailPresetPicker({
   hasValueSpec,
   value,
   onChange,
+  approvalSuggestions = [],
+  onlyOptions = [],
 }: {
   presets: GuardrailPreset[];
   /** A connection's plugin's own `guardrails/*.toml` library (design §3-6),
@@ -404,6 +538,12 @@ export function GuardrailPresetPicker({
   hasValueSpec: boolean;
   value: GuardrailValue;
   onChange: (next: GuardrailValue) => void;
+  /** This connection's tool-name catalog -- doubles as datalist suggestions
+   * for the free-text "approval for a specific tool" input and as the
+   * option list for "Only these surfaces". Same source for both, since both
+   * are just different ways of naming a tool this connection exposes. */
+  approvalSuggestions?: string[];
+  onlyOptions?: string[];
 }) {
   const t = useT();
   const { lang } = useLang();
@@ -488,6 +628,8 @@ export function GuardrailPresetPicker({
           value={value}
           onChange={onChange}
           hasValueSpec={hasValueSpec}
+          approvalSuggestions={approvalSuggestions}
+          onlyOptions={onlyOptions}
           t={t}
         />
       </div>
@@ -557,7 +699,14 @@ export function GuardrailPresetPicker({
           })}
         </div>
       )}
-      <FreeGuardrailControls value={value} onChange={onChange} hasValueSpec={hasValueSpec} t={t} />
+      <FreeGuardrailControls
+        value={value}
+        onChange={onChange}
+        hasValueSpec={hasValueSpec}
+        approvalSuggestions={approvalSuggestions}
+        onlyOptions={onlyOptions}
+        t={t}
+      />
     </div>
   );
 }

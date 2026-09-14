@@ -223,6 +223,44 @@ def parse_guardrail_preset(data: dict[str, Any]) -> GuardrailPreset:
         raise ManifestError(str(exc)) from exc
 
 
+class GuardrailAttribute(BaseModel):
+    """One named, typed value a tool-pack plugin declares as technically
+    extractable from a call to one of its tools -- the generalisation of
+    `value_spec` (which only ever extracted one anonymous number) into a
+    named catalog a "with limits" Condition (`authz/pdp.py`) can reference.
+
+    The PDP knows nothing about order values, domains or environments; it
+    only evaluates `Condition.attribute` against whatever `attributes` dict
+    it is handed. This model is how a plugin says which attribute *names*
+    exist for a given tool and how to pull each one out of a real call's
+    arguments -- the UI's Conditions editor may only ever offer attributes
+    declared here for the tool being edited.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    key: str
+    label: str
+    datatype: Literal["number", "string", "boolean", "enum"] = "number"
+    #: Only meaningful when datatype == "enum": the values a user may compare
+    #: against, e.g. ["staging", "production"].
+    enum_values: list[str] = []
+    #: Tool names this attribute applies to. Empty means every tool on the
+    #: connection may expose it (extraction simply yields nothing for a call
+    #: whose arguments don't match the spec).
+    tools: list[str] = []
+    #: Opaque, datatype-dependent extraction spec, interpreted by
+    #: `agent/tool_semantics.py:extract_attributes` -- same `direct_fields`/
+    #: `line_items` shape `value_spec` already uses for `datatype == "number"`;
+    #: a plain `{"field": "..."}` path lookup for string/boolean/enum.
+    extract: dict[str, Any] = {}
+
+    @model_validator(mode="after")
+    def _enum_needs_values(self) -> GuardrailAttribute:
+        if self.datatype == "enum" and not self.enum_values:
+            raise ValueError(f"attribute {self.key!r} has datatype='enum' but no enum_values")
+        return self
+
+
 class ToolPackConnection(BaseModel):
     """An MCP server a tool pack describes. It is materialised DISCONNECTED --
     a manifest may describe a server, but only an operator may declare it
@@ -249,6 +287,10 @@ class ToolPackConnection(BaseModel):
     #: Named permission sets this connection's plugin author recommends.
     #: Offered as a choice by the picker; free configuration stays available.
     guardrail_presets: list[GuardrailPreset] = []
+    #: Named, typed attributes this connection's tools expose for "with
+    #: limits" Conditions (see `GuardrailAttribute`). Empty for a connection
+    #: that predates the generic condition model or has nothing to gate on.
+    guardrail_attributes: list[GuardrailAttribute] = []
 
     @model_validator(mode="after")
     def _validate_guardrail_presets(self) -> ToolPackConnection:
@@ -262,6 +304,12 @@ class ToolPackConnection(BaseModel):
         if dupes:
             names = ", ".join(sorted(dupes))
             msg = f"connection '{self.key}' has duplicate guardrail preset key(s): {names}"
+            raise ValueError(msg)
+        attr_keys = [a.key for a in self.guardrail_attributes]
+        attr_dupes = {k for k in attr_keys if attr_keys.count(k) > 1}
+        if attr_dupes:
+            names = ", ".join(sorted(attr_dupes))
+            msg = f"connection '{self.key}' has duplicate guardrail attribute key(s): {names}"
             raise ValueError(msg)
         recommended = [p.key for p in self.guardrail_presets if p.recommended]
         if len(recommended) > 1:

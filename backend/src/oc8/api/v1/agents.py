@@ -35,7 +35,7 @@ from oc8.api.deps import DbSession, require_departmental
 from oc8.api.v1._serializers import agent_to_dto
 from oc8.api.v1.files import _attachment_dto
 from oc8.authz.authority import authority_for_principal, tenant_wide_read
-from oc8.authz.pdp import ToolPolicy, effective_tool_policies
+from oc8.authz.pdp import ToolPolicy, effective_tool_policies, tool_policy_source
 from oc8.authz.permissions import AGENT, VIEW, perm
 from oc8.authz.scope import HumanActor
 from oc8.runtime.states import TERMINAL
@@ -219,6 +219,16 @@ async def _agent_detail_dto(db: DbSession, agent: m.Agent) -> AgentDetailDTO:
     dept_name = dept.name if dept else None
 
     effective = effective_tool_policies(frame, agent.narrowing)
+    overridden_keys = frozenset(agent.narrowing_overridden_keys or [])
+    tool_policy_sources = {
+        k: tool_policy_source(
+            k,
+            frame=frame,
+            capa_defaults=dept.frame_capa_defaults if dept else None,
+            narrowing_overridden_keys=overridden_keys,
+        )
+        for k in effective
+    }
     # Through `ToolPolicy.from_json(v).to_json()`, not a raw `**v` passthrough:
     # a stored frame row can predate migration 0087's write/send -> modify data
     # merge (Task 3) and still carry the old keys, which `from_json` no longer
@@ -270,6 +280,7 @@ async def _agent_detail_dto(db: DbSession, agent: m.Agent) -> AgentDetailDTO:
         department_frame_tools=frame_tools,
         narrowing_tools=narrowing_tools,
         narrowing_overridden_keys=list(agent.narrowing_overridden_keys or []),
+        tool_policy_sources=tool_policy_sources,
         runtime_ref=agent.runtime_ref,
         current_run_id=str(current_run) if current_run else None,
         temperature=model_params.get("temperature"),

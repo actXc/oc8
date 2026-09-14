@@ -90,6 +90,14 @@ class ApprovalRequest(Base, PkMixin, TenantMixin, TimestampMixin):
     #: Which of the agent's proposed options a human picked (action_type
     #: "decision"). NULL for a plain yes/no on a held tool call, which has none.
     decision_option: Mapped[str | None] = mapped_column(Text)
+    #: Structured sibling of `detail`: `{"code": "<Decision.reason_code>",
+    #: **Decision.context}` when this approval was raised from a PDP
+    #: `authorize_tool_call` REQUIRE_APPROVAL decision, letting the approval
+    #: pane render a real i18n'd sentence instead of `detail`'s raw, un-i18n'd
+    #: English string. NULL for every approval NOT raised from such a decision
+    #: (e.g. `request_decision`, budget incidents, blast-radius stops) --
+    #: those keep `detail`/`amount_text` as their only "why".
+    reason_context: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     __table_args__ = (
         CheckConstraint(

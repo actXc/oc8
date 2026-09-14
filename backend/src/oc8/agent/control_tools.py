@@ -343,12 +343,13 @@ PROPOSE_CHANGE = NeutralTool(
         "Propose a structural change to the system for a human to review -- "
         "you NEVER apply one yourself. Use this for anything that changes how "
         "oc8 itself is set up: a new department, a new agent, changing an "
-        "agent's mission, enabling a plugin, or preparing an integration. "
+        "agent's mission, enabling a plugin, preparing an integration, or "
+        "setting a guardrail on one of an agent's tools. "
         "The only supported operation_type values are: agent.mission.set, "
         "trigger.create, plugin.enable, integration.prepare, "
-        "department.create, agent.create. `payload` must contain only that "
-        "operation's own fields, listed under `payload` below -- any other "
-        "key is rejected."
+        "department.create, agent.create, agent.guardrail.set. `payload` "
+        "must contain only that operation's own fields, listed under "
+        "`payload` below -- any other key is rejected."
     ),
     parameters={
         "type": "object",
@@ -362,6 +363,7 @@ PROPOSE_CHANGE = NeutralTool(
                     "integration.prepare",
                     "department.create",
                     "agent.create",
+                    "agent.guardrail.set",
                 ],
             },
             "payload": {
@@ -386,6 +388,19 @@ PROPOSE_CHANGE = NeutralTool(
                     "(text)]. "
                     "agent.create: departmentId (uuid), name (text), "
                     "[roleTitle (text), mission (text)]. "
+                    "agent.guardrail.set: agentId (uuid), connectionName "
+                    "(text), function (text), decision ('not_allowed': the "
+                    "function must never run; 'approval_required': the "
+                    "function may run but a human must approve EVERY call; "
+                    "'with_limits': the function runs on its own up to a "
+                    "limit, above which conditions apply; 'self_sufficient': "
+                    "no restriction), [conditions (list, only with decision "
+                    "'with_limits' -- each entry: attribute (text, must be "
+                    "one you actually saw offered for this function -- never "
+                    "invent one), datatype ('number', 'string', 'boolean', "
+                    "or 'enum'), operator ('>', '>=', '<', '<=', '==', '!=', "
+                    "'in', or 'not_in'), value (typed to match the "
+                    "attribute), then ('require_approval' or 'deny'))]. "
                     "Every id must be one you actually saw in your context -- "
                     "never invent a uuid, the proposal is refused if it "
                     "refers to nothing."
@@ -1406,6 +1421,8 @@ async def execute_control_tool(
                     "tier": str(tc.arguments.get("tier", "")),
                     "content": str(tc.arguments.get("content", "")),
                 },
+                reason_code=decision.reason_code,
+                reason_context=decision.context,
             )
             return ControlOutcome(
                 output=(

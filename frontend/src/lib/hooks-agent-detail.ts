@@ -7,6 +7,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { ToolPolicy } from "@/lib/hooks";
+import type { Condition } from "@/components/guardrail-preset-picker";
 
 // Mirrors backend AgentDetailDTO (backend/src/oc8/schemas/dto.py), camelCase
 // over the wire via CamelModel. Extends the AgentDTO fields inline.
@@ -78,6 +79,49 @@ export function useUpdateNarrowing(agentId: string) {
       qc.invalidateQueries({ queryKey: ["agents", agentId] });
       qc.invalidateQueries({ queryKey: ["agents"] });
     },
+  });
+}
+
+// POST /agents/{id}/guardrails/interpret -- single-shot, non-conversational
+// translation of a free-text guardrail definition into the same generic
+// 4-state decision (plus structured Conditions for "with_limits") the manual
+// editor writes (GuardrailInterpretRequest/DTO in backend/src/oc8/schemas/
+// requests.py + dto.py). Never writes anything itself, and the LLM is never
+// called again at runtime for this text: the caller shows this result to the
+// operator, who must explicitly accept it before it is merged into the
+// GuardrailValue draft that still goes through the normal useUpdateNarrowing
+// save above.
+export interface GuardrailInterpretation {
+  decision: "self_sufficient" | "with_limits" | "approval_required" | "not_allowed";
+  conditions: Condition[];
+}
+
+export function useInterpretGuardrail(agentId: string) {
+  return useMutation({
+    mutationFn: (body: { connectionName: string; function: string; definition: string }) =>
+      api.post<GuardrailInterpretation>(`/agents/${agentId}/guardrails/interpret`, body),
+  });
+}
+
+// POST /agents/{id}/guardrails/interpret-from-instruction -- the "Copilot"
+// button on the guardrails table. Same one-shot, non-conversational contract
+// as useInterpretGuardrail above, but reads the agent's own instructions
+// instead of an operator-typed definition, and proposes rules for every
+// restricted function of one connection in a single call. `results` only
+// ever lists functions the model decided to restrict -- everything else
+// stays "self_sufficient" (no entry), same silent-default convention as the
+// backend's own narrowing/frame resolution.
+export interface GuardrailBatchInterpretation {
+  results: (GuardrailInterpretation & { function: string })[];
+}
+
+export function useInterpretGuardrailsFromInstruction(agentId: string) {
+  return useMutation({
+    mutationFn: (body: { connectionName: string }) =>
+      api.post<GuardrailBatchInterpretation>(
+        `/agents/${agentId}/guardrails/interpret-from-instruction`,
+        body,
+      ),
   });
 }
 

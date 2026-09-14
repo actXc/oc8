@@ -32,6 +32,12 @@ from oc8.audit import append_event
 from oc8.authz.pdp import ToolPolicy, missing_skill_requirements, narrowing_within_frame
 from oc8.authz.scope import HumanActor
 from oc8.capas.discovery import connection_supports_value_spec, resolve_tool_pack_connection
+from oc8.capas.manifest import GuardrailAttribute
+from oc8.copilot.guardrail_interpret import (
+    GuardrailNotUnderstood,
+    interpret_guardrail_definition,
+    interpret_guardrails_from_instruction,
+)
 from oc8.modelrouter.subscription_guard import (
     SubscriptionModelNotManualOnly,
     assert_manual_only_compatible,
@@ -44,11 +50,21 @@ from oc8.runtime.registry import (
     check_runtime_capabilities,
     resolve_runtime_plugin,
 )
-from oc8.schemas.dto import AgentDetailDTO, AgentDTO, FileAttachmentDTO
+from oc8.schemas.dto import (
+    AgentDetailDTO,
+    AgentDTO,
+    ConditionDTO,
+    FileAttachmentDTO,
+    FunctionGuardrailInterpretationDTO,
+    GuardrailBatchInterpretationDTO,
+    GuardrailInterpretationDTO,
+)
 from oc8.schemas.requests import (
     AgentRenameRequest,
     AssignSkillRequest,
     CreateAgentRequest,
+    GuardrailInterpretFromInstructionRequest,
+    GuardrailInterpretRequest,
     InstructionsRequest,
     LifecycleRequest,
     ModelConfigRequest,
@@ -411,6 +427,257 @@ async def set_narrowing(
         principal=principal,
     )
     return await _agent_detail_dto(db, agent)
+
+
+@router.post(
+    "/agents/{agent_id}/narrowing/{key}/reset",
+    response_model=AgentDetailDTO,
+)
+async def reset_agent_narrowing(
+    agent_id: uuid.UUID,
+    key: str,
+    db: DbSession,
+    request: Request,
+    actor: Annotated[HumanActor, Depends(require_agent_write())],
+) -> AgentDetailDTO:
+    """Discard this agent's own override of one tool key, going back to
+    whatever the department's current frame grants for it (Source flips back
+    from "agent" to "department"/"capa_default" -- see `authz.pdp.tool_
+    policy_source`). Unlike the department-level reset
+    (`departments.py::reset_department_tool`), there is no separate defaults
+    snapshot to restore FROM here: an agent's only two layers are its own
+    narrowing and the department frame it inherits from, so "reset" simply
+    means "stop narrowing this key" -- the frame itself, whatever it
+    currently is, becomes this key's effective value again, with no cascade
+    needed since this write touches only this one agent.
+
+    Removing the key from `narrowing_overridden_keys` is required alongside
+    removing it from `narrowing["tools"]`, not implied by the latter: a key
+    can be recorded as overridden even when the agent's narrowed value
+    happens to equal the frame's (`_enforce_narrowing_logins`'s own
+    docstring), so leaving it in `narrowing_overridden_keys` after this
+    reset would make `set_department_tools`'s cascade skip this agent on the
+    very next department-level change to this key.
+    """
+    agent = await _load_agent(db, agent_id)
+    await authorize_agent_write(
+        request,
+        db,
+        actor,
+        agent.department_id,
+        not_found=HTTPException(status.HTTP_404_NOT_FOUND, "agent not found"),
+    )
+    principal = actor.principal
+    raw_tools = dict((agent.narrowing or {}).get("tools", {}))
+    if key not in raw_tools:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"tool {key!r} not set on this agent")
+
+    new_tools = dict(raw_tools)
+    del new_tools[key]
+    narrowing = dict(agent.narrowing or {})
+    narrowing["tools"] = new_tools
+    agent.narrowing = narrowing
+    overridden = set(agent.narrowing_overridden_keys or [])
+    overridden.discard(key)
+    agent.narrowing_overridden_keys = sorted(overridden)
+
+    await db.flush()
+    await append_event(
+        db,
+        tenant_id=principal.tenant_id,
+        actor_type="operator",
+        actor_id=None,
+        category="authz",
+        action="agent.narrowing.reset_to_inherited",
+        resource={"agent_id": str(agent.id), "key": key, "by": principal.subject},
+        principal=principal,
+    )
+    return await _agent_detail_dto(db, agent)
+
+
+async def _connection_guardrail_attributes(
+    db: DbSession, *, tenant_id: uuid.UUID, connection_name: str
+) -> list[GuardrailAttribute]:
+    """This connection's declared `GuardrailAttribute`s (`capas/manifest.py`)
+    -- the closed catalog `interpret_guardrail_definition` may build
+    `with_limits` conditions from. Same connection resolution `set_narrowing`
+    uses for `approval_eur`, generalized: a plugin with no matching manifest
+    (or one that declares none) yields an empty list, which is exactly what
+    forces the interpreter away from `with_limits`."""
+    mcp_conn = (
+        await db.execute(
+            select(m.McpConnection)
+            .where(
+                m.McpConnection.tenant_id == tenant_id,
+                m.McpConnection.name == connection_name,
+                m.McpConnection.credential_id.is_(None),
+            )
+            .order_by(m.McpConnection.created_at)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    cfg: dict[str, Any] = {}
+    if mcp_conn is not None and isinstance(mcp_conn.config, dict):
+        cfg = mcp_conn.config
+    manifest_conn = resolve_tool_pack_connection(
+        str(cfg.get("_plugin_name", "")), str(cfg.get("_connection_key", ""))
+    )
+    return manifest_conn.guardrail_attributes if manifest_conn is not None else []
+
+
+async def _connection_tool_catalog(
+    db: DbSession, *, tenant_id: uuid.UUID, connection_name: str
+) -> list[str]:
+    """This connection's real tool names, resolved server-side the same way
+    `GET /mcp/connections/{name}/tool-names` does -- the batch interpreter
+    below must never trust a client-supplied function list, since that list
+    also becomes the closed enum the LLM tool call is validated against."""
+    mcp_conn = (
+        await db.execute(
+            select(m.McpConnection)
+            .where(
+                m.McpConnection.tenant_id == tenant_id,
+                m.McpConnection.name == connection_name,
+                m.McpConnection.credential_id.is_(None),
+            )
+            .order_by(m.McpConnection.created_at)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    cfg: dict[str, Any] = {}
+    if mcp_conn is not None and isinstance(mcp_conn.config, dict):
+        cfg = mcp_conn.config
+    manifest_conn = resolve_tool_pack_connection(
+        str(cfg.get("_plugin_name", "")), str(cfg.get("_connection_key", ""))
+    )
+    if manifest_conn is None:
+        return []
+    scopes = manifest_conn.scopes if isinstance(manifest_conn.scopes, dict) else {}
+    return sorted({*scopes.get("read", []), *scopes.get("modify", [])})
+
+
+@router.post(
+    "/agents/{agent_id}/guardrails/interpret-from-instruction",
+    response_model=GuardrailBatchInterpretationDTO,
+)
+async def interpret_guardrails_from_instruction_endpoint(
+    agent_id: uuid.UUID,
+    body: GuardrailInterpretFromInstructionRequest,
+    db: DbSession,
+    request: Request,
+    actor: Annotated[HumanActor, Depends(require_agent_write())],
+) -> GuardrailBatchInterpretationDTO:
+    """Same one-shot, non-conversational contract as `interpret_guardrail`
+    below, but reads the agent's own instructions instead of an
+    operator-typed definition, and proposes rules for every function of one
+    connection in a single call ("Copilot" button in the guardrails table).
+    Nothing is written here; the operator still reviews and must explicitly
+    accept each suggestion, same as the free-text interpreter."""
+    agent = await _load_agent(db, agent_id)
+    await authorize_agent_write(
+        request,
+        db,
+        actor,
+        agent.department_id,
+        not_found=HTTPException(status.HTTP_404_NOT_FOUND, "agent not found"),
+    )
+    principal = actor.principal
+    tool_catalog = await _connection_tool_catalog(
+        db, tenant_id=principal.tenant_id, connection_name=body.connection_name
+    )
+    attributes = await _connection_guardrail_attributes(
+        db, tenant_id=principal.tenant_id, connection_name=body.connection_name
+    )
+    try:
+        results = await interpret_guardrails_from_instruction(
+            db,
+            tenant_id=principal.tenant_id,
+            agent=agent,
+            connection_name=body.connection_name,
+            tool_catalog=tool_catalog,
+            guardrail_attributes=attributes,
+        )
+    except GuardrailNotUnderstood as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, {"error": "guardrail_not_understood"}
+        ) from exc
+    return GuardrailBatchInterpretationDTO(
+        results=[
+            FunctionGuardrailInterpretationDTO(
+                function=r.function,
+                decision=r.decision,
+                conditions=[
+                    ConditionDTO(
+                        attribute=c.attribute,
+                        datatype=c.datatype,
+                        operator=c.operator,
+                        value=list(c.value) if isinstance(c.value, tuple) else c.value,
+                        then=c.then.value,
+                    )
+                    for c in r.conditions
+                ],
+            )
+            for r in results
+        ]
+    )
+
+
+@router.post(
+    "/agents/{agent_id}/guardrails/interpret",
+    response_model=GuardrailInterpretationDTO,
+)
+async def interpret_guardrail(
+    agent_id: uuid.UUID,
+    body: GuardrailInterpretRequest,
+    db: DbSession,
+    request: Request,
+    actor: Annotated[HumanActor, Depends(require_agent_write())],
+) -> GuardrailInterpretationDTO:
+    """Translate a free-text guardrail definition into the generic 4-state
+    decision (plus structured `Condition`s for `with_limits`) -- a pre-fill
+    suggestion only, never applied or re-interpreted at runtime. Nothing is
+    written here; the operator still reviews, must explicitly accept it in
+    the UI, and saves through `PUT /agents/{id}/narrowing` like any other
+    narrowing change."""
+    agent = await _load_agent(db, agent_id)
+    await authorize_agent_write(
+        request,
+        db,
+        actor,
+        agent.department_id,
+        not_found=HTTPException(status.HTTP_404_NOT_FOUND, "agent not found"),
+    )
+    principal = actor.principal
+    attributes = await _connection_guardrail_attributes(
+        db, tenant_id=principal.tenant_id, connection_name=body.connection_name
+    )
+    try:
+        interpretation = await interpret_guardrail_definition(
+            db,
+            tenant_id=principal.tenant_id,
+            agent=agent,
+            connection_name=body.connection_name,
+            function=body.function,
+            definition=body.definition,
+            guardrail_attributes=attributes,
+        )
+    except GuardrailNotUnderstood as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, {"error": "guardrail_not_understood"}
+        ) from exc
+    return GuardrailInterpretationDTO(
+        decision=interpretation.decision,
+        conditions=[
+            ConditionDTO(
+                attribute=c.attribute,
+                datatype=c.datatype,
+                operator=c.operator,
+                value=list(c.value) if isinstance(c.value, tuple) else c.value,
+                then=c.then.value,
+            )
+            for c in interpretation.conditions
+        ],
+    )
 
 
 @router.put(

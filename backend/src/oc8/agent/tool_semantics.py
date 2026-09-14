@@ -110,6 +110,51 @@ def extract_value(
     return max(found) if found else None
 
 
+def _extract_one_attribute(arguments: dict[str, Any], attribute_spec: dict[str, Any]) -> Any:
+    """One named value out of a call's arguments, per `GuardrailAttribute.extract`
+    (`capas/manifest.py`) and its declared `datatype`. `number` reuses
+    `extract_value`'s existing `direct_fields`/`line_items` shape; every other
+    datatype is a plain field lookup -- `{"field": "environment"}` -- since
+    string/boolean/enum values are never summed the way a monetary total is."""
+    datatype = str(attribute_spec.get("datatype", "number"))
+    if datatype == "number":
+        return extract_value(arguments, attribute_spec.get("extract"))
+    extract_spec = attribute_spec.get("extract") or {}
+    path = extract_spec.get("field")
+    if not path:
+        return None
+    parts = str(path).split(".")
+    value = _dig(arguments, parts)
+    if datatype == "boolean":
+        return bool(value) if isinstance(value, bool) else None
+    if value is None:
+        return None
+    return str(value) if datatype in ("string", "enum") else value
+
+
+def extract_attributes(
+    arguments: dict[str, Any], attribute_specs: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Every named `GuardrailAttribute` a tool call actually yields a value for,
+    keyed by `attribute.key` -- the generic counterpart to `extract_value`'s
+    single anonymous number. Feeds `authorize_tool_call`'s `attributes` param,
+    which a `Condition` (`authz/pdp.py`) is evaluated against.
+
+    An attribute a call's arguments don't match is simply absent from the
+    result (not `None`-valued) -- `evaluate_conditions` already treats a
+    missing attribute as "this condition does not match", so there is no
+    second, different way to say "not applicable" here.
+    """
+    result: dict[str, Any] = {}
+    for spec in attribute_specs:
+        key = spec.get("key")
+        if not key:
+            continue
+        value = _extract_one_attribute(arguments, spec)
+        if value is not None:
+            result[str(key)] = value
+    return result
+
 
 def _record_ref(arguments: dict[str, Any], focus_spec: dict[str, Any]) -> str:
     """`#43`, or `'Some name'`, or empty when the call names no particular record."""

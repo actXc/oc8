@@ -9,7 +9,7 @@ import {
   X,
   XCircle,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   Sheet,
@@ -18,7 +18,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { activity, agents, agentById, departmentById, type ActivityItem } from "@/lib/mock-data";
+import { useActivity, useAgents, useDepartments } from "@/lib/hooks";
+import { agents, type ActivityItem } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
 
 // The approvals half of this file is GONE, not merely unmounted: it was a sheet
@@ -27,7 +28,7 @@ import { cn } from "@/lib/utils";
 // `src/routes/workspace.tsx`. Two inboxes over one queue is how the two drift,
 // so there is only one.
 //
-// What is left here is NotificationsSheet, which is still 100% mock data.
+// What is left here is NotificationsSheet.
 
 // ============= Notifications =============
 
@@ -42,9 +43,17 @@ export function NotificationsSheet({
   onOpenChange: (v: boolean) => void;
   onOpenApprovals: () => void;
 }) {
-  const [items, setItems] = useState<Notif[]>(() =>
-    activity.map((a, i) => ({ ...a, read: i > 3 })),
-  );
+  const { data: activityData } = useActivity({ limit: 50 });
+  const { data: agentsPage } = useAgents({ pageSize: 200 });
+  const { data: departmentsPage } = useDepartments({ pageSize: 200 });
+  const [items, setItems] = useState<Notif[]>([]);
+  useEffect(() => {
+    if (!activityData) return;
+    setItems((prev) => {
+      const prevById = new Map(prev.map((i) => [i.id, i]));
+      return activityData.map((a, i) => prevById.get(a.id) ?? { ...a, read: i > 3 });
+    });
+  }, [activityData]);
   const [filter, setFilter] = useState<"all" | "warning" | "error" | "info">("all");
 
   const filtered = useMemo(() => {
@@ -110,8 +119,10 @@ export function NotificationsSheet({
         ) : (
           <ul className="h-[calc(100dvh-140px)] divide-y divide-border overflow-y-auto">
             {filtered.map((n) => {
-              const a = agentById(n.agentId);
-              const dept = a?.departmentId ? departmentById(a.departmentId) : null;
+              const a = agentsPage?.items?.find((x) => x.id === n.agentId);
+              const dept = a?.departmentId
+                ? departmentsPage?.items?.find((d) => d.id === a.departmentId)
+                : null;
               return (
                 <li key={n.id} className="px-5 py-3">
                   <div className="flex items-start gap-3">

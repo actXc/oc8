@@ -37,7 +37,12 @@ from oc8.agent.outward import (
 )
 from oc8.agent.preamble import build_run_preamble
 from oc8.agent.tool_notes import apply_tool_notes
-from oc8.agent.tool_semantics import describe_focus, describes_a_record, extract_value
+from oc8.agent.tool_semantics import (
+    describe_focus,
+    describes_a_record,
+    extract_attributes,
+    extract_value,
+)
 from oc8.approvals import raise_approval
 from oc8.audit import append_event
 from oc8.authz.pdp import (
@@ -311,6 +316,7 @@ def _authorize(
     skill_thresholds: Sequence[float | None] = (),
     skill_tool_names: frozenset[str] = frozenset(),
     value_spec: dict[str, Any] | None = None,
+    guardrail_attribute_specs: Sequence[dict[str, Any]] = (),
 ) -> Decision:
     """PEP for a tool call. Every connection tool is decided against the
     department frame (§5.3): which entry governs it is the connection key, and
@@ -376,12 +382,18 @@ def _authorize(
             return Decision(Effect.DENY, f"content exceeds {MAX_MEMORY_CONTENT_LENGTH} characters")
         return authorize_memory_write(frame, agent.narrowing or {}, tier)
     agent_threshold = (agent.presentation or {}).get("approval_value_eur")
+    applicable_attributes = [
+        spec
+        for spec in guardrail_attribute_specs
+        if not spec.get("tools") or tc.name in spec["tools"]
+    ]
     return authorize_tool_call(
         policies=tool_policies,
         connection_key=connection_key,
         right=required_right(tc.name, tool_scopes),
         tool=tc.name,
         value=_extract_value(tc.arguments, value_spec),
+        attributes=extract_attributes(tc.arguments, applicable_attributes),
         extra_thresholds=(
             float(agent_threshold) if agent_threshold is not None else None,
             *skill_thresholds,
@@ -523,6 +535,7 @@ async def run_agent(
             value_spec: dict[str, Any] | None = None
             focus_spec: dict[str, Any] | None = None
             outward_tools: list[str] | None = None
+            guardrail_attribute_specs: list[dict[str, Any]] = []
         elif mcp_conn is not None:
             connection_key = mcp_conn.name
             _cfg = mcp_conn.config if isinstance(mcp_conn.config, dict) else {}
@@ -552,12 +565,29 @@ async def run_agent(
             value_spec = _vs if isinstance(_vs, dict) else None
             focus_spec = _fs if isinstance(_fs, dict) else None
             outward_tools = _ot if isinstance(_ot, list) else None
+            # `_manifest_conn` (resolved above for `tool_scopes`) also carries
+            # this connection's declared `GuardrailAttribute`s -- reused here
+            # rather than re-parsing the manifest a second time.
+            guardrail_attribute_specs = (
+                [
+                    {
+                        "key": a.key,
+                        "datatype": a.datatype,
+                        "tools": a.tools,
+                        "extract": a.extract,
+                    }
+                    for a in _manifest_conn.guardrail_attributes
+                ]
+                if _manifest_conn is not None
+                else []
+            )
         else:
             connection_key = None
             tool_scopes = None
             value_spec = None
             focus_spec = None
             outward_tools = None
+            guardrail_attribute_specs = []
         # A resume leg continues the task its suspended leg opened; see
         # open_run_task. The run is the only place that link is recorded, so a
         # runtime that gets no run_id (a direct run_agent call in a test) simply
@@ -1039,6 +1069,7 @@ async def run_agent(
                         tool_scopes=tool_scopes,
                         skill_tool_names=skill_tool_names,
                         value_spec=call_value_spec,
+                        guardrail_attribute_specs=guardrail_attribute_specs,
                         skill_thresholds=tuple(
                             g.gt
                             for s in active_skills
@@ -1144,6 +1175,8 @@ async def run_agent(
                                         "tier": str(tc.arguments.get("tier", "")),
                                         "content": str(tc.arguments.get("content", "")),
                                     },
+                                    reason_code=decision.reason_code,
+                                    reason_context=decision.context,
                                 )
                             else:
                                 ar = await raise_approval(
@@ -1155,6 +1188,8 @@ async def run_agent(
                                     title=f"{agent.name} wants to call {tc.name}",
                                     detail=decision.reason,
                                     payload={"tool": tc.name, "arguments": tc.arguments},
+                                    reason_code=decision.reason_code,
+                                    reason_context=decision.context,
                                 )
 
                             from oc8.realtime.bus import get_event_bus

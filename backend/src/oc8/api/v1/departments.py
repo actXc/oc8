@@ -46,6 +46,7 @@ from oc8.api.deps import CurrentPrincipal, DbSession, require_departmental, requ
 from oc8.api.v1._serializers import agent_to_dto, department_to_dto, task_to_dto
 from oc8.audit import append_event
 from oc8.authz.authority import authority_for_principal, tenant_wide_read
+from oc8.authz.pdp import ConditionDatatype, ConditionOperator, Effect
 from oc8.authz.permissions import DEPARTMENT, MANAGE, VIEW, perm
 from oc8.authz.scope import HumanActor
 from oc8.capas.discovery import connection_supports_value_spec, resolve_tool_pack_connection
@@ -65,6 +66,54 @@ class DepartmentToolsDTO(CamelModel):
     deviation_counts: dict[str, int] = {}
     #: Total agents in the department -- the "M" half of "N of M".
     agent_count: int = 0
+
+
+class ConditionWriteDTO(CamelModel):
+    """Write-side shape for one entry of `ToolPolicyWriteDTO.conditions`,
+    mirroring `authz.pdp.Condition` field-for-field -- the generic "with
+    limits" rule row (design: OC8 Guardrails UX spec, generic Condition
+    model). Deliberately does NOT cross-reference `attribute` against a
+    connection's declared `GuardrailAttribute`s (this endpoint has no access
+    to a resolved manifest, same reason `only`/`approval_actions` above
+    don't cross-reference either) -- the frontend's Conditions editor is
+    what constrains attribute choice to what the connection actually
+    declares; this only validates that a submitted condition is well-formed.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    attribute: str
+    datatype: str = ConditionDatatype.NUMBER.value
+    operator: str = ConditionOperator.GTE.value
+    value: Any = None
+    then: str = Effect.REQUIRE_APPROVAL.value
+
+    @field_validator("attribute")
+    @classmethod
+    def _attribute_is_not_blank(cls, v: str) -> str:
+        if not v:
+            raise ValueError("attribute must not be the empty string")
+        return v
+
+    @field_validator("datatype")
+    @classmethod
+    def _datatype_is_known(cls, v: str) -> str:
+        if v not in {d.value for d in ConditionDatatype}:
+            raise ValueError(f"unknown condition datatype: {v!r}")
+        return v
+
+    @field_validator("operator")
+    @classmethod
+    def _operator_is_known(cls, v: str) -> str:
+        if v not in {o.value for o in ConditionOperator}:
+            raise ValueError(f"unknown condition operator: {v!r}")
+        return v
+
+    @field_validator("then")
+    @classmethod
+    def _then_is_a_real_effect(cls, v: str) -> str:
+        if v not in {e.value for e in Effect}:
+            raise ValueError(f"unknown condition effect: {v!r}")
+        return v
 
 
 class ToolPolicyWriteDTO(CamelModel):
@@ -88,6 +137,10 @@ class ToolPolicyWriteDTO(CamelModel):
     approval_eur: int | None = None
     approval_actions: list[str] = []
     only: list[str] | None = None
+    #: Generic "with limits" rules -- see `ConditionWriteDTO`. Additive
+    #: alongside `approval_eur`/`approval_actions`, mirroring
+    #: `authz.pdp.ToolPolicy.conditions` field-for-field.
+    conditions: list[ConditionWriteDTO] = []
     #: The McpConnection this department's agents use for this tool when they
     #: have no narrowing pin of their own -- `_resolve_mcp_connection`
     #: (runtime/executor.py) reads it back out of `frame["tools"][key]`
@@ -218,6 +271,44 @@ def _deviation_counts(tools: dict[str, Any], agents: Sequence[m.Agent]) -> dict[
             if key in counts:
                 counts[key] += 1
     return counts
+
+
+def _cascade_department_tools_change(
+    *,
+    old_tools: dict[str, Any],
+    new_tools: dict[str, Any],
+    agents: Sequence[m.Agent],
+) -> None:
+    """Shared by `set_department_tools` and `reset_department_tool`: cascade
+    each tool's new `enabled` default to every CURRENT agent in this
+    department that has never *deliberately* touched this tool key. See
+    `set_department_tools`'s own long comment (unchanged, kept there rather
+    than duplicated here) for why this reads `narrowing_overridden_keys` and
+    never writes to it, and why the whole policy dict is written rather than
+    a sparse `{"enabled": ...}` patch.
+
+    Over the UNION of old/new keys rather than just `new_tools`, so a reset
+    that removes a key from the frame entirely (no CAPA default to restore
+    it to) still cascades that removal to agents who never overrode it --
+    `new_tools.get(key, {})` there is an empty `ToolPolicy`, i.e. "disabled,
+    no rights", the correct meaning of "this tool no longer exists here".
+    """
+    changed_keys = {
+        key
+        for key in set(old_tools) | set(new_tools)
+        if bool(new_tools.get(key, {}).get("enabled", False))
+        != bool(old_tools.get(key, {}).get("enabled", False))
+    }
+    for key in changed_keys:
+        new_policy = new_tools.get(key, {})
+        for agent in agents:
+            if key in (agent.narrowing_overridden_keys or []):
+                continue  # a genuine, deliberate operator override -- never touch it
+            narrowing = dict(agent.narrowing or {})
+            agent_tools = dict(narrowing.get("tools", {}))
+            agent_tools[key] = dict(new_policy)
+            narrowing["tools"] = agent_tools
+            agent.narrowing = narrowing
 
 
 async def _get_department(db: DbSession, dept_id: uuid.UUID) -> m.Department:
@@ -409,12 +500,16 @@ async def get_department_tools(
     )
     tools = dict((dept.frame or {}).get("tools", {}))
     agents = (
-        await db.execute(
-            select(m.Agent).where(
-                m.Agent.department_id == dept_id, m.Agent.deleted_at.is_(None)
+        (
+            await db.execute(
+                select(m.Agent).where(
+                    m.Agent.department_id == dept_id, m.Agent.deleted_at.is_(None)
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return DepartmentToolsDTO(
         tools=tools,
         deviation_counts=_deviation_counts(tools, agents),
@@ -529,44 +624,94 @@ async def set_department_tools(
     # enabled without a connection_id is caught at runtime resolution, not
     # here, and re-saving that agent's own narrowing via `PUT .../narrowing`
     # still enforces Task 4's check as normal.
-    changed_keys = [
-        key
-        for key, policy_data in frame["tools"].items()
-        if bool(policy_data.get("enabled", False))
-        != bool(old_tools.get(key, {}).get("enabled", False))
-    ]
     agents = (
-        await db.execute(
-            select(m.Agent).where(
-                m.Agent.department_id == dept_id, m.Agent.deleted_at.is_(None)
+        (
+            await db.execute(
+                select(m.Agent).where(
+                    m.Agent.department_id == dept_id, m.Agent.deleted_at.is_(None)
+                )
             )
         )
-    ).scalars().all()
-    if changed_keys:
-        for key in changed_keys:
-            # The full new frame policy, not just `enabled` -- a sparse
-            # `{"enabled": ...}` entry still counts as a NON-None narrowing
-            # term in `effective_tool_policies`'s intersection, so every
-            # other field (read/write/send/...) would default to False there
-            # instead of falling through to the frame's own value the way an
-            # agent with no narrowing entry at all does. Writing the whole
-            # policy dict makes an untouched agent's narrowing echo the
-            # frame exactly, which intersects back to the frame unchanged --
-            # the only way to update `enabled` here without silently
-            # zeroing read/write/send for every cascaded agent.
-            for agent in agents:
-                if key in (agent.narrowing_overridden_keys or []):
-                    continue  # a genuine, deliberate operator override -- never touch it
-                narrowing = dict(agent.narrowing or {})
-                agent_tools = dict(narrowing.get("tools", {}))
-                agent_tools[key] = dict(frame["tools"][key])
-                narrowing["tools"] = agent_tools
-                agent.narrowing = narrowing
+        .scalars()
+        .all()
+    )
+    _cascade_department_tools_change(old_tools=old_tools, new_tools=frame["tools"], agents=agents)
 
     await db.flush()
     return DepartmentToolsDTO(
         tools=frame["tools"],
         deviation_counts=_deviation_counts(frame["tools"], agents),
+        agent_count=len(agents),
+    )
+
+
+@router.post(
+    "/departments/{dept_id}/tools/{key}/reset",
+    response_model=DepartmentToolsDTO,
+    dependencies=[Depends(require_permission(perm(DEPARTMENT, MANAGE)))],
+)
+async def reset_department_tool(
+    dept_id: uuid.UUID,
+    key: str,
+    db: DbSession,
+    _p: CurrentPrincipal,
+) -> DepartmentToolsDTO:
+    """Restore one tool key to its CAPA default, discarding whatever hand-
+    edit an operator made to it at the department level (Source flips back
+    from "department" to "capa_default" -- see `authz.pdp.tool_policy_
+    source`). Reads `Department.frame_capa_defaults`, the snapshot captured
+    once at template-instantiation time and never touched again (its own
+    docstring in models/core.py); a department with none at all -- hand-
+    created with no template, or one that predates the column -- has nothing
+    to restore TO, so the key is removed from the frame entirely rather than
+    silently kept as this operator's own prior edit under a different name.
+
+    Cascades exactly like `set_department_tools`, via the same shared
+    `_cascade_department_tools_change` helper, so an agent that never
+    deliberately overrode this key sees the restored value too.
+    """
+    dept = await _get_department(db, dept_id)
+    frame = dict(dept.frame or {})
+    old_tools = dict(frame.get("tools", {}))
+    if key not in old_tools:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"tool {key!r} not set on this department")
+
+    new_tools = dict(old_tools)
+    capa_defaults = dict((dept.frame_capa_defaults or {}).get("tools", {}))
+    if key in capa_defaults:
+        new_tools[key] = dict(capa_defaults[key])
+    else:
+        del new_tools[key]
+    frame["tools"] = new_tools
+    dept.frame = frame
+
+    agents = (
+        (
+            await db.execute(
+                select(m.Agent).where(
+                    m.Agent.department_id == dept_id, m.Agent.deleted_at.is_(None)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    _cascade_department_tools_change(old_tools=old_tools, new_tools=new_tools, agents=agents)
+
+    await db.flush()
+    await append_event(
+        db,
+        tenant_id=_p.tenant_id,
+        actor_type="operator",
+        actor_id=None,
+        category="authz",
+        action="department.tools.reset_to_capa_default",
+        resource={"department_id": str(dept_id), "key": key, "by": _p.subject},
+        principal=_p,
+    )
+    return DepartmentToolsDTO(
+        tools=new_tools,
+        deviation_counts=_deviation_counts(new_tools, agents),
         agent_count=len(agents),
     )
 

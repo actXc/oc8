@@ -64,6 +64,16 @@ class NarrowingRequest(CamelModel):
     narrowing: dict[str, Any] = {}
 
 
+class GuardrailInterpretRequest(CamelModel):
+    connection_name: str = Field(min_length=1)
+    function: str = Field(min_length=1)
+    definition: str = Field(min_length=1, max_length=2_000)
+
+
+class GuardrailInterpretFromInstructionRequest(CamelModel):
+    connection_name: str = Field(min_length=1)
+
+
 class ModelConfigRequest(CamelModel):
     model_config_id: uuid.UUID
     #: Per-agent sampling overrides, written into agent.definition["model_params"]

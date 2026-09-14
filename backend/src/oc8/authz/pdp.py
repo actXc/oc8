@@ -25,19 +25,34 @@ Frame / narrowing JSON shape (stored on ``department.frame`` / ``agent.narrowing
           "enabled": bool,
           "read": bool, "modify": bool,
           "approval_eur": int | null,  # threshold at or above which modify needs approval
-          "approval_actions": ["modify", ...]  # rights and/or tool keys that always need a human
+          "approval_actions": ["modify", ...],  # rights and/or tool keys that always need a human
+          "conditions": [  # generic "with limits" rules -- see `Condition` below
+            {"attribute": "order_value", "datatype": "number", "operator": ">",
+             "value": 5000, "then": "require_approval"}
+          ]
         }
       },
       "kbs": ["<kb_id>", ...],
       "memory": {"department": ["read","write"], "company": ["read"]}
     }
+
+`conditions` is deliberately generic and tool-agnostic: it does not know about
+euros or Odoo. Which `attribute` names are actually evaluable for a given tool
+call is a CAPA-declared concern (see `capas/manifest.py`'s
+`GuardrailAttribute`), not a PDP one -- this module only ever sees an already
+name-keyed `attributes` mapping (`authorize_tool_call`'s `attributes` param)
+and a list of conditions to check it against. `approval_eur`/`approval_actions`
+remain as they were (a numeric-threshold-only, tool-agnostic-but-narrower
+mechanism); they are not being replaced or reinterpreted -- `conditions` is
+the generalization new callers should reach for, kept alongside rather than
+instead of, so existing saved data keeps meaning exactly what it always did.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
@@ -50,6 +65,75 @@ class Effect(StrEnum):
     ALLOW = "allow"
     DENY = "deny"
     REQUIRE_APPROVAL = "require_approval"
+
+
+class ConditionDatatype(StrEnum):
+    """The set of value shapes a `Condition.attribute` may hold. A CAPA's
+    `GuardrailAttribute` (capas/manifest.py) declares which datatype a given
+    attribute name is, so the UI's operator/value picker can be built from
+    that alone -- this PDP module never hardcodes what an attribute means,
+    only how to compare a value against a condition once one is authored."""
+
+    NUMBER = "number"
+    STRING = "string"
+    BOOLEAN = "boolean"
+    ENUM = "enum"
+
+
+class ConditionOperator(StrEnum):
+    GT = ">"
+    GTE = ">="
+    LT = "<"
+    LTE = "<="
+    EQ = "=="
+    NEQ = "!="
+    IN = "in"
+    NOT_IN = "not_in"
+
+
+@dataclass(frozen=True)
+class Condition:
+    """One business rule row for the "with limits" permission state:
+
+        IF <attribute> <operator> <value> THEN <then>
+
+    Deliberately generic -- `attribute` is just a name (e.g. "order_value",
+    "recipient_domain", "environment"); this module has no special case for
+    any particular one. What attributes exist and what they mean is a CAPA
+    concern (`GuardrailAttribute`); what a condition made from them decides is
+    this module's concern. `datatype` is carried alongside the raw `value` so
+    round-tripping through the UI/API never has to guess a stored value's
+    intended type back from raw JSON.
+    """
+
+    attribute: str
+    datatype: str = ConditionDatatype.NUMBER.value
+    operator: str = ConditionOperator.GTE.value
+    value: Any = None
+    then: Effect = Effect.REQUIRE_APPROVAL
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any]) -> Condition:
+        raw_value = data.get("value")
+        return cls(
+            attribute=str(data["attribute"]),
+            datatype=str(data.get("datatype", ConditionDatatype.NUMBER.value)),
+            operator=str(data.get("operator", ConditionOperator.GTE.value)),
+            # Lists (the "in"/"not_in" comparison set) become tuples so every
+            # `Condition` -- and therefore every `ToolPolicy` -- stays
+            # hashable; JSON has no tuple type, so `to_json` converts back.
+            value=tuple(raw_value) if isinstance(raw_value, list) else raw_value,
+            then=Effect(data.get("then", Effect.REQUIRE_APPROVAL.value)),
+        )
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "attribute": self.attribute,
+            "datatype": self.datatype,
+            "operator": self.operator,
+            "value": list(self.value) if isinstance(self.value, tuple) else self.value,
+            "then": self.then.value,
+        }
 
 
 @dataclass(frozen=True)
@@ -68,6 +152,14 @@ class ToolPolicy:
     #: same right alone -- the precision `only` gives to surface, applied to
     #: approval.
     approval_actions: frozenset[str] = frozenset()
+    #: Generic "with limits" rules, evaluated in order by `evaluate_conditions`
+    #: (first match wins). Additive alongside `approval_eur`/`approval_actions`,
+    #: not a replacement -- see the module docstring. Kept alongside `only`,
+    #: `approval_actions` etc. as a tighten-only field: `effective_tool_policies`
+    #: unions a frame's and a narrowing's conditions rather than intersecting,
+    #: same as `approval_actions`, because a narrowing can only ever add a
+    #: rule, never drop one the frame set.
+    conditions: tuple[Condition, ...] = ()
     #: When set, the ONLY tool names this connection may offer. None means all.
     #:
     #: A ceiling has always been about rights; this makes it about surface too,
@@ -92,6 +184,7 @@ class ToolPolicy:
             return cls()
         raw_only = data.get("only")
         raw_actions = data.get("approval_actions")
+        raw_conditions = data.get("conditions")
         return cls(
             enabled=bool(data.get("enabled", False)),
             read=bool(data.get("read", False)),
@@ -100,6 +193,9 @@ class ToolPolicy:
             approval_actions=frozenset(str(a) for a in raw_actions) if raw_actions else frozenset(),
             only=frozenset(str(t) for t in raw_only) if raw_only else None,
             connection_id=data.get("connection_id"),
+            conditions=tuple(Condition.from_json(c) for c in raw_conditions)
+            if raw_conditions
+            else (),
         )
 
     def to_json(self) -> dict[str, Any]:
@@ -111,6 +207,7 @@ class ToolPolicy:
             "approval_actions": sorted(self.approval_actions),
             "only": sorted(self.only) if self.only is not None else None,
             "connection_id": self.connection_id,
+            "conditions": [c.to_json() for c in self.conditions],
         }
 
     def has_right(self, action: str) -> bool:
@@ -125,6 +222,19 @@ class ToolPolicy:
 class Decision:
     effect: Effect
     reason: str = ""
+    #: A stable, translatable identifier for WHY this decision was made --
+    #: e.g. "condition_matched", "always_requires_approval",
+    #: "value_threshold_exceeded" -- alongside `context`, the structured
+    #: parameters an i18n template needs to render `reason` as a real
+    #: sentence for a human approver ("Lennart may confirm sales orders
+    #: autonomously up to €5,000. This order is €12,480.") instead of
+    #: showing `reason`'s raw, un-i18n'd English string verbatim (today's
+    #: approval-pane behaviour, kept as the fallback for any reason that
+    #: predates this field or any DENY path that never set one -- see
+    #: `approvals/service.py`'s own docstring on `detail`). None for every
+    #: DENY/no-grant path, which this pass leaves as free text only.
+    reason_code: str | None = None
+    context: dict[str, Any] = field(default_factory=dict)
 
     @property
     def allowed(self) -> bool:
@@ -169,6 +279,11 @@ def effective_tool_policies(
             # this passes through from the narrowing term alone; there is no
             # `f.connection_id` to consider.
             connection_id=no.connection_id if no else None,
+            # Union, same reasoning as `approval_actions`: a narrowing may add
+            # a stricter rule the frame never set, but cannot drop one the
+            # frame did -- so the effective rule set is everything either
+            # level named, not just what both agree on.
+            conditions=f.conditions + (no.conditions if no else ()),
         )
     # Agent-exclusive grants: a narrowing key with no frame counterpart at
     # all. There is nothing to intersect against, so the narrowing term IS
@@ -187,6 +302,7 @@ def effective_tool_policies(
             approval_actions=exclusive.approval_actions,
             only=exclusive.only,
             connection_id=exclusive.connection_id,
+            conditions=exclusive.conditions,
         )
     return out
 
@@ -214,6 +330,117 @@ def _min_threshold(frame_eur: int | None, narrow_eur: int | None) -> int | None:
     if narrow_eur is None:
         return frame_eur
     return min(frame_eur, narrow_eur)
+
+
+#: Ordered narrowest-first. A future "company"/org-wide tier slots in
+#: between "department" and "capa_default" -- `tool_policy_source` walks an
+#: ordered list built from this shape rather than assuming exactly two
+#: levels, so adding one is an extra entry in that walk, not a rewrite of it.
+PROVENANCE_LEVELS: tuple[str, ...] = ("agent", "department", "capa_default")
+
+
+def tool_policy_source(
+    key: str,
+    *,
+    frame: dict[str, Any],
+    capa_defaults: dict[str, Any] | None,
+    narrowing_overridden_keys: Sequence[str] | frozenset[str],
+) -> str:
+    """Which level a tool policy key's effective value actually came from --
+    the guardrails UX Source column (design: OC8 Guardrails UX spec
+    §"Source"). Walks `PROVENANCE_LEVELS` narrowest-first as an ordered list
+    of `(level, is_customized_at_this_level)` pairs and returns the first
+    level found customized; falls through to the broadest level if none was.
+
+    "Customized" means something different at each level -- an agent's is an
+    explicit override flag, a department's is a diff against its own
+    captured default -- so each level's own test is spelled out once, in
+    `PROVENANCE_LEVELS` order, rather than one generic test applied
+    identically at every level. Inserting a `company` level between
+    "department" and "capa_default" later means adding one more `(label,
+    customized)` pair to this list (plus, if needed, changing what
+    "department" diffs against) -- it does not touch how "agent" is decided
+    or how callers use this function's return value.
+
+    `capa_defaults=None` (see `Department.frame_capa_defaults`'s own
+    docstring) means this department has no captured default at all -- a
+    hand-created department, or one that predates that column -- so nothing
+    below "department" is ever reachable: every key not agent-overridden
+    reports "department".
+    """
+    levels: list[tuple[str, bool]] = [
+        ("agent", key in narrowing_overridden_keys),
+        (
+            "department",
+            capa_defaults is None or _tools(frame).get(key) != _tools(capa_defaults).get(key),
+        ),
+    ]
+    for label, customized in levels:
+        if customized:
+            return label
+    return "capa_default"
+
+
+def _condition_matches(condition: Condition, attributes: Mapping[str, Any]) -> bool:
+    if condition.attribute not in attributes:
+        # An attribute this call never produced (e.g. a condition written for
+        # an action that doesn't extract it) cannot match -- fail toward "no
+        # rule fired" here; the caller's own DENY-by-default checks already
+        # covered whether the call is permitted at all.
+        return False
+    actual = attributes[condition.attribute]
+    expected = condition.value
+    try:
+        if condition.operator == ConditionOperator.GT:
+            return bool(actual > expected)
+        if condition.operator == ConditionOperator.GTE:
+            return bool(actual >= expected)
+        if condition.operator == ConditionOperator.LT:
+            return bool(actual < expected)
+        if condition.operator == ConditionOperator.LTE:
+            return bool(actual <= expected)
+        if condition.operator == ConditionOperator.EQ:
+            return bool(actual == expected)
+        if condition.operator == ConditionOperator.NEQ:
+            return bool(actual != expected)
+        if condition.operator == ConditionOperator.IN:
+            return actual in expected
+        if condition.operator == ConditionOperator.NOT_IN:
+            return actual not in expected
+    except TypeError:
+        # Comparing incompatible types (e.g. a string against a number because
+        # the attribute's real value drifted from what the condition expects)
+        # is a data problem, not a match -- never raise out of a policy check.
+        return False
+    logger.warning(
+        "unknown condition operator %r on attribute %r", condition.operator, condition.attribute
+    )
+    return False
+
+
+def evaluate_conditions(
+    conditions: Sequence[Condition], attributes: Mapping[str, Any]
+) -> Decision | None:
+    """The generic "with limits" resolver: first condition whose `attribute`
+    is present in `attributes` and whose `operator`/`value` matches wins;
+    returns None if nothing matched (falls through to plain ALLOW at the
+    caller). Deliberately knows nothing about euros, Odoo, or any other
+    domain concept -- see the module docstring and `Condition`."""
+    for condition in conditions:
+        if _condition_matches(condition, attributes):
+            reason = f"condition '{condition.attribute} {condition.operator} {condition.value!r}'"
+            return Decision(
+                condition.then,
+                f"{reason} matched",
+                reason_code="condition_matched",
+                context={
+                    "attribute": condition.attribute,
+                    "operator": condition.operator,
+                    "threshold": condition.value,
+                    "actual": attributes.get(condition.attribute),
+                },
+            )
+    return None
 
 
 def authorize_tool(
@@ -410,12 +637,19 @@ def authorize_tool_call(
     value: float | None,
     extra_thresholds: Sequence[float | None] = (),
     tool: str | None = None,
+    attributes: Mapping[str, Any] | None = None,
 ) -> Decision:
     """Decide a tool call against the department frame (§5.3).
 
     `extra_thresholds` carries the agent's own `approval_value_eur` and any
     active skill guardrail; the strictest (lowest non-null) of those and the
     policy's own `approval_eur` governs.
+
+    `attributes` is the generic, CAPA-declared-name-keyed sibling of `value`
+    (e.g. `{"order_value": 12480, "customer_type": "wholesale"}`), checked
+    against `policy.conditions` via `evaluate_conditions`. It is additive
+    alongside `value`/`extra_thresholds`, not a replacement for them -- a
+    connection with no conditions authored behaves exactly as before.
 
     `tool` is checked against the frame's surface (`only`) where one is set.
     Withholding a tool from the advertised list is not enough on its own: a
@@ -462,7 +696,17 @@ def authorize_tool_call(
             if right in policy.approval_actions
             else f"{tool!r} always needs approval"
         )
-        return Decision(Effect.REQUIRE_APPROVAL, reason)
+        return Decision(
+            Effect.REQUIRE_APPROVAL,
+            reason,
+            reason_code="always_requires_approval",
+            context={"right": right, "tool": tool, "connection": connection_key},
+        )
+
+    if policy.conditions:
+        condition_decision = evaluate_conditions(policy.conditions, attributes or {})
+        if condition_decision is not None:
+            return condition_decision
 
     thresholds = [t for t in (policy.approval_eur, *extra_thresholds) if t is not None]
     if thresholds:
@@ -478,5 +722,7 @@ def authorize_tool_call(
                 f"value €{value:g} meets threshold €{strictest:g}"
                 if value is not None
                 else f"every action needs approval (threshold €{strictest:g})",
+                reason_code="value_threshold_exceeded",
+                context={"threshold": strictest, "actual": value if value is not None else 0.0},
             )
     return Decision(Effect.ALLOW)

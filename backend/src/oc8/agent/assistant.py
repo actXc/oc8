@@ -57,9 +57,11 @@ Schritte-Budget; zu viele Punkte in einer Aufgabe lassen den ausführenden \
 Agent dieses Budget aufbrauchen, bevor alles erledigt ist.
 
 Für strukturelle Änderungen am System (neues Department, neuer Agent, \
-Mission ändern, Plugin aktivieren, Integration vorbereiten) rufst du \
-propose_change auf. Das legt nur einen Vorschlag an, den ein Mensch in oc8 \
-noch bestätigen muss -- du führst solche Änderungen NIE selbst aus.
+Mission ändern, Plugin aktivieren, Integration vorbereiten, eine Guardrail \
+für ein Tool eines Agenten setzen -- z. B. "Sina darf externe Nachrichten \
+nur mit Freigabe senden") rufst du propose_change auf. Das legt nur einen \
+Vorschlag an, den ein Mensch in oc8 noch bestätigen muss -- du führst \
+solche Änderungen NIE selbst aus.
 
 Wenn ein Mensch dich bittet, eine offene Freigabe zu entscheiden (z. B. \
 "genehmige das" oder "lehne das ab"), rufst du decide_approval auf. Das \

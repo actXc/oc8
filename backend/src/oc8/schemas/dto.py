@@ -156,6 +156,12 @@ class ApprovalDTO(CamelModel):
     tool_arguments: dict[str, Any] = {}
     title_translations: dict[str, str] = {}
     detail_translations: dict[str, str] = {}
+    #: `ApprovalRequest.reason_context` verbatim: `{"code": ..., ...}` when
+    #: this was raised from a PDP `authorize_tool_call` decision, letting the
+    #: pane render an i18n template instead of `detail`'s raw English string.
+    #: `None` for every approval not raised that way -- `detail` remains the
+    #: only "why" for those.
+    reason_context: dict[str, Any] | None = None
 
 
 class ClarificationDTO(CamelModel):
@@ -569,6 +575,20 @@ class IngestionJobDTO(CamelModel):
     stats: dict[str, Any] = {}
 
 
+class ConditionDTO(CamelModel):
+    """Read-side mirror of `authz.pdp.Condition`, one entry of
+    `ToolPolicyDTO.conditions` -- see `ConditionWriteDTO` (departments.py) for
+    the write-side counterpart this is deliberately kept field-for-field
+    identical to.
+    """
+
+    attribute: str
+    datatype: str
+    operator: str
+    value: Any = None
+    then: str
+
+
 class ToolPolicyDTO(CamelModel):
     enabled: bool
     read: bool
@@ -581,6 +601,12 @@ class ToolPolicyDTO(CamelModel):
     approval_actions: list[str] = []
     only: list[str] | None = None
     connection_id: str | None = None
+    #: Generic "with limits" rules -- see `ConditionDTO`. Silently dropped by
+    #: pydantic's default extra="ignore" until this field existed, even
+    #: though `ToolPolicy.to_json()` always emits the key -- callers building
+    #: `**ToolPolicy.to_json()` need this present or `conditions` never
+    #: reaches the frontend at all.
+    conditions: list[ConditionDTO] = []
 
 
 class AgentDetailDTO(AgentDTO):
@@ -606,6 +632,12 @@ class AgentDetailDTO(AgentDTO):
     #: diverged from the department default for this tool" answer -- the same
     #: one `departments.py`'s `_deviation_counts` (§ Abweichungen) uses.
     narrowing_overridden_keys: list[str] = []
+    #: Per-`effective_tools` key, which level actually produced that key's
+    #: current value -- "agent" / "department" / "capa_default" (see
+    #: `authz.pdp.tool_policy_source`; guardrails UX Source column). A key
+    #: absent here (should not happen for anything present in
+    #: `effective_tools`) has no known provenance rather than a guessed one.
+    tool_policy_sources: dict[str, str] = {}
     runtime_ref: str | None = None
     #: The run this agent is on right now, whoever started it. Without it the
     #: detail screen can only show a live log for a run started in that same
@@ -738,6 +770,20 @@ class GuardrailDTO(CamelModel):
     adjustable: list[GuardrailAdjustableDTO] = []
 
 
+class GuardrailAttributeDTO(CamelModel):
+    """One named, typed value a connection's tools expose for a "with limits"
+    Condition -- mirrors `oc8.capas.manifest.GuardrailAttribute`. The
+    Conditions editor may only ever build a rule against an attribute
+    listed here for the tool being edited; it never invents a field name."""
+
+    key: str
+    label: str
+    label_translations: dict[str, str] = {}
+    datatype: str = "number"
+    enum_values: list[str] = []
+    tools: list[str] = []
+
+
 class McpLoginDTO(CamelModel):
     """A Credential-backed McpConnection -- name, department_id (None for a
     tenant-wide login, set when the login is scoped to one department),
@@ -781,6 +827,11 @@ class McpConnectionDTO(CamelModel):
     #: a euro-threshold field in a preset ever affect a decision; the spec
     #: itself stays server-side.
     has_value_spec: bool = False
+    #: Named, typed attributes this connection's tools expose for "with
+    #: limits" Conditions, resolved from the manifest exactly like
+    #: `guardrail_presets` -- empty for a connection whose plugin declares
+    #: none (predates the generic condition model) or is no longer installed.
+    guardrail_attributes: list[GuardrailAttributeDTO] = []
     #: The plugin this connection was created from (the same `_plugin_name`
     #: stamp `materialise.py` writes at enable time), or None for a connection
     #: an operator created by hand via "Add connection" rather than through a
@@ -798,6 +849,14 @@ class McpConnectionDTO(CamelModel):
 
 class ConnectionToolNamesDTO(CamelModel):
     names: list[str] = []
+    #: Same names split by `authz.pdp.required_right`'s classification, so a
+    #: guardrail editor can show the one checkbox (Read xor Modify) that
+    #: actually applies to a given tool instead of both -- a tool is never
+    #: both at once (`required_right` fails closed to "modify" for anything
+    #: unlisted in the connection's `scopes`, so `read` here is a strict
+    #: subset of `names`, never the other way around).
+    read: list[str] = []
+    modify: list[str] = []
 
 
 class RenderedComponentDTO(CamelModel):
@@ -1165,6 +1224,37 @@ class RuntimeOptionDTO(CamelModel):
 
 class VapidPublicKeyDTO(CamelModel):
     public_key: str
+
+
+class GuardrailInterpretationDTO(CamelModel):
+    """The free-text interpreter's structured suggestion -- one of the same
+    4 states the manual editor writes (`self_sufficient`/`with_limits`/
+    `approval_required`/`not_allowed`), plus `conditions` when `decision ==
+    "with_limits"`. This IS the artifact the operator reviews and must
+    explicitly accept before it is merged into the draft policy; no euro-
+    only shape survives here -- see `ConditionDTO`."""
+
+    decision: str
+    conditions: list[ConditionDTO] = []
+
+
+class FunctionGuardrailInterpretationDTO(GuardrailInterpretationDTO):
+    """One function's entry in a `GuardrailBatchInterpretationDTO` -- same
+    shape as a single free-text interpretation, plus which function it's
+    for."""
+
+    function: str
+
+
+class GuardrailBatchInterpretationDTO(CamelModel):
+    """The instruction-driven interpreter's suggestions for a whole
+    connection in one call -- one entry per function it decided to restrict.
+    A function absent here got no suggestion (`self_sufficient`, i.e. leave
+    it at whatever the department/inherited policy already allows); the
+    operator still reviews and accepts each entry individually, exactly like
+    a single `GuardrailInterpretationDTO`."""
+
+    results: list[FunctionGuardrailInterpretationDTO] = []
 
 
 class WidgetInstanceDTO(CamelModel):

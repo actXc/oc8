@@ -311,9 +311,17 @@ async def test_get_connection_tool_names_returns_the_connections_own_tools(
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             resp = await c.get("/api/v1/mcp/connections/odoo/tool-names", headers=_h(tenant))
             assert resp.status_code == 200, resp.text
-            names = resp.json()["names"]
+            body = resp.json()
+            names = body["names"]
             assert "search_records" in names
             assert "create_record" in names
+            # Split by right, not just the flat union: a guardrail editor needs
+            # to know which single checkbox (read xor modify) applies to a
+            # given tool -- a tool is never both.
+            assert "search_records" in body["read"]
+            assert "search_records" not in body["modify"]
+            assert "create_record" in body["modify"]
+            assert "create_record" not in body["read"]
 
 
 async def test_get_connection_tool_names_for_an_unknown_connection_is_empty(

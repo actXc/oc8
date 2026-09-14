@@ -23,6 +23,7 @@ from oc8.capas.manifest import ManifestError, ToolPackConnection, parse_manifest
 from oc8.schemas.dto import (
     ConnectionToolNamesDTO,
     GuardrailAdjustableDTO,
+    GuardrailAttributeDTO,
     GuardrailDTO,
     GuardrailPresetDTO,
     McpConnectionDTO,
@@ -156,6 +157,21 @@ def _to_dto(c: m.McpConnection) -> McpConnectionDTO:
         if guardrail_library is not None
         else None
     )
+    attributes = (
+        [
+            GuardrailAttributeDTO(
+                key=a.key,
+                label=a.label,
+                label_translations=translations_for(i18n, a.label),
+                datatype=a.datatype,
+                enum_values=a.enum_values,
+                tools=a.tools,
+            )
+            for a in manifest_conn.guardrail_attributes
+        ]
+        if manifest_conn is not None
+        else []
+    )
     has_value_spec = manifest_conn is not None and "value_spec" in manifest_conn.config
     # The same `_plugin_name` stamp `_manifest_connection` above reads to find
     # the manifest connection -- read directly off `cfg` rather than through
@@ -176,6 +192,7 @@ def _to_dto(c: m.McpConnection) -> McpConnectionDTO:
         health=c.health or {},
         guardrail_presets=presets,
         guardrail_library=library,
+        guardrail_attributes=attributes,
         has_value_spec=has_value_spec,
         plugin_name=plugin_name if isinstance(plugin_name, str) and plugin_name else None,
         credential_type=manifest_conn.credential_type or None if manifest_conn else None,
@@ -223,8 +240,10 @@ async def get_connection_tool_names(name: str, db: DbSession) -> ConnectionToolN
         return ConnectionToolNamesDTO(names=[])
     manifest_conn, _guardrail_library, _i18n = resolved
     scopes = manifest_conn.scopes if isinstance(manifest_conn.scopes, dict) else {}
-    names = sorted({*scopes.get("read", []), *scopes.get("modify", [])})
-    return ConnectionToolNamesDTO(names=names)
+    read = sorted(scopes.get("read", []))
+    modify = sorted(scopes.get("modify", []))
+    names = sorted({*read, *modify})
+    return ConnectionToolNamesDTO(names=names, read=read, modify=modify)
 
 
 @router.post(

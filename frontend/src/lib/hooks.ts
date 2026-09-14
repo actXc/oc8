@@ -49,6 +49,9 @@ export interface ToolPolicy {
   approvalActions: string[];
   only: string[] | null;
   connectionId?: string | null;
+  // Generic "with limits" rules -- see `Condition`
+  // (@/components/guardrail-preset-picker). Mirrors `ToolPolicyDTO.conditions`.
+  conditions?: import("@/components/guardrail-preset-picker").Condition[];
 }
 
 export interface AgentDetail extends Agent {
@@ -104,6 +107,12 @@ export interface Approval {
   toolArguments?: Record<string, unknown>;
   titleTranslations?: Record<string, string>;
   detailTranslations?: Record<string, string>;
+  // Structured "why" behind a PDP-raised approval -- `ApprovalDTO.reasonContext`
+  // verbatim: `{code: "condition_matched" | "always_requires_approval" |
+  // "value_threshold_exceeded", ...}`. `null`/absent for approvals not raised
+  // via `authorize_tool_call` (e.g. agent decision requests) -- `detail`
+  // remains the only "why" for those.
+  reasonContext?: Record<string, unknown> | null;
 }
 
 /** A question an agent parked mid-run. The other half of the workspace queue. */
@@ -194,6 +203,25 @@ export interface McpConnection {
   // flow skip asking the operator to pick a credential type from every
   // registered one, most of which are irrelevant to this tool.
   credentialType: string | null;
+  // Which attributes a Conditions editor may build a "with limits" rule
+  // against for this connection -- mirrors `GuardrailAttributeDTO`
+  // (backend/src/oc8/schemas/dto.py), CAPA-declared per connection/tool-action
+  // (`ToolPackConnection.guardrail_attributes`, capas/manifest.py). The
+  // editor must never offer an attribute absent here: this list IS the
+  // "technically available and evaluable" boundary the generic Condition
+  // model (design correction #2) requires.
+  guardrailAttributes: GuardrailAttribute[];
+}
+
+export interface GuardrailAttribute {
+  key: string;
+  label: string;
+  labelTranslations: Record<string, string>;
+  datatype: "number" | "string" | "boolean" | "enum";
+  enumValues: string[];
+  // Scopes this attribute to specific tool names; empty means every tool on
+  // this connection may expose it.
+  tools: string[];
 }
 
 // Model config DTO (§ model registry). Provider/locality are free-form
@@ -927,11 +955,18 @@ export interface ConnectionToolNamesDTO {
   modify: string[];
 }
 
+// No `staleTime` meant every "Edit" click on a tool's guardrails refetched
+// this from scratch -- same `_manifest_connection` re-parse-on-every-request
+// cost `useMcpConnections` above already documents, just paid again here
+// because this is a separate query key. A plugin's manifest only changes
+// when its folder changes on disk (never at runtime), so the same
+// generous staleTime applies for the same reason.
 export const useConnectionToolNames = (name: string) =>
   useQuery({
     queryKey: ["connections", name, "tool-names"],
     queryFn: () => api.get<ConnectionToolNamesDTO>(`/mcp/connections/${name}/tool-names`),
     enabled: !!name,
+    staleTime: 5 * 60 * 1000,
   });
 
 /** The installed/enabled agent-runtime plugins, for the hire-time picker

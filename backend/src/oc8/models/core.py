@@ -69,6 +69,17 @@ class Department(Base, PkMixin, TenantMixin, TimestampMixin, SoftDeleteMixin):
     goal: Mapped[str | None] = mapped_column(Text)
     team_lead_agent_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     frame: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    #: A snapshot of `frame` exactly as the department_template plugin declared
+    #: it at instantiation time -- never touched again afterwards, even as
+    #: `frame` itself is edited. This is the "capa_default" rung of the
+    #: guardrails Source/provenance ladder (design: OC8 Guardrails UX spec
+    #: §"Source"): a tool policy key still equal to its own entry here is
+    #: still the plugin's default; one that differs was hand-edited for this
+    #: department. `None` for a department created by hand (no template
+    #: behind it) or one that predates this column -- Source then reports
+    #: every key as "department" rather than misreporting a default that was
+    #: never captured.
+    frame_capa_defaults: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Display-only fields backing the office view (icon, okr, kpi, accent, ...).
     presentation: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     prompt_caching_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

@@ -266,6 +266,7 @@ def approval_to_dto(a: m.ApprovalRequest, names: ApprovalNames | None = None) ->
         tool_arguments=raw_arguments if isinstance(raw_arguments, dict) else {},
         title_translations=_i18n_str(payload.get("i18n"), "title"),
         detail_translations=_i18n_str(payload.get("i18n"), "detail"),
+        reason_context=a.reason_context,
     )
 
 

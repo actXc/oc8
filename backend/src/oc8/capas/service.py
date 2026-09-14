@@ -288,6 +288,9 @@ async def instantiate_department(
         tenant_id=tenant_id,
         name=name or mf.get("name", "Department"),
         frame=dict(spec.get("frame", {})),
+        # Captured once, here, and never refreshed by a later template
+        # upgrade -- see the column's own docstring (models/core.py) for why.
+        frame_capa_defaults=dict(spec.get("frame", {})),
     )
     db.add(dept)
     await db.flush()

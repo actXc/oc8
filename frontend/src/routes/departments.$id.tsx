@@ -24,7 +24,7 @@ import { NewAgentDialog } from "@/components/new-agent-dialog";
 import { MemoryEditor } from "@/components/memory-editor";
 import { KnowledgeAssignment } from "@/components/knowledge-assignment";
 import { ComponentGrantPanel } from "@/components/component-grant-panel";
-import type { GuardrailValue } from "@/components/guardrail-preset-picker";
+import type { Condition, GuardrailValue } from "@/components/guardrail-preset-picker";
 import {
   ToolGuardrailTable,
   type ToolGuardrailRow,
@@ -58,7 +58,7 @@ import {
   X as XIcon,
   Zap,
 } from "lucide-react";
-import { type Agent, type Task, type TaskColumn, supervisorOf } from "@/lib/mock-data";
+import { type Agent, type Supervisor, type Task, type TaskColumn } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 
@@ -70,6 +70,24 @@ const iconMap = {
   hr: UserRound,
   support: Headphones,
 } as const;
+
+// Pure resolver over a fetched `agents` list -- mirrors the former
+// mock-data.ts supervisorOf, now parameterized on real query data instead
+// of the static mock array (which never contains a real agent's live id).
+function supervisorOf(agents: Agent[], agent: Agent): Supervisor {
+  if (agent.supervisorId === "human") return { kind: "human", source: "explicit" };
+  if (agent.supervisorId) {
+    const a = agents.find((x) => x.id === agent.supervisorId);
+    if (a) return { kind: "agent", agent: a, source: "explicit" };
+  }
+  if (agent.departmentId) {
+    const lead = agents.find((a) => a.departmentId === agent.departmentId && a.isLead);
+    if (lead && lead.id !== agent.id) {
+      return { kind: "agent", agent: lead, source: "department-lead" };
+    }
+  }
+  return { kind: "human", source: "fallback" };
+}
 
 export const Route = createFileRoute("/departments/$id")({
   component: DepartmentDetail,
@@ -823,6 +841,7 @@ export function DepartmentGuardrailsPanel({ departmentId }: { departmentId: stri
         : [],
       approvalEur: typeof raw.approval_eur === "number" ? (raw.approval_eur as number) : null,
       only: Array.isArray(raw.only) ? (raw.only as string[]) : [],
+      conditions: Array.isArray(raw.conditions) ? (raw.conditions as Condition[]) : [],
     };
   }
 
@@ -843,6 +862,7 @@ export function DepartmentGuardrailsPanel({ departmentId }: { departmentId: stri
         approval_eur: next.approvalEur,
         approval_actions: next.approvalActions,
         only: next.only,
+        conditions: next.conditions,
       },
     };
     return new Promise((resolve) => {
@@ -862,7 +882,14 @@ export function DepartmentGuardrailsPanel({ departmentId }: { departmentId: stri
   function addTool(name: string, policy: GuardrailValue | null) {
     persistOne(
       name,
-      policy ?? { read: true, modify: false, approvalActions: [], approvalEur: null, only: [] },
+      policy ?? {
+        read: true,
+        modify: false,
+        approvalActions: [],
+        approvalEur: null,
+        only: [],
+        conditions: [],
+      },
     );
   }
 
@@ -1106,7 +1133,7 @@ function TaskDistribution({ lead, members }: { lead: Agent; members: Agent[] }) 
                 {n.m.name}
               </text>
               {(() => {
-                const sup = supervisorOf(n.m);
+                const sup = supervisorOf(members, n.m);
                 const supFill = sup.kind === "agent" ? sup.agent.avatarColor : "var(--primary)";
                 const supLabel = sup.kind === "agent" ? sup.agent.name[0] : "H";
                 return (
@@ -1151,7 +1178,7 @@ function TaskDistribution({ lead, members }: { lead: Agent; members: Agent[] }) 
         </div>
         <ul className="grid gap-1.5 sm:grid-cols-2">
           {members.map((m) => {
-            const sup = supervisorOf(m);
+            const sup = supervisorOf(members, m);
             return (
               <li
                 key={m.id}

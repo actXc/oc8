@@ -189,6 +189,53 @@ describe("ApprovalsWidget", () => {
     expect(screen.queryByText(/nothing is waiting for you/i)).not.toBeInTheDocument();
   });
 
+  it("renders a structured reason sentence from reasonContext instead of the raw detail string", async () => {
+    const approval = {
+      id: "a1",
+      title: "Vera wants to send a quote",
+      agentId: "agent-1",
+      agentName: "Vera",
+      departmentId: "dept-1",
+      departmentName: "Sales",
+      amount: "€7,400",
+      createdAt: new Date().toISOString(),
+      toolArguments: {},
+      options: [],
+      recommendation: null,
+      actionType: "tool_send",
+      detail: "condition 'order_value >= 5000' matched",
+      taskTitle: null,
+      toolName: null,
+      reasonContext: {
+        code: "condition_matched",
+        attribute: "order_value",
+        operator: ">=",
+        threshold: 5000,
+        actual: 7400,
+      },
+    };
+    vi.spyOn(hooks, "useApprovals").mockReturnValue({
+      data: [approval],
+      isPending: false,
+    } as never);
+    vi.spyOn(hooks, "useClarifications").mockReturnValue({ data: [], isPending: false } as never);
+    vi.spyOn(hooks, "useStanding").mockReturnValue({
+      seats: [{ departmentId: "dept-1", seatRole: "dept_approver" }],
+      decidesEverywhere: false,
+      unrestricted: false,
+      unassigned: false,
+      pending: false,
+    } as never);
+    vi.spyOn(hooks, "useDecideApproval").mockReturnValue({ isPending: false } as never);
+    vi.spyOn(hooks, "useAnswerClarification").mockReturnValue({ isPending: false } as never);
+
+    render(<ApprovalsWidget config={{}} onConfigChange={vi.fn()} />, { wrapper });
+    fireEvent.click(screen.getByText("Vera wants to send a quote"));
+    expect(await screen.findByText(/Order Value ≥/)).toBeInTheDocument();
+    expect(screen.getByText(/this one is/)).toBeInTheDocument();
+    expect(screen.queryByText("condition 'order_value >= 5000' matched")).not.toBeInTheDocument();
+  });
+
   it("shows the underlying error message when the queue fails to load", () => {
     vi.spyOn(hooks, "useApprovals").mockReturnValue({
       data: undefined,

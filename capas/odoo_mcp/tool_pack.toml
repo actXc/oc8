@@ -124,6 +124,41 @@ path = ["values", "order_line"]
 price_field = "price_unit"
 qty_field = "product_uom_qty"
 
+# Named, typed attributes this connection's tools expose for "with limits"
+# Conditions (generic condition model -- authz/pdp.py's Condition). The PDP
+# itself knows nothing about order values or Odoo models; this is what lets a
+# department author "IF order_value > 5000 THEN approval required" or
+# "IF model == 'helpdesk.ticket' THEN not allowed" without any Odoo-specific
+# code in the guardrail engine. order_value reuses the exact extraction shape
+# `value_spec` above already declares (same fields, same line-item summing) --
+# it is the first attribute to exist because that extraction already existed,
+# not because the condition model treats it specially.
+[[connections.guardrail_attributes]]
+key = "order_value"
+label = "Order value"
+datatype = "number"
+tools = ["create_record", "update_record"]
+
+[connections.guardrail_attributes.extract]
+direct_fields = ["expected_revenue", "amount_total", "amount_untaxed", "price_total", "price_subtotal"]
+
+[connections.guardrail_attributes.extract.line_items]
+path = ["values", "order_line"]
+price_field = "price_unit"
+qty_field = "product_uom_qty"
+
+# A non-numeric example, proving the model is genuinely generic: which Odoo
+# model a write touches (e.g. "crm.lead", "helpdesk.ticket") -- lets a
+# condition say "not allowed for helpdesk.ticket" without a euro amount at all.
+[[connections.guardrail_attributes]]
+key = "model"
+label = "Odoo model"
+datatype = "string"
+tools = ["create_record", "update_record", "delete_record"]
+
+[connections.guardrail_attributes.extract]
+field = "model"
+
 # NEUTRAL SEAM (focus_spec): how to describe which record a call touches, for the
 # live log. Only listed entities are surfaced.
 [connections.config.focus_spec]

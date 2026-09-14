@@ -1,6 +1,7 @@
 import { Fragment, useState } from "react";
 import { Plus } from "lucide-react";
 import { useT } from "@/lib/i18n";
+import { ApiError } from "@/lib/api";
 import type { McpConnection } from "@/lib/hooks";
 import type { GuardrailValue } from "@/components/guardrail-preset-picker";
 import { ToolGuardrailEditorPanel } from "@/components/tool-guardrail-editor-panel";
@@ -18,6 +19,18 @@ export function describeGuardrailSaveError(
   error: unknown,
   t: (en: string, de: string) => string,
 ): string {
+  // A 403 here is always `require_agent_write`/`authorize_agent_write`
+  // (`api/deps.py`) refusing the write outright -- its `detail` is an
+  // engineer-facing string like "requires permission: agent:manage", never
+  // the operator's business language. Shown as a fixed, translated line
+  // instead of leaking that string, same as the RLS-denial 403s these share
+  // a shape with.
+  if (error instanceof ApiError && error.status === 403) {
+    return t(
+      "This action is blocked by an OC8 security policy.",
+      "Diese Aktion ist durch eine OC8-Sicherheitsrichtlinie gesperrt.",
+    );
+  }
   const raw = error instanceof Error ? error.message : String(error);
   let detail: unknown;
   try {
@@ -95,6 +108,8 @@ export function ToolGuardrailTable({
   onSave,
   onAdd,
   saving,
+  departmentId,
+  agentId,
 }: {
   level: "department" | "agent";
   rows: ToolGuardrailRow[];
@@ -105,8 +120,18 @@ export function ToolGuardrailTable({
   // ceiling doesn't allow it) doesn't also discard the edit the operator
   // was mid-way through.
   onSave: (toolKey: string, next: GuardrailValue) => Promise<boolean>;
-  onAdd: (name: string, policy: GuardrailValue | null) => void;
+  onAdd: (name: string, policy: GuardrailValue | null, connectionId?: string | null) => void;
   saving: boolean;
+  // Agent level only: passed through to AddToolPicker so it can resolve a
+  // login inline before "Add" persists (see AddToolPicker's own comment).
+  // Left undefined for the department level, where saving never requires a
+  // connection_id.
+  departmentId?: string | null;
+  // Agent level only: passed through to ToolGuardrailEditorPanel so its
+  // per-function inner table can call the interpret endpoint. Left
+  // undefined at the department level, which has no per-agent identity to
+  // interpret against (see that panel's own comment on this prop).
+  agentId?: string;
 }) {
   const t = useT();
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -189,13 +214,13 @@ export function ToolGuardrailTable({
                         ceiling={level === "agent" ? row.ceilingPolicy : null}
                         value={draft}
                         onChange={setDraft}
-                        loginPicker={row.loginPicker}
                         onCancel={() => setEditingKey(null)}
                         onSave={async () => {
                           const ok = await onSave(row.toolKey, draft);
                           if (ok) setEditingKey(null);
                         }}
                         saving={saving}
+                        agentId={level === "agent" ? agentId : undefined}
                       />
                     </td>
                   </tr>
@@ -220,8 +245,9 @@ export function ToolGuardrailTable({
         <AddToolPicker
           addableNames={addableNames}
           connections={connections}
-          onAdd={(name, policy) => {
-            onAdd(name, policy);
+          departmentId={level === "agent" ? departmentId : undefined}
+          onAdd={(name, policy, connectionId) => {
+            onAdd(name, policy, connectionId);
             setPickerOpen(false);
           }}
           onClose={() => setPickerOpen(false)}

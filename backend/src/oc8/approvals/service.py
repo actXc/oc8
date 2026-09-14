@@ -217,6 +217,8 @@ async def raise_approval(
     payload: dict[str, Any] | None = None,
     expires_at: dt.datetime | None = None,
     department_id: uuid.UUID | _Derive | None = DERIVE,
+    reason_code: str | None = None,
+    reason_context: dict[str, Any] | None = None,
 ) -> m.ApprovalRequest:
     """Create a request for a human, and tell the people who can answer it.
 
@@ -233,6 +235,11 @@ async def raise_approval(
     confusing but safe -- whereas announcing post-commit would mean every caller
     remembering to, and the ones that forget fail silently. The window is small
     and the failure is visible; the alternative fails quietly and forever.
+
+    `reason_code`/`reason_context` are the PDP `Decision`'s structured "why"
+    (see `authz.pdp.Decision`), stored together as `ApprovalRequest.reason_context`.
+    Leave both None for an approval not raised from an `authorize_tool_call`
+    decision -- `detail`/`amount_text` remain the only "why" for those.
 
     `department_id` defaults to `DERIVE`, which reads it off the agent. It is
     pinned here, at the moment the question is asked, rather than joined through
@@ -256,6 +263,9 @@ async def raise_approval(
         payload=payload or {},
         expires_at=expires_at,
         status="pending",
+        reason_context={"code": reason_code, **(reason_context or {})}
+        if reason_code is not None
+        else None,
     )
     db.add(approval)
     await db.flush()
