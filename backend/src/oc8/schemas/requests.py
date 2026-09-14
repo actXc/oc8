@@ -89,6 +89,12 @@ class ModelConfigRequest(CamelModel):
     #: raw overrides untouched; an empty dict clears them back to inheriting the
     #: assigned ModelConfig's own extra params.
     extra: dict[str, Any] | None = None
+    #: Per-agent override of the run-loop step budget (agent.engine._max_steps),
+    #: written to agent.definition["max_steps"] -- a top-level key, unlike the
+    #: four sampling fields above, which live under definition["model_params"].
+    #: None/absent leaves the agent's existing override untouched; 0 or a
+    #: negative number clears it back to inheriting settings.agent_max_steps.
+    max_steps: int | None = None
 
 
 class InstructionsRequest(CamelModel):

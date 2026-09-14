@@ -44,9 +44,15 @@ class Settings(BaseSettings):
     capas_path: str = "capas"
 
     # Max tool-using steps one agent run may take before it stops (§8.3). The
-    # framework default; an agent plugin may raise it per agent for longer,
-    # multi-record workflows (agent.definition["max_steps"]).
-    agent_max_steps: int = 12
+    # framework default; an operator may override it per agent, in either
+    # direction, via agent.definition["max_steps"] (see AssignedModelPanel /
+    # PATCH /agents/{id}/model-config). High rather than low by default: a
+    # run that stops mid-task because it hit an arbitrary step ceiling looks
+    # identical to one that finished, which is worse than a slower run.
+    # Token/budget metering (oc8.metering.check_budget) is the real cost
+    # backstop -- it is just checked once per run, not per step, so this is
+    # deliberately a large finite number, not literal infinity.
+    agent_max_steps: int = 200
 
     # Isolated agent runtime (§8.5): the control-plane internal base URL an
     # isolated agent container calls back on (compose service name by default),

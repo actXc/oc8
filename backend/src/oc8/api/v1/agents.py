@@ -287,6 +287,9 @@ async def _agent_detail_dto(db: DbSession, agent: m.Agent) -> AgentDetailDTO:
         max_tokens=model_params.get("max_tokens"),
         effort=model_params.get("effort"),
         extra=model_params.get("extra") if isinstance(model_params.get("extra"), dict) else None,
+        # Top-level key, unlike the four sampling fields above -- see
+        # engine._max_steps and switch_model in agents_write.py.
+        max_steps=(agent.definition or {}).get("max_steps"),
     )
 
 

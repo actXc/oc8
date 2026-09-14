@@ -17,7 +17,12 @@ import sys
 
 import httpx
 
-MAX_ITERS = 64  # hard backstop; the control plane enforces the real step budget
+#: Hard backstop only -- the control plane (internal_agent.py's /step) enforces
+#: the real, per-agent step budget (agent.engine._max_steps) and ends the run
+#: with status_override="done" well before this fires in normal operation.
+#: Set high enough that a generous per-agent override (config.py's
+#: agent_max_steps default is 200) never gets silently truncated here.
+MAX_ITERS = 2000
 MAX_BODY_CHARS = 1000
 PREVIEW_CHARS = 200
 

@@ -651,6 +651,10 @@ class AgentDetailDTO(AgentDTO):
     max_tokens: int | None = None
     effort: str | None = None
     extra: dict[str, Any] | None = None
+    #: Per-agent override of the run-loop step budget (agent.definition
+    #: ["max_steps"], a top-level key -- see engine._max_steps). None means
+    #: "inherit settings.agent_max_steps", not a framework default value.
+    max_steps: int | None = None
 
 
 class AgentInstructionRevisionDTO(CamelModel):

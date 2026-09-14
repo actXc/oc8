@@ -15,7 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from oc8 import models as m
-from oc8.agent.engine import CancelCheck, InboxCheck, RunResult, open_run_task
+from oc8.agent.engine import CancelCheck, InboxCheck, RunResult, _max_steps, open_run_task
 from oc8.auth import get_identity_provider
 from oc8.config import get_settings
 from oc8.metering import check_budget, trigger_budget_hard_stop
@@ -191,10 +191,14 @@ class DockerIsolatedRuntime:
             # executed, and since 2026-08-02 the worker keeps its queue claim for
             # the same reason. The run ROW is then closed by the reconciler /
             # the reclaim one ABANDONED_AFTER later.
-            # Note the size: agent_max_steps * 60 is a minute a step (12 minutes
-            # by default), while a single step's model call alone is allowed 180s.
-            # It is a cap on how long an agent may work, not a liveness guess.
-            code = await driver.wait(handle, timeout_s=float(settings.agent_max_steps * 60))
+            # Note the size: _max_steps(agent) * 60 is a minute a step (this
+            # agent's own override if it has one, else settings.agent_max_steps),
+            # while a single step's model call alone is allowed 180s. It is a cap
+            # on how long an agent may work, not a liveness guess -- must track
+            # the SAME per-agent budget internal_agent.py's /step endpoint
+            # enforces, or a raised per-agent override would still get killed by
+            # a wall-clock timeout sized for the framework default.
+            code = await driver.wait(handle, timeout_s=float(_max_steps(agent) * 60))
             if code != 0:
                 logs = await driver.logs(handle)
                 logger.warning(

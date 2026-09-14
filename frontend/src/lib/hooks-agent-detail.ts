@@ -56,6 +56,10 @@ export interface AgentDetail {
   maxTokens: number | null;
   effort: string | null;
   extra: Record<string, unknown> | null;
+  // Per-agent override of the run-loop step budget (agent.engine._max_steps).
+  // null means "inherit settings.agent_max_steps", not a literal framework
+  // default value.
+  maxSteps: number | null;
 }
 
 // Reuses the ["agents", id] key already invalidated by the "agent.status"

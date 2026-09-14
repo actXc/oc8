@@ -574,3 +574,45 @@ async def test_a_container_that_never_exits_is_torn_down_and_the_run_fails(
     assert 0 < driver.waited_with < float("inf")
     # And the wedged container is gone, not merely disowned.
     assert driver.torn_down is True
+
+
+async def test_container_wait_timeout_scales_with_the_agents_own_max_steps_override(
+    app_session: AppSessionFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The wall-clock cap on the container must track the SAME per-agent budget
+    internal_agent.py's /step endpoint enforces (agent.engine._max_steps) --
+    not the framework default alone -- or an operator raising one agent's step
+    budget above the default would still get that agent's container killed on
+    a timeout sized for the old, lower budget."""
+    tenant = uuid.uuid4()
+    agent_id, run_id = await _agent_and_run(app_session, tenant)
+    async with app_session(tenant) as db:
+        agent = await db.get(m.Agent, agent_id)
+        assert agent is not None
+        agent.definition = {"max_steps": 500}
+
+    class _RecordingDriver(_FakeDriver):
+        def __init__(self) -> None:
+            super().__init__(None)
+            self.waited_with: float | None = None
+
+        async def wait(self, handle: SandboxHandle, timeout_s: float) -> int:
+            self.waited_with = timeout_s
+            async with app_session(tenant) as db:
+                run = await db.get(m.AgentRun, run_id)
+                assert run is not None
+                run.context = {**run.context, "isolated_result": {"status": "done", "output": "ok"}}
+            return 0
+
+    driver = _RecordingDriver()
+    monkeypatch.setattr("oc8.runtime.isolated.get_sandbox_driver", lambda: driver)
+
+    async with app_session(tenant) as db:
+        agent = await db.get(m.Agent, agent_id)
+        assert agent is not None
+        result = await DockerIsolatedRuntime().execute(
+            db, agent=agent, task_text="verkauf etwas", tenant_id=tenant, run_id=run_id
+        )
+
+    assert result.status == "done"
+    assert driver.waited_with == 500 * 60

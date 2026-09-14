@@ -796,6 +796,13 @@ async def switch_model(
         definition["model_params"] = model_params
     else:
         definition.pop("model_params", None)
+    # Top-level key, not nested under model_params: engine._max_steps reads
+    # agent.definition["max_steps"] directly.
+    if "max_steps" in body.model_fields_set:
+        if body.max_steps is not None and body.max_steps > 0:
+            definition["max_steps"] = body.max_steps
+        else:
+            definition.pop("max_steps", None)
     agent.definition = definition
     await db.flush()
     await append_event(
