@@ -300,6 +300,11 @@ export interface RunComponentDTO {
   props: Record<string, unknown>;
 }
 
+export interface RunTodoDTO {
+  content: string;
+  status: "pending" | "in_progress" | "completed";
+}
+
 export interface RunDTO {
   id: string;
   agentId: string;
@@ -310,6 +315,10 @@ export interface RunDTO {
   steps: number;
   toolCalls: Array<Record<string, unknown>>;
   taskId?: string | null;
+  // From the agent's most recent todo_write call (whole-list-replace, not an
+  // append log — same durability as toolCalls/steps, present from the initial
+  // GET /runs/{id} fetch, no WS-live patcher exists for it yet).
+  todos?: RunTodoDTO[];
   // Never returned by the backend -- populated client-side only, by the
   // "run.output_delta" live-event patcher (lib/live/apply-event.ts) as chunks
   // arrive over the WS. Absent until the first delta lands, so a fresh

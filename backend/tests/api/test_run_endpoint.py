@@ -71,3 +71,33 @@ async def test_run_enqueues_and_status_polls(
                 run_row = await s.get(m.AgentRun, uuid.UUID(run_id))
                 assert run_row is not None
                 assert run_row.state == "queued"
+
+
+async def test_run_todos_reach_the_wire(app_session: AppSessionFactory) -> None:
+    """The todo_write control tool's list is stored on
+    `AgentRun.context["todos"]` and must round-trip through `GET /runs/{id}`
+    -- same durable-field shape as rendered_components (see test_chat.py's
+    equivalent regression test for that field's snake/camel aliasing)."""
+    tenant = uuid.UUID(str(ACME_TENANT_ID))
+    async with app_session(tenant) as s:
+        agent = m.Agent(tenant_id=tenant, department_id=uuid.uuid4(), name="Dev")
+        s.add(agent)
+        await s.flush()
+        run = m.AgentRun(
+            tenant_id=tenant,
+            agent_id=agent.id,
+            state="done",
+            context={"todos": [{"content": "Check the invoice", "status": "in_progress"}]},
+        )
+        s.add(run)
+        await s.flush()
+        run_id = run.id
+
+    app = create_app()
+    token = get_identity_provider().mint(tenant_id=tenant, subject="dev-user", role="org_admin")
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+            headers = {"Authorization": f"Bearer {token}"}
+            r = await client.get(f"/api/v1/runs/{run_id}", headers=headers)
+            assert r.status_code == 200, r.text
+            assert r.json()["todos"] == [{"content": "Check the invoice", "status": "in_progress"}]

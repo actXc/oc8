@@ -159,6 +159,7 @@ def run_to_dto(run: m.AgentRun) -> RunDTO:
         task_id=str(run.task_id) if run.task_id else None,
         question=ctx.get("pending_question"),
         rendered_components=ctx.get("rendered_components", []),
+        todos=ctx.get("todos", []),
     )
 
 

@@ -5,6 +5,8 @@ import {
   BookOpen,
   Check,
   CheckCircle2,
+  Circle,
+  CircleDot,
   Clock,
   Copy,
   Crown,
@@ -66,6 +68,7 @@ import {
   type McpLoginDTO,
   type ModelDTO,
   type RunDTO,
+  type RunTodoDTO,
   type TriggerDTO,
 } from "@/lib/hooks";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
@@ -2441,6 +2444,7 @@ function RunTranscript({ run, pending }: { run: RunDTO | undefined; pending: boo
           })}
         </div>
       )}
+      {run.todos && run.todos.length > 0 && <RunTodoList todos={run.todos} />}
       <div className="max-h-[360px] min-h-[160px] overflow-auto rounded-md border border-border bg-background/60 p-3 font-mono text-[12px] leading-relaxed">
         {run.toolCalls.length === 0 ? (
           <div className="py-6 text-center text-xs text-muted-foreground">
@@ -2657,6 +2661,40 @@ function RunStateBadge({ state }: { state: string }) {
 // toolCalls is `Array<Record<string, unknown>>` with no fixed schema on the
 // wire yet — render whichever recognizable keys are present and fall back to
 // the raw JSON so nothing silently disappears.
+// The agent's most recent todo_write call -- whole-list-replace, so this
+// always reflects its current plan, not a history of every edit.
+function RunTodoList({ todos }: { todos: RunTodoDTO[] }) {
+  const t = useT();
+  return (
+    <div className="rounded-md border border-border bg-background/40 p-3">
+      <div className="mb-2 text-[11px] uppercase tracking-wider text-muted-foreground">
+        {t("Todos", "Todos")}
+      </div>
+      <ul className="space-y-1">
+        {todos.map((todo, i) => (
+          <li key={i} className="flex items-start gap-2 text-xs">
+            {todo.status === "completed" ? (
+              <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--status-success)]" />
+            ) : todo.status === "in_progress" ? (
+              <CircleDot className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--status-running)]" />
+            ) : (
+              <Circle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            )}
+            <span
+              className={cn(
+                "min-w-0",
+                todo.status === "completed" && "text-muted-foreground line-through",
+              )}
+            >
+              {todo.content}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function ToolCallRow({ call }: { call: Record<string, unknown> }) {
   const name =
     (call.tool as string | undefined) ??

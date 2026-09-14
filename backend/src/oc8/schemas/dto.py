@@ -879,6 +879,15 @@ class RenderedComponentDTO(CamelModel):
     props: dict[str, object] = {}
 
 
+class TodoDTO(CamelModel):
+    """One item from the agent's most recent `todo_write` call (control_tools.py's
+    `ControlOutcome.todos`). The list is whole-list-replace, not append-only --
+    this is always the agent's current full todo list, not a history of edits."""
+
+    content: str
+    status: str
+
+
 class RunDTO(CamelModel):
     id: str
     agent_id: str
@@ -894,6 +903,11 @@ class RunDTO(CamelModel):
     # Unlike the live-only `run.component_rendered` WS event, this survives a page
     # reload or an unattended run nobody watched live.
     rendered_components: list[RenderedComponentDTO] = []
+    # Same durability reasoning as rendered_components, for the agent's most
+    # recent todo_write call (agent/engine.py's RunResult.todos / internal_agent
+    # .py's ctx["todos"]). Empty means either the agent never called todo_write,
+    # or it cleared the list on its last call -- both render as "no todos".
+    todos: list[TodoDTO] = []
 
 
 class ChatSessionDTO(CamelModel):
