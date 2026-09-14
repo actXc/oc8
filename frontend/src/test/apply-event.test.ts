@@ -62,6 +62,48 @@ describe("run.component_rendered", () => {
   });
 });
 
+describe("run.todos_updated", () => {
+  it("replaces the run's todos wholesale", () => {
+    const qc = new QueryClient();
+    qc.setQueryData(["run", "r1"], {
+      id: "r1",
+      state: "running",
+      steps: 1,
+      toolCalls: [],
+      todos: [{ content: "First", status: "pending" }],
+    });
+
+    applyEvent(
+      qc,
+      event("run.todos_updated", {
+        run_id: "r1",
+        todos: [
+          { content: "First", status: "completed" },
+          { content: "Second", status: "in_progress" },
+        ],
+      }),
+    );
+
+    const run = qc.getQueryData(["run", "r1"]) as { todos?: Array<Record<string, unknown>> };
+    expect(run.todos).toEqual([
+      { content: "First", status: "completed" },
+      { content: "Second", status: "in_progress" },
+    ]);
+  });
+
+  it("does nothing for a run that is not in the cache", () => {
+    const qc = new QueryClient();
+    applyEvent(
+      qc,
+      event("run.todos_updated", {
+        run_id: "unknown",
+        todos: [{ content: "First", status: "pending" }],
+      }),
+    );
+    expect(qc.getQueryData(["run", "unknown"])).toBeUndefined();
+  });
+});
+
 describe("run.tool_call", () => {
   it("appends one tool call to the run's toolCalls array", () => {
     const qc = new QueryClient();

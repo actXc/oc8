@@ -1495,6 +1495,77 @@ async def test_run_agent_publishes_a_rendered_component(
 
 
 @pytest.mark.asyncio
+async def test_run_agent_publishes_todos(app_session: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """todo_write's list is DATA on the outcome (see control_tools.py); like
+    render_component above, it is run_agent's job to turn that into the
+    realtime event an already-open Live Log tab actually consumes -- without
+    it, `useRun`'s cache only ever reflects the todos present at its initial
+    GET fetch (see frontend/src/lib/live/apply-event.ts)."""
+    from oc8.agent.engine import run_agent
+    from oc8.modelrouter import CompletionResult, ToolCall, Usage, chunk_from_result
+
+    published: list[tuple[str, dict[str, Any]]] = []
+
+    class _SpyBus:
+        async def publish_event(
+            self, tenant_id: Any, type_: str, data: dict[str, Any], **kw: Any
+        ) -> None:
+            published.append((type_, data))
+
+    monkeypatch.setattr("oc8.realtime.bus.get_event_bus", lambda: _SpyBus())
+
+    class _WritesTodoThenStops:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def complete(self, req: Any) -> CompletionResult:
+            self.calls += 1
+            if self.calls == 1:
+                return CompletionResult(
+                    text="",
+                    tool_calls=[
+                        ToolCall(
+                            id="c1",
+                            name="todo_write",
+                            arguments={"todos": [{"content": "Check it", "status": "pending"}]},
+                        )
+                    ],
+                    usage=Usage(1, 1),
+                    stop_reason="tool_use",
+                    provider="ollama",
+                    model="m",
+                )
+            return CompletionResult(
+                text="fertig",
+                tool_calls=[],
+                usage=Usage(1, 1),
+                stop_reason="stop",
+                provider="ollama",
+                model="m",
+            )
+
+        async def stream(self, req: Any) -> Any:
+            yield chunk_from_result(await self.complete(req))
+
+    monkeypatch.setattr("oc8.agent.engine.get_model_router", lambda: _WritesTodoThenStops())
+
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:
+        agent, _task = await _dept_agent_task(db, tenant)
+        run = m.AgentRun(tenant_id=tenant, agent_id=agent.id, state="running", context={})
+        db.add(run)
+        await db.flush()
+        await run_agent(
+            db, agent=agent, task_text="drei Dinge erledigen", tenant_id=tenant, run_id=run.id
+        )
+
+    assert (
+        "run.todos_updated",
+        {"run_id": str(run.id), "todos": [{"content": "Check it", "status": "pending"}]},
+    ) in published
+
+
+@pytest.mark.asyncio
 async def test_run_agent_returns_rendered_components_durably(
     app_session: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -1252,6 +1252,42 @@ async def test_the_internal_endpoint_publishes_a_rendered_component(
 
 
 @pytest.mark.asyncio
+async def test_the_internal_endpoint_publishes_todos(
+    app_session: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Parity with the in-process engine's todos fix: without this, an
+    already-open Live Log tab watching an isolated/container run only ever
+    sees the todos present at its initial GET /runs/{id} fetch (see
+    frontend/src/lib/live/apply-event.ts's `run.todos_updated` patcher)."""
+    published: list[tuple[str, dict[str, Any]]] = []
+
+    class _SpyBus:
+        async def publish_event(
+            self, tenant_id: Any, type_: str, data: dict[str, Any], **kw: Any
+        ) -> None:
+            published.append((type_, data))
+
+    monkeypatch.setattr("oc8.realtime.bus.get_event_bus", lambda: _SpyBus())
+    tenant = uuid.uuid4()
+    async with app_session(tenant) as db:  # type: ignore[operator]
+        agent, _task, run = await _plain_agent_run(db, tenant)
+        agent_id, run_id = agent.id, run.id
+
+    code, body = await _post_tool(
+        tenant,
+        agent_id,
+        run_id,
+        "todo_write",
+        {"todos": [{"content": "Check it", "status": "pending"}]},
+    )
+    assert code == 200, body
+    assert (
+        "run.todos_updated",
+        {"run_id": str(run_id), "todos": [{"content": "Check it", "status": "pending"}]},
+    ) in published
+
+
+@pytest.mark.asyncio
 async def test_the_internal_endpoint_makes_a_tool_call_live(
     app_session: object, monkeypatch: pytest.MonkeyPatch
 ) -> None:

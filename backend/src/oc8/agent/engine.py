@@ -1298,6 +1298,20 @@ async def run_agent(
                                 # need `nonlocal` and every RunResult below already
                                 # closes over the one list object.
                                 todos[:] = control.todos
+                                if run_id is not None:
+                                    # Same reasoning as run.component_rendered above:
+                                    # an already-open Live Log tab's `useRun` cache
+                                    # is otherwise stuck with whatever todos existed
+                                    # at its initial GET fetch, since nothing else
+                                    # refetches or polls it.
+                                    from oc8.realtime.bus import get_event_bus
+
+                                    await get_event_bus().publish_event(
+                                        tenant_id,
+                                        "run.todos_updated",
+                                        {"run_id": str(run_id), "todos": control.todos},
+                                        source=f"oc8/run/{run_id}",
+                                    )
                             if control.suspend == "waiting_for_input":
                                 task.state = "waiting_for_input"
                                 return RunResult(

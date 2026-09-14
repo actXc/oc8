@@ -126,6 +126,18 @@ const patchers: Record<string, Patcher> = {
         : prev,
     );
   },
+  // The agent's whole to-do list as of the last todo_write call (whole-list
+  // replace, not appended like toolCalls/components above) -- see
+  // backend/src/oc8/agent/control_tools.py's ControlOutcome.todos and its
+  // publish call sites in engine.py/internal_agent.py.
+  "run.todos_updated": (qc, d) => {
+    const runId = d.run_id as string | undefined;
+    const todos = d.todos as unknown[] | undefined;
+    if (!runId || !todos) return;
+    qc.setQueryData(["run", runId], (prev: unknown) =>
+      prev ? { ...(prev as object), todos } : prev,
+    );
+  },
   "agent.status": (qc, d) => {
     const agentId = d.agent_id as string | undefined;
     const status = d.status as string | undefined;

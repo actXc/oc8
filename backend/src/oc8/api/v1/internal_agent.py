@@ -781,6 +781,20 @@ async def tool(
             # Whole-list replace, unlike rendered_components above -- this IS
             # the current state, not a log of every call. See RunResult.todos.
             ctx["todos"] = control.todos
+            # Live tab open on this run right now: without this, the frontend's
+            # `useRun` cache only ever sees the todos captured at its initial GET
+            # fetch (no polling, everything else after that is WS-patched) -- an
+            # already-open Live Log would show a stale or empty list until the
+            # viewer navigated away and back. Same "durable copy + live event"
+            # split as rendered_component above.
+            from oc8.realtime.bus import get_event_bus
+
+            await get_event_bus().publish_event(
+                run.tenant_id,
+                "run.todos_updated",
+                {"run_id": str(run.id), "todos": control.todos},
+                source=f"oc8/run/{run.id}",
+            )
     elif decision.effect is Effect.DENY:
         output = f"ERROR: {decision.reason or 'denied'}"
         dispatched = False
