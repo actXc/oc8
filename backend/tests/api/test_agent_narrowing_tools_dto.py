@@ -89,6 +89,7 @@ async def test_narrowing_tools_reflects_the_agents_own_stored_narrowing(
                 "approvalActions": [],
                 "only": None,
                 "connectionId": None,
+                "conditions": [],
             }
 
 

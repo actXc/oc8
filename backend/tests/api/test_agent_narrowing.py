@@ -357,3 +357,75 @@ async def test_setting_approval_eur_for_a_connection_with_a_value_spec_is_accept
                 headers=headers,
             )
             assert r.status_code == 200, r.text
+
+
+async def test_resetting_an_overridden_key_drops_it_and_clears_the_override_flag(
+    app_session: AppSessionFactory,
+) -> None:
+    tenant = uuid.UUID(str(ACME_TENANT_ID))
+    async with app_session(tenant) as db:
+        department = m.Department(
+            tenant_id=tenant,
+            name=f"D-{uuid.uuid4().hex}",
+            frame={"tools": {"github": {"enabled": True, "read": True, "modify": False}}},
+        )
+        db.add(department)
+        await db.flush()
+        agent = m.Agent(
+            tenant_id=tenant,
+            department_id=department.id,
+            name="Probe",
+            narrowing={"tools": {"github": {"enabled": True, "read": True, "modify": True}}},
+            narrowing_overridden_keys=["github"],
+        )
+        db.add(agent)
+        await db.flush()
+        agent_id = agent.id
+
+    app = create_app()
+    async with LifespanManager(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            headers = {"Authorization": f"Bearer {_token(tenant)}"}
+            r = await client.post(
+                f"/api/v1/agents/{agent_id}/narrowing/github/reset", headers=headers
+            )
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert "github" not in body["narrowingTools"]
+            assert body["narrowingOverriddenKeys"] == []
+            # Falls back to whatever the department frame currently grants.
+            assert body["effectiveTools"]["github"]["modify"] is False
+            assert body["toolPolicySources"]["github"] == "department"
+
+    async with app_session(tenant) as db:
+        refreshed = await db.get(m.Agent, agent_id)
+        assert refreshed is not None
+        assert "github" not in refreshed.narrowing.get("tools", {})
+        assert refreshed.narrowing_overridden_keys == []
+
+
+async def test_resetting_an_untracked_key_404s(app_session: AppSessionFactory) -> None:
+    tenant = uuid.UUID(str(ACME_TENANT_ID))
+    async with app_session(tenant) as db:
+        department = m.Department(
+            tenant_id=tenant,
+            name=f"D-{uuid.uuid4().hex}",
+            frame={"tools": {"github": {"enabled": True, "read": True, "modify": False}}},
+        )
+        db.add(department)
+        await db.flush()
+        agent = m.Agent(tenant_id=tenant, department_id=department.id, name="Probe")
+        db.add(agent)
+        await db.flush()
+        agent_id = agent.id
+
+    app = create_app()
+    async with LifespanManager(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            headers = {"Authorization": f"Bearer {_token(tenant)}"}
+            r = await client.post(
+                f"/api/v1/agents/{agent_id}/narrowing/github/reset", headers=headers
+            )
+            assert r.status_code == 404, r.text

@@ -107,6 +107,7 @@ async def test_well_formed_payload_is_accepted_and_echoed_back(
                 "approval_eur": 3000,
                 "approval_actions": ["send"],
                 "only": ["search_records", "post_message"],
+                "conditions": [],
                 "default_connection_id": None,
             }
         },
@@ -530,3 +531,153 @@ async def test_put_department_tools_also_reports_deviation_counts(
         body = resp.json()
         assert body["deviationCounts"]["odoo"] == 1
         assert body["agentCount"] == 1
+
+
+async def test_a_generic_condition_round_trips_through_the_write_and_read_paths(
+    app_session: AppSessionFactory,
+) -> None:
+    """The generic Condition model (authz/pdp.py) is writable through this
+    endpoint, not just readable off a hand-built frame -- proves
+    `ToolPolicyWriteDTO.conditions`/`ConditionWriteDTO` actually reach
+    `department.frame["tools"][key]["conditions"]` in the exact shape
+    `Condition.from_json` expects."""
+    tenant, dept_id = await _seed_department(app_session)
+    payload = {
+        "tools": {
+            "odoo": {
+                "enabled": True,
+                "modify": True,
+                "conditions": [
+                    {"attribute": "order_value", "operator": ">", "value": 5000},
+                ],
+            }
+        }
+    }
+    expected_condition = {
+        "attribute": "order_value",
+        "datatype": "number",
+        "operator": ">",
+        "value": 5000,
+        "then": "require_approval",
+    }
+    async with _http() as http:
+        h = _headers(tenant, "org_admin")
+        resp = await http.put(f"/api/v1/departments/{dept_id}/tools", json=payload, headers=h)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["tools"]["odoo"]["conditions"] == [expected_condition]
+
+        get_resp = await http.get(f"/api/v1/departments/{dept_id}/tools", headers=h)
+        assert get_resp.status_code == 200, get_resp.text
+        assert get_resp.json()["tools"]["odoo"]["conditions"] == [expected_condition]
+
+
+async def test_an_unknown_condition_operator_is_rejected(
+    app_session: AppSessionFactory,
+) -> None:
+    tenant, dept_id = await _seed_department(app_session)
+    payload = {
+        "tools": {
+            "odoo": {
+                "conditions": [{"attribute": "order_value", "operator": "~=", "value": 1}],
+            }
+        }
+    }
+    async with _http() as http:
+        h = _headers(tenant, "org_admin")
+        resp = await http.put(f"/api/v1/departments/{dept_id}/tools", json=payload, headers=h)
+        assert resp.status_code == 422, resp.text
+
+
+async def test_a_blank_condition_attribute_is_rejected(
+    app_session: AppSessionFactory,
+) -> None:
+    tenant, dept_id = await _seed_department(app_session)
+    payload = {"tools": {"odoo": {"conditions": [{"attribute": "", "value": 1}]}}}
+    async with _http() as http:
+        h = _headers(tenant, "org_admin")
+        resp = await http.put(f"/api/v1/departments/{dept_id}/tools", json=payload, headers=h)
+        assert resp.status_code == 422, resp.text
+
+
+async def test_resetting_a_key_with_a_capa_default_restores_it_verbatim(
+    app_session: AppSessionFactory,
+) -> None:
+    """A key that WAS the CAPA template's own default, then hand-edited by an
+    operator, goes back to exactly that default -- not to some other
+    invented value -- on reset."""
+    tenant, dept_id = await _seed_department(app_session)
+    capa_default = {"enabled": True, "read": True, "modify": False}
+    async with app_session(tenant) as db:
+        dept = await db.get(m.Department, dept_id)
+        assert dept is not None
+        dept.frame = {"tools": {"odoo": {"enabled": True, "read": True, "modify": True}}}
+        dept.frame_capa_defaults = {"tools": {"odoo": capa_default}}
+        await db.flush()
+
+    async with _http() as http:
+        h = _headers(tenant, "org_admin")
+        resp = await http.post(f"/api/v1/departments/{dept_id}/tools/odoo/reset", headers=h)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["tools"]["odoo"]["modify"] is False
+
+        get_resp = await http.get(f"/api/v1/departments/{dept_id}/tools", headers=h)
+        assert get_resp.json()["tools"]["odoo"]["modify"] is False
+
+
+async def test_resetting_a_key_with_no_capa_default_removes_it_entirely(
+    app_session: AppSessionFactory,
+) -> None:
+    """A hand-created department (or one that predates `frame_capa_defaults`)
+    has nothing to restore a key TO, so reset removes the key rather than
+    inventing or keeping a value."""
+    tenant, dept_id = await _seed_department(app_session)
+    async with app_session(tenant) as db:
+        dept = await db.get(m.Department, dept_id)
+        assert dept is not None
+        dept.frame = {"tools": {"odoo": {"enabled": True, "read": True}}}
+        # frame_capa_defaults left at its column default (None).
+        await db.flush()
+
+    async with _http() as http:
+        h = _headers(tenant, "org_admin")
+        resp = await http.post(f"/api/v1/departments/{dept_id}/tools/odoo/reset", headers=h)
+        assert resp.status_code == 200, resp.text
+        assert "odoo" not in resp.json()["tools"]
+
+        get_resp = await http.get(f"/api/v1/departments/{dept_id}/tools", headers=h)
+        assert "odoo" not in get_resp.json()["tools"]
+
+
+async def test_resetting_an_untracked_key_404s(app_session: AppSessionFactory) -> None:
+    tenant, dept_id = await _seed_department(app_session)
+    async with _http() as http:
+        h = _headers(tenant, "org_admin")
+        resp = await http.post(f"/api/v1/departments/{dept_id}/tools/odoo/reset", headers=h)
+        assert resp.status_code == 404, resp.text
+
+
+async def test_resetting_a_key_cascades_to_agents_that_never_overrode_it(
+    app_session: AppSessionFactory,
+) -> None:
+    tenant, dept_id = await _seed_department(app_session)
+    capa_default = {"enabled": False, "read": True}
+    async with app_session(tenant) as db:
+        dept = await db.get(m.Department, dept_id)
+        assert dept is not None
+        dept.frame = {"tools": {"odoo": {"enabled": True, "read": True}}}
+        dept.frame_capa_defaults = {"tools": {"odoo": capa_default}}
+        agent = m.Agent(tenant_id=tenant, department_id=dept_id, name="Nora", narrowing={})
+        db.add(agent)
+        await db.flush()
+        agent_id = agent.id
+
+    async with _http() as http:
+        h = _headers(tenant, "org_admin")
+        resp = await http.post(f"/api/v1/departments/{dept_id}/tools/odoo/reset", headers=h)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["deviationCounts"] == {"odoo": 0}
+
+    async with app_session(tenant) as db:
+        reloaded = await db.get(m.Agent, agent_id)
+        assert reloaded is not None
+        assert reloaded.narrowing["tools"]["odoo"]["enabled"] is False
