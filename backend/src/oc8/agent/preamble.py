@@ -54,6 +54,16 @@ def system_prompt(agent: m.Agent) -> str:
         "your reply. Call one tool at a time and wait for its result. When the task "
         "is fully done, reply with a short plain-text summary and call no further tools."
     )
+    parts.append(
+        "Before you report completion, actively verify you covered the whole task, "
+        "not just the first sub-part that happened to have work in it: re-read your "
+        "own instructions and check whether anything else they describe still needs "
+        "action right now -- including records or items that were already in "
+        "progress before this run started, not only newly arrived ones. Only report "
+        "'nothing to do' once you have actually checked, not because a first search "
+        "came back empty. If you run out of steps before finishing, say so plainly "
+        "in your summary instead of presenting a partial result as complete."
+    )
     if agent.is_tenant_assistant:
         parts.append(
             "At the start of a new conversation, before waiting for the human to "

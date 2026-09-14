@@ -70,6 +70,46 @@ MEMORY_WRITE = NeutralTool(
     },
 )
 
+TODO_WRITE = NeutralTool(
+    name="todo_write",
+    description=(
+        "Keep a structured to-do list for the CURRENT task -- essential for "
+        "multi-step or multi-record work (e.g. 'work every open ticket', "
+        "'update these 5 records', a task with several distinct parts). Call "
+        "this BEFORE you start such work to lay out every step, and again "
+        "whenever a step's status changes. Always resend the WHOLE list, "
+        "never a partial diff -- each call replaces the previous one "
+        "entirely. Mark exactly one item 'in_progress' at a time; move it to "
+        "'completed' before starting the next. Before you report the task "
+        "done, check this list: an item still 'pending' or 'in_progress' "
+        "means you stopped early, not that the task is finished."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "todos": {
+                "type": "array",
+                "description": "The full list, replacing whatever was recorded before.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "content": {
+                            "type": "string",
+                            "description": "One concrete, checkable step.",
+                        },
+                        "status": {
+                            "type": "string",
+                            "enum": ["pending", "in_progress", "completed"],
+                        },
+                    },
+                    "required": ["content", "status"],
+                },
+            },
+        },
+        "required": ["todos"],
+    },
+)
+
 ASK_USER = NeutralTool(
     name="ask_user",
     description=(
@@ -584,6 +624,7 @@ KPI_OVERVIEW = NeutralTool(
 
 CONTROL_TOOL_SCHEMAS: dict[str, NeutralTool] = {
     MEMORY_WRITE.name: MEMORY_WRITE,
+    TODO_WRITE.name: TODO_WRITE,
     ASK_USER.name: ASK_USER,
     DELEGATE_TASK.name: DELEGATE_TASK,
     REQUEST_DECISION.name: REQUEST_DECISION,
@@ -639,7 +680,7 @@ def offered_tools(
     # execute_control_tool. Withdrawing the tool the moment it activates would
     # strand a model that re-checks its own tool list mid-task with an unknown
     # tool name instead of a harmless "already active" response.
-    offered = [MEMORY_WRITE, RENDER_COMPONENT, FETCH_URL]
+    offered = [MEMORY_WRITE, RENDER_COMPONENT, FETCH_URL, TODO_WRITE]
     # ASK_USER parks the run and waits for an answer through the SAME door the
     # question arrived on. That holds for every other agent, whose only doors
     # are the web Chat tab and internal handoffs -- both can answer a park.
@@ -734,6 +775,11 @@ class ControlOutcome:
     #: pending_run is reported rather than published from inside this
     #: function -- the caller is the one holding the run id.
     rendered_component: dict[str, Any] | None = None
+    #: Set only by todo_write: the agent's whole to-do list as of this call
+    #: (whole-list replace, not a diff). None means "not a todo_write call";
+    #: an empty list is a real call that cleared the list. The CALLER stores
+    #: it -- same reasoning as rendered_component above.
+    todos: list[dict[str, str]] | None = None
 
 
 async def _member_behind_task(
@@ -1390,6 +1436,38 @@ async def execute_control_tool(
             # would leave a human staring at nothing to answer.
             return ControlOutcome(output="ERROR: ask_user requires a non-empty question")
         return ControlOutcome(output=question, suspend="waiting_for_input")
+
+    if tc.name == TODO_WRITE.name:
+        raw_todos = tc.arguments.get("todos")
+        if not isinstance(raw_todos, list):
+            return ControlOutcome(output="ERROR: todo_write requires a `todos` array")
+        todos: list[dict[str, str]] = []
+        seen_todo_content: set[str] = set()
+        for item in raw_todos:
+            if not isinstance(item, dict):
+                return ControlOutcome(output="ERROR: every todo must be an object")
+            todo_content = str(item.get("content", "")).strip()
+            todo_status = str(item.get("status", "")).strip()
+            if not todo_content:
+                return ControlOutcome(output="ERROR: a todo's `content` cannot be empty")
+            if todo_status not in ("pending", "in_progress", "completed"):
+                return ControlOutcome(
+                    output="ERROR: a todo's `status` must be pending, in_progress, or completed"
+                )
+            if todo_content in seen_todo_content:
+                return ControlOutcome(output=f"ERROR: duplicate todo content: {todo_content!r}")
+            seen_todo_content.add(todo_content)
+            todos.append({"content": todo_content, "status": todo_status})
+        pending = sum(1 for t in todos if t["status"] == "pending")
+        in_progress = sum(1 for t in todos if t["status"] == "in_progress")
+        completed = sum(1 for t in todos if t["status"] == "completed")
+        return ControlOutcome(
+            output=(
+                f"Updated todo list: {pending} pending, {in_progress} in progress, "
+                f"{completed} completed."
+            ),
+            todos=todos,
+        )
 
     if tc.name == MEMORY_WRITE.name:
         if decision.effect is Effect.DENY:

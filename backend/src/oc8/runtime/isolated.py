@@ -253,6 +253,11 @@ class DockerIsolatedRuntime:
         rendered_components = (
             fresh.context.get("rendered_components", []) if fresh is not None else []
         ) or []
+        # Same reasoning as rendered_components above: /tool already wrote every
+        # todo_write call onto run.context (whole-list-replace, see internal_agent
+        # .py's `ctx["todos"] = control.todos`) -- this is the one place that
+        # copy makes it onto the RunResult the executor's merge_context() persists.
+        todos = (fresh.context.get("todos", []) if fresh is not None else []) or []
         return RunResult(
             task_id=task_id,
             agent_id=agent.id,
@@ -261,4 +266,5 @@ class DockerIsolatedRuntime:
             steps=int((fresh.context.get("steps", 0)) if fresh is not None else 0),
             pending_runs=[uuid.UUID(str(r)) for r in pending_raw],
             rendered_components=list(rendered_components),
+            todos=list(todos),
         )

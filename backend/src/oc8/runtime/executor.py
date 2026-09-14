@@ -886,6 +886,7 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
                             "steps": result.steps,
                             "pending_question": result.output,
                             "rendered_components": result.rendered_components,
+                            "todos": result.todos,
                         },
                     )
                     try:
@@ -972,6 +973,7 @@ async def execute_run(message: RunMessage, *, runtime: RuntimeAdapter | None = N
                             "toolCalls": result.tool_calls,
                             "steps": result.steps,
                             "rendered_components": result.rendered_components,
+                            "todos": result.todos,
                         },
                     )
                     new_state = _STATUS_TO_STATE.get(result.status)
