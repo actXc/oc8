@@ -271,6 +271,11 @@ services:
     volumes:
       # Plugin folders, read-only: oc8 discovers and reads them, never writes.
       - ./capas:/app/capas:ro
+      # Core UI translation catalogs, read-only: only `backend` serves the
+      # /api/v1/i18n/core endpoint the frontend fetches these through, so
+      # only it needs the mount -- dropping in a new locale here just needs
+      # a `backend` restart, no image rebuild.
+      - ./i18n:/app/i18n:ro
       # runtime session root: identical absolute path on both sides is the
       # point, not a typo -- see OC8_RUNTIME_SESSION_ROOT above.
       - ${OC8_RUNTIME_SESSION_ROOT:-/var/lib/oc8/sessions}:${OC8_RUNTIME_SESSION_ROOT:-/var/lib/oc8/sessions}

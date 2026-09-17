@@ -1335,3 +1335,17 @@ class DashboardPresetDTO(CamelModel):
     #: `settings:manage`, which the frontend already knows from `/governance`
     #: and can combine with this locally.
     mine: bool
+
+
+class CoreLocaleDTO(CamelModel):
+    locale: str
+    native_name: str
+    flag: str
+    translations: dict[str, str]
+
+
+class CoreI18nCatalogDTO(CamelModel):
+    #: Every non-English locale a `.po` catalog exists for. English itself
+    #: is never a key here -- it is the `msgid` source text the frontend
+    #: already has inline, needing no lookup at all.
+    locales: list[CoreLocaleDTO]

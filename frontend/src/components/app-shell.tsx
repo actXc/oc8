@@ -40,12 +40,7 @@ import { NotificationsSheet, OPEN_NOTIFICATIONS_EVENT } from "@/components/inbox
 import { GlobalSearch } from "@/components/global-search";
 import { CopilotDock } from "@/components/copilot-dock";
 import { cn } from "@/lib/utils";
-import {
-  useAgents,
-  useApprovals,
-  useClarifications,
-  useStanding,
-} from "@/lib/hooks";
+import { useAgents, useApprovals, useClarifications, useStanding } from "@/lib/hooks";
 import { useAssignedRoleName, useCan, useMay } from "@/lib/governance-hooks";
 import { useLang, useT } from "@/lib/i18n";
 import { hasCommunitySession, logoutCommunity, logoutDev } from "@/lib/api";
@@ -55,11 +50,6 @@ import {
   unsubscribeFromPush,
 } from "@/lib/push-notifications";
 import { useFrontendEdition } from "@/edition/composition";
-
-const languages = [
-  { code: "de", label: "Deutsch", flag: "🇩🇪", toastMsg: "Sprache auf Deutsch gestellt" },
-  { code: "en", label: "English", flag: "🇬🇧", toastMsg: "Language switched to English" },
-] as const;
 
 /** Hand this device's push subscription back before the session ends.
  *
@@ -366,7 +356,7 @@ export function AppShell() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
   const t = useT();
-  const { lang, setLang } = useLang();
+  const { lang, setLang, locales } = useLang();
   const can = useCan();
   const may = useMay();
   const standing = useStanding();
@@ -836,7 +826,7 @@ export function AppShell() {
                 className="ml-1 inline-flex items-center gap-1 rounded-md border border-border bg-background/40 px-2 py-1 text-[11px] font-medium text-muted-foreground transition hover:text-foreground focus:outline-none"
               >
                 <span className="text-sm leading-none">
-                  {languages.find((l) => l.code === lang)?.flag}
+                  {locales.find((l) => l.code === lang)?.flag}
                 </span>
                 <span className="uppercase tracking-wider">{lang}</span>
                 <ChevronDown className="h-3 w-3" />
@@ -846,18 +836,20 @@ export function AppShell() {
                   Sprache · Language
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                {languages.map((l) => (
+                {locales.map((l) => (
                   <DropdownMenuItem
                     key={l.code}
                     onSelect={() => {
                       if (l.code === lang) return;
                       setLang(l.code);
-                      toast.success(l.toastMsg);
+                      toast.success(
+                        `${t("Language switched to", "Sprache umgestellt auf")} ${l.nativeName}`,
+                      );
                     }}
                     className="flex items-center gap-2 text-sm"
                   >
                     <span className="text-base leading-none">{l.flag}</span>
-                    <span className="flex-1">{l.label}</span>
+                    <span className="flex-1">{l.nativeName}</span>
                     <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
                       {l.code}
                     </span>

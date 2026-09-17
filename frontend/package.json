@@ -30,6 +30,7 @@
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "check:edition-boundaries": "node scripts/check-edition-boundaries.mjs",
+    "i18n:export": "node scripts/i18n-export-template.mjs",
     "test:e2e": "playwright test",
     "test:unit": "vitest run --config vitest.config.ts",
     "lint": "eslint .",

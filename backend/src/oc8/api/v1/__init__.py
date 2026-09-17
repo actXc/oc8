@@ -29,6 +29,7 @@ from oc8.api.v1 import (
     flows,
     governance,
     handoffs,
+    i18n,
     knowledge,
     kpis,
     mcp,
@@ -55,6 +56,7 @@ from oc8.api.v1 import (
 api_router = APIRouter()
 api_router.include_router(auth.router, tags=["auth"])
 api_router.include_router(totp.router, tags=["auth"])
+api_router.include_router(i18n.router, tags=["i18n"])
 api_router.include_router(departments.router, tags=["departments"])
 api_router.include_router(onboarding.router, tags=["onboarding"])
 api_router.include_router(agents.router, tags=["agents"])

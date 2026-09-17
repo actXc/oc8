@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     # addons_path. Operator configuration -- never taken from a request.
     capas_path: str = "capas"
 
+    # Core UI translations: directory holding one `<locale>.po` per language
+    # (oc8.i18n.catalog). Same convention as capas_path -- a relative path
+    # resolved against the working directory, mounted read-only so dropping
+    # in a new file needs no image rebuild, just a backend restart.
+    core_i18n_path: str = "i18n"
+
     # Max tool-using steps one agent run may take before it stops (§8.3). The
     # framework default; an operator may override it per agent, in either
     # direction, via agent.definition["max_steps"] (see AssignedModelPanel /
