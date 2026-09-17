@@ -23,6 +23,8 @@ capa, not in core.
    configuration and the testing discipline this codebase expects.
 3. **[Git Guidelines](git-guidelines.md)** — commit message conventions
    and pre-PR checks.
+4. **[Core UI Translations](translations.md)** — add or update a language
+   for oc8's own UI via a `.po` catalog, no code change required.
 
 ## Opening a pull request
 

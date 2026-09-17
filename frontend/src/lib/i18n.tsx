@@ -8,23 +8,87 @@ import {
   type ReactNode,
 } from "react";
 
-export type Lang = "de" | "en";
+// Any locale a `.po` catalog fetched from `/i18n/core` reports, plus the two
+// built into the source itself: "en" (every `t()` call's first argument,
+// needing no lookup) and "de" (every call's second argument, present in
+// every call site regardless of whether `i18n/de.po` exists on disk).
+export type Lang = string;
+
+const CORE_I18N_URL =
+  (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:8099/api/v1";
+
+export interface LocaleInfo {
+  code: string;
+  nativeName: string;
+  flag: string;
+}
+
+const BUILTIN_LOCALES: LocaleInfo[] = [
+  { code: "en", nativeName: "English", flag: "🇬🇧" },
+  { code: "de", nativeName: "Deutsch", flag: "🇩🇪" },
+];
+
+type CoreCatalogs = Record<string, Record<string, string>>;
+
+interface CoreI18nResponse {
+  locales: {
+    locale: string;
+    nativeName: string;
+    flag: string;
+    translations: Record<string, string>;
+  }[];
+}
 
 interface LangCtx {
   lang: Lang;
   setLang: (l: Lang) => void;
+  /** Built-in en/de plus every locale `/i18n/core` reports, deduped by code. */
+  locales: LocaleInfo[];
+  /** `{locale: {msgid: msgstr}}`, empty until the one startup fetch resolves. */
+  catalogs: CoreCatalogs;
 }
 
-const Ctx = createContext<LangCtx>({ lang: "en", setLang: () => {} });
+const Ctx = createContext<LangCtx>({
+  lang: "en",
+  setLang: () => {},
+  locales: BUILTIN_LOCALES,
+  catalogs: {},
+});
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Lang>("en");
+  const [locales, setLocales] = useState<LocaleInfo[]>(BUILTIN_LOCALES);
+  const [catalogs, setCatalogs] = useState<CoreCatalogs>({});
+
+  // Fetched once per page load, before login: the login screen itself is
+  // translated. A failed fetch just means every language falls back to its
+  // in-source literal (English always, German via its own `de` argument) --
+  // see `useT` below.
+  useEffect(() => {
+    fetch(`${CORE_I18N_URL}/i18n/core`)
+      .then((r) => r.json() as Promise<CoreI18nResponse>)
+      .then((data) => {
+        const byCode = new Map(BUILTIN_LOCALES.map((l) => [l.code, l]));
+        for (const l of data.locales) {
+          byCode.set(l.locale, {
+            code: l.locale,
+            nativeName: l.nativeName || l.locale,
+            flag: l.flag,
+          });
+        }
+        setLocales([...byCode.values()]);
+        setCatalogs(Object.fromEntries(data.locales.map((l) => [l.locale, l.translations])));
+      })
+      .catch(() => {
+        /* keep the built-in en/de entries and empty catalogs */
+      });
+  }, []);
 
   // Read localStorage after mount to avoid SSR hydration mismatch.
   useEffect(() => {
     try {
       const stored = window.localStorage.getItem("oc8-lang");
-      if (stored === "de" || stored === "en") setLangState(stored);
+      if (stored) setLangState(stored);
     } catch {
       /* noop */
     }
@@ -40,8 +104,8 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   }, [lang]);
 
   const value = useMemo(
-    () => ({ lang, setLang: setLangState }),
-    [lang],
+    () => ({ lang, setLang: setLangState, locales, catalogs }),
+    [lang, locales, catalogs],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
@@ -52,13 +116,25 @@ export function useLang() {
 
 /**
  * Inline translator. Usage: `t("Departments", "Abteilungen")`.
- * Falls back to the English string if the German is missing.
+ *
+ * `en` is the source text and always the fallback of last resort. `de` is a
+ * literal, present at every call site regardless of whether `i18n/de.po`
+ * exists on disk -- German works even with an empty or missing catalog.
+ * A catalog entry for the CURRENT language, when one is loaded (from
+ * `/i18n/core`, fetched once at startup), always wins over both: it is how
+ * a `.po` file overrides or corrects a hardcoded string without a code
+ * change, and it is the ONLY source of truth for any language besides
+ * English and German, which have no second literal argument to fall back to.
  */
 export function useT() {
-  const { lang } = useContext(Ctx);
+  const { lang, catalogs } = useContext(Ctx);
   return useCallback(
-    (en: string, de: string) => (lang === "de" ? de : en),
-    [lang],
+    (en: string, de?: string) => {
+      if (lang === "en") return en;
+      if (lang === "de") return catalogs["de"]?.[en] ?? de ?? en;
+      return catalogs[lang]?.[en] ?? en;
+    },
+    [lang, catalogs],
   );
 }
 
