@@ -1028,6 +1028,10 @@ class AuthConfig(CamelModel):
     #: is what this instance is for. The UI can show a Demo badge; it does not
     #: by itself enable unauthenticated login -- that still needs `mode=dev`.
     demo: bool = False
+    #: The identity provider's external SSO logout endpoint (RP-initiated
+    #: logout), if it has one. None for the dev/community provider, which has
+    #: no external session to terminate.
+    sso_logout_url: str | None = None
 
 
 class SecretDTO(CamelModel):

@@ -757,6 +757,7 @@ async def auth_config() -> AuthConfig:
     unreachable there.
     """
     s = get_settings()
+    sso_logout_url = get_identity_provider().logout_url()
     if s.is_dev:
         return AuthConfig(
             mode="dev",
@@ -764,6 +765,7 @@ async def auth_config() -> AuthConfig:
             realm="",
             client_id="",
             demo=s.is_demo,
+            sso_logout_url=sso_logout_url,
         )
     return AuthConfig(
         mode="community",
@@ -772,6 +774,7 @@ async def auth_config() -> AuthConfig:
         client_id="",
         initialized=await _instance_has_an_administrator(),
         demo=s.is_demo,
+        sso_logout_url=sso_logout_url,
     )
 
 

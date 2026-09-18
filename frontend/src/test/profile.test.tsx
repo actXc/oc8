@@ -310,6 +310,9 @@ describe("Profile page — Account panel", () => {
 
     await waitFor(() => expect(logoutCommunityMock).toHaveBeenCalled());
     expect(logoutDevMock).not.toHaveBeenCalled();
-    expect(reloadMock).toHaveBeenCalled();
+    // logoutCommunity owns its own reload/SSO-redirect (see api.ts) -- a
+    // caller-side reload here would race a pending SSO redirect and win,
+    // silently cancelling it, so the caller must not also reload.
+    expect(reloadMock).not.toHaveBeenCalled();
   });
 });

@@ -25,9 +25,28 @@ export function hasCommunitySession(): boolean {
   return typeof window !== "undefined" && window.localStorage.getItem(COMMUNITY_TOKEN_KEY) !== null;
 }
 
-export function logoutCommunity(): void {
+/** Clears the local session and, if the identity provider has an external SSO
+ *  session (e.g. Keycloak in oc8-saas), redirects to its logout endpoint --
+ *  otherwise reloads in place, same as before this existed. Owns its own
+ *  end-of-flow navigation: a caller-side reload right after would race the
+ *  SSO redirect and win, silently cancelling it. */
+export async function logoutCommunity(): Promise<void> {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(COMMUNITY_TOKEN_KEY);
+  // /auth/config is unguarded, so this works with the token already gone.
+  try {
+    const res = await fetch(`${API_URL}/auth/config`);
+    if (res.ok) {
+      const config = (await res.json()) as { ssoLogoutUrl?: string | null };
+      if (config.ssoLogoutUrl) {
+        window.location.href = config.ssoLogoutUrl;
+        return;
+      }
+    }
+  } catch {
+    // Network hiccup on the way out -- the local session is already cleared.
+  }
+  window.location.reload();
 }
 
 export interface DevTenant {
@@ -133,11 +152,12 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     // the expired community token in place, so the reload just re-sent it and
     // got another 401, forever.
     if (hasCommunitySession()) {
-      logoutCommunity();
+      // Owns its own reload/SSO-redirect -- see its doc comment.
+      await logoutCommunity();
     } else {
       logoutDev();
+      if (typeof window !== "undefined") window.location.reload();
     }
-    if (typeof window !== "undefined") window.location.reload();
     throw new Error("session expired — signing in again");
   }
   if (!res.ok) throw await toError(res);

@@ -31,6 +31,13 @@ class IdentityProvider(Protocol):
 
     def verify(self, token: str) -> Principal: ...
 
+    def logout_url(self) -> str | None:
+        """Optional: an external SSO endpoint to redirect to on logout.
+
+        Returns None if the provider has no external session to terminate.
+        """
+        ...
+
 
 class InvalidToken(Exception):
     pass
@@ -81,6 +88,10 @@ class DevIdentityProvider:
         except jwt.PyJWTError as exc:
             raise InvalidToken(str(exc)) from exc
         return _principal_from_claims(data)
+
+    def logout_url(self) -> str | None:
+        """Community has no external SSO session to terminate."""
+        return None
 
 
 _dev_provider: IdentityProvider = DevIdentityProvider()

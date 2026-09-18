@@ -803,15 +803,21 @@ export function AppShell() {
             <button
               type="button"
               onClick={() => {
-                void revokePushOnSignOut().finally(() => {
+                void revokePushOnSignOut().finally(async () => {
                   // Community mode is checked first, mirroring api.ts's own
                   // 401-handling precedence: clearing the wrong key here
                   // left the community token in place, so "Sign out"
                   // reloaded straight back into the same authenticated
                   // session instead of actually signing out.
-                  if (hasCommunitySession()) logoutCommunity();
-                  else logoutDev();
-                  window.location.reload();
+                  if (hasCommunitySession()) {
+                    // Owns its own reload/SSO-redirect -- see its doc
+                    // comment in api.ts. A reload here would race a pending
+                    // SSO redirect and silently cancel it.
+                    await logoutCommunity();
+                  } else {
+                    logoutDev();
+                    window.location.reload();
+                  }
                 });
               }}
               aria-label={t("Sign out", "Abmelden")}
