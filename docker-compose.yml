@@ -54,6 +54,17 @@ x-backend-env: &backend-env
   # :8080), neither of which is actually reachable in this compose stack.
   OC8_OAUTH_REDIRECT_BASE_URL: ${OC8_OAUTH_REDIRECT_BASE_URL:-http://localhost}
   OC8_FRONTEND_BASE_URL: ${OC8_FRONTEND_BASE_URL:-http://localhost}
+  # arm64 hosts only (ignored on x86_64): cryptography's vendored OpenSSL
+  # probes CPU crypto features via an `mrs` instruction at import time, which
+  # some virtualization stacks running a Linux arm64 guest under Apple's
+  # Virtualization framework (e.g. Docker Desktop on Apple Silicon) trap as
+  # Illegal Instruction instead of emulating -- crashing the container before
+  # it ever starts. `armcap=0` skips that probe and falls back to software
+  # crypto; the cost is negligible for oc8's light per-request crypto use
+  # (JWT sign/verify, small secret payloads). Real arm64 production hardware
+  # without this bug can restore hardware-accelerated crypto by overriding
+  # OC8_OPENSSL_ARMCAP in its own .env.
+  OPENSSL_armcap: ${OC8_OPENSSL_ARMCAP:-0}
   OC8_ANTHROPIC_API_KEY: ${OC8_ANTHROPIC_API_KEY:-}
   OC8_OPENAI_API_KEY: ${OC8_OPENAI_API_KEY:-}
   OC8_MISTRAL_API_KEY: ${OC8_MISTRAL_API_KEY:-}

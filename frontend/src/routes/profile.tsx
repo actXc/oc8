@@ -135,9 +135,13 @@ function AccountPanel({ initialDisplayName }: { initialDisplayName: string }) {
         // docstring in auth.py) -- so the caller must be signed out right
         // now, not merely told about it. Same precedence and same steps as
         // the sign-out button in `app-shell.tsx`.
-        if (hasCommunitySession()) logoutCommunity();
-        else logoutDev();
-        window.location.reload();
+        if (hasCommunitySession()) {
+          // Owns its own reload/SSO-redirect -- see its doc comment in api.ts.
+          await logoutCommunity();
+        } else {
+          logoutDev();
+          window.location.reload();
+        }
         return;
       }
       if (r.verificationRequired) {
