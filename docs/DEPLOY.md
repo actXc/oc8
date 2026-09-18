@@ -41,7 +41,7 @@ Then run `OC8_CONTAINER_RUNTIME=podman ./scripts/quickstart.sh` (or set
 `OC8_CONTAINER_RUNTIME=podman` once in `.env` to make it the default for this
 checkout). The script fills in `OC8_CONTAINER_SOCKET` for you.
 
-Three rootless-on-Linux specifics the quickstart handles or you must set:
+Four rootless-on-Linux specifics the quickstart handles or you must set:
 
 - **Ports below 1024** cannot be published by an unprivileged podman
   (`net.ipv4.ip_unprivileged_port_start`). Set `OC8_HTTP_PORT=8080` (and
@@ -55,6 +55,15 @@ Three rootless-on-Linux specifics the quickstart handles or you must set:
   compose provider is installed, and distro packages can be old (Ubuntu
   24.04 ships 1.0.6). Verified with podman 4.9 and podman-compose 1.6:
   `python3 -m pip install --user --break-system-packages --upgrade podman-compose`.
+- **Image names are fully qualified** (`docker.io/library/redis:7-alpine`,
+  `docker.io/oven/bun:1`, ...) in every Dockerfile and compose file, because
+  Podman -- unlike Docker -- does not assume Docker Hub for a short name: on a
+  host whose `/etc/containers/registries.conf` lists no
+  `unqualified-search-registries`, `FROM oven/bun:1` fails the build with
+  `short-name "oven/bun:1" did not resolve to an alias`. Keep new image
+  references qualified the same way; the alternative is a per-host
+  `unqualified-search-registries = ["docker.io"]` line, which the stack must
+  not depend on.
 
 One security difference worth knowing: **rootless Podman's socket is scoped
 to the invoking user's own containers**, not root-equivalent the way the

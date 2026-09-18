@@ -134,7 +134,7 @@ x-backend-env: &backend-env
 services:
   postgres:
     restart: unless-stopped
-    image: pgvector/pgvector:pg15
+    image: docker.io/pgvector/pgvector:pg15
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
@@ -150,7 +150,7 @@ services:
 
   redis:
     restart: unless-stopped
-    image: redis:7-alpine
+    image: docker.io/library/redis:7-alpine
     # Redis defaults to maxmemory 0 / noeviction, which means that once the
     # keyspace fills EVERY write fails -- including run intake and the
     # realtime bus, which share this instance and are not designed to fail
@@ -400,7 +400,7 @@ services:
 
   caddy:
     restart: unless-stopped
-    image: caddy:2
+    image: docker.io/library/caddy:2
     depends_on:
       - frontend
       - backend
@@ -423,7 +423,7 @@ services:
   ollama:
     restart: unless-stopped
     profiles: ["ollama"]
-    image: ollama/ollama:latest
+    image: docker.io/ollama/ollama:latest
     volumes:
       - oc8-ollama:/root/.ollama
     # CPU-only by default. For GPU, add a deploy.resources.reservations.devices
